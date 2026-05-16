@@ -98,16 +98,18 @@ GET  /api/videos
 
 POST /api/ingest
   Body: { playlistUrl: string, outputFolder?: string }
-  Returns: { ok: true }
+  Returns: { jobId: string }           ← unique ID for this ingestion run
 
 GET  /api/ingest/stream
-  Returns: SSE stream of ProgressEvent
+  Query: ?jobId=xxx
+  Returns: SSE stream of ProgressEvent ← scoped to the given jobId
 
 POST /api/videos/[id]/deep-dive
-  Returns: { ok: true }
+  Returns: { jobId: string }           ← unique ID for this deep-dive run
 
 GET  /api/videos/[id]/deep-dive/stream
-  Returns: SSE stream of ProgressEvent
+  Query: ?jobId=xxx
+  Returns: SSE stream of ProgressEvent ← scoped to the given jobId
 
 POST /api/videos/[id]/archive
   Body: { action: 'archive' | 'unarchive' }
@@ -124,6 +126,8 @@ POST /api/settings
   Body: { outputFolder: string }
   Returns: { ok: true }
 ```
+
+**Job orchestration:** The server maintains a `Map<jobId, EventEmitter>` in memory. `POST /api/ingest` generates a `jobId` (crypto.randomUUID), registers an emitter, starts the pipeline in the background, and returns `{ jobId }`. `GET /api/ingest/stream?jobId=xxx` subscribes to that emitter and forwards events as SSE. If the client connects before the pipeline starts, events are queued. The same pattern applies to deep-dive. This handles concurrent runs without cross-contamination.
 
 ### SSE Event Shape
 
@@ -177,7 +181,7 @@ Triggered by `POST /api/videos/[id]/deep-dive`, progress via SSE on `/api/videos
 5. Update index  →  set deepDiveMd + deepDivePdf fields
 ```
 
-Fallback: if YouTube URL call fails (private video, quota exceeded), retry with transcript-only prompt. Log which mode was used.
+**Fallback:** If the YouTube URL call fails (private video, quota exceeded), `runDeepDive` refetches the transcript via `fetchTranscript(videoId)` and retries with a transcript-only prompt. The transcript text is not stored in the index — it is always fetched fresh. The log records which mode was used (`url` or `transcript-fallback`).
 
 ---
 
@@ -228,7 +232,20 @@ Deep Dive Overlay
 obsidian://open?vault={encodeURIComponent(outputFolder)}&file={encodeURIComponent(videoId)}
 ```
 
-No Obsidian plugin required — standard URI scheme. Vault = output folder path.
+No Obsidian plugin required — standard URI scheme.
+
+**Prerequisite:** The output folder must be opened as an Obsidian vault (File → Open Folder as Vault). Obsidian recognises vaults by their absolute folder path. The `vault` parameter in the URI is the absolute path to the output folder, not the vault name shown in the Obsidian UI. Archived files live under `archived/` which Obsidian indexes normally — archiving keeps them out of the active note list only if the user adds `archived/` to Obsidian's "Excluded files" list, or relies on the app's own Show Archive toggle.
+
+---
+
+## Filesystem Safety
+
+All filesystem operations use two sanitisation rules enforced in `lib/index-store.ts` and `lib/archive.ts`:
+
+1. **outputFolder** — resolved to an absolute path via `path.resolve()`. Any path that resolves outside the user's home directory (`os.homedir()`) is rejected with a 400 error. Symlinks are not followed (use `fs.lstat`, not `fs.stat`).
+2. **videoId** — validated against `/^[A-Za-z0-9_-]{1,20}$/` before use in any file path. The YouTube video ID format is `[A-Za-z0-9_-]{11}` so this is a safe superset. Any videoId failing validation returns a 400 error.
+
+These rules apply to all API routes that accept `outputFolder` or `[id]` path segments.
 
 ---
 

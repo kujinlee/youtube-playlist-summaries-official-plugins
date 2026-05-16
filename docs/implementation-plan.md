@@ -111,12 +111,13 @@
 - `runDeepDive(videoId, outputFolder, onProgress): Promise<void>`
   1. Read video from index
   2. `generateDeepDive(youtubeUrl, language)`
-  3. Fallback to transcript-only on failure, log mode used
+  3. On failure: refetch transcript via `fetchTranscript(videoId)`, retry with transcript-only prompt; log `mode: 'transcript-fallback'`
   4. Write `{videoId}-deep-dive.md` → `generatePdf` → `updateVideoFields`
   5. Call `onProgress(event)` throughout
 - **Tests (TDD):** `tests/lib/deep-dive.test.ts` — all lib deps mocked
   - Progress events: start → step → done
-  - Fallback triggered on Gemini URL failure
+  - Fallback triggered on Gemini URL failure: fetchTranscript called, transcript-only prompt used
+  - Log records `mode: 'url'` on success, `mode: 'transcript-fallback'` on fallback
   - Index updated with deepDiveMd + deepDivePdf after success
 
 ---
@@ -126,19 +127,23 @@
 
 Implement all routes per design spec:
 - `GET /api/videos` — read index, sort/filter by query params
-- `POST /api/ingest` — validate body, start pipeline
-- `GET /api/ingest/stream` — SSE stream
-- `POST /api/videos/[id]/deep-dive` — trigger deep-dive
-- `GET /api/videos/[id]/deep-dive/stream` — SSE stream
-- `POST /api/videos/[id]/archive` — call archive/unarchive
+- `POST /api/ingest` — validate body, generate jobId, register EventEmitter, start pipeline in background, return `{ jobId }`
+- `GET /api/ingest/stream?jobId=xxx` — subscribe to job's EventEmitter, forward as SSE
+- `POST /api/videos/[id]/deep-dive` — generate jobId, register EventEmitter, start deep-dive, return `{ jobId }`
+- `GET /api/videos/[id]/deep-dive/stream?jobId=xxx` — subscribe, forward as SSE
+- `POST /api/videos/[id]/archive` — validate action, call archive/unarchive, return `{ ok: true }`
 - `GET /api/pdf/[id]` — serve PDF file with correct Content-Type
 - `GET|POST /api/settings` — read/write outputFolder setting
+- All routes: validate `outputFolder` (resolved absolute path within homedir) and `videoId` (`/^[A-Za-z0-9_-]{1,20}$/`) per Filesystem Safety spec
 
 - **Tests (TDD):** `tests/api/*.test.ts` — lib functions mocked
+  - POST /api/ingest returns `{ jobId }` (string, non-empty)
+  - GET /api/ingest/stream with unknown jobId returns 404
   - Sort: each column sorts correctly asc/desc
   - Archive toggle: action:'archive' calls archiveVideo, action:'unarchive' calls unarchiveVideo
   - PDF route returns 404 for missing file
   - Settings persist across GET/POST round-trip
+  - Invalid videoId (path traversal attempt) returns 400
 
 ---
 
