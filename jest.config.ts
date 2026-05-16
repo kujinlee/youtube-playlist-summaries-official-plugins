@@ -2,7 +2,7 @@ import type { Config } from 'jest';
 
 const tsJestOptions = {
   tsconfig: {
-    moduleResolution: 'node',
+    moduleResolution: 'node16',
     module: 'commonjs',
     jsx: 'react-jsx',
   },
