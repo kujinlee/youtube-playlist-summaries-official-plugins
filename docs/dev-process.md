@@ -26,7 +26,8 @@ The application is divided into two sequential sub-projects. Sub-project 2 does 
 - Propose 2–3 approaches with trade-offs before recommending one
 - Present design section by section, get approval after each
 - Output: `docs/design-spec.md`
-- **Gate:** User approves design spec
+- **Adversarial doc review** — before asking the user to approve, dispatch Codex (or equivalent adversarial LLM) to review the spec for: architectural gaps, underspecified behaviour, security risks, internal contradictions, and missing edge cases. Address findings, then present the revised spec to the user.
+- **Gate:** Adversarial review complete AND user approves design spec
 
 ### Phase 2 — Writing Plans
 **Goal:** Break the approved design into a sequenced, task-by-task implementation plan.
@@ -34,7 +35,8 @@ The application is divided into two sequential sub-projects. Sub-project 2 does 
 - Each task is independently executable with clear inputs and outputs
 - TDD tasks are explicit: test file written before implementation file
 - Output: `docs/implementation-plan.md`
-- **Gate:** User approves implementation plan
+- **Adversarial doc review** — before asking the user to approve, dispatch Codex (or equivalent adversarial LLM) to review the plan for: missing tasks, wrong task order, underspecified acceptance criteria, and risks that will surface during implementation. Address findings, then present to the user.
+- **Gate:** Adversarial review complete AND user approves implementation plan
 
 ### Phase 3 — Implementation (per task)
 **Goal:** Implement each task with TDD, review, and adversarial review before moving to the next.
@@ -74,8 +76,10 @@ For each task:
 
 | Gate | Trigger | Blocks |
 |---|---|---|
-| Design approval | End of Phase 1 | Phase 2 cannot start |
-| Plan approval | End of Phase 2 | Phase 3 cannot start |
+| Design adversarial review | After spec written (Phase 1) | Human approval cannot proceed |
+| Design approval | After adversarial review (Phase 1) | Phase 2 cannot start |
+| Plan adversarial review | After plan written (Phase 2) | Human approval cannot proceed |
+| Plan approval | After adversarial review (Phase 2) | Phase 3 cannot start |
 | Per-task review | After each task implementation | Next task cannot start |
 | Adversarial review | After Claude review, per task | Next task cannot start |
 | Verification | End of sub-project | Cannot claim done |
@@ -102,10 +106,10 @@ For each task:
 | Tool | Purpose |
 |---|---|
 | `superpowers:brainstorming` | Phase 1 design dialogue |
+| `codex:rescue` | Phase 1 & 2 adversarial doc review; Phase 3 adversarial code review |
 | `superpowers:writing-plans` | Phase 2 task breakdown |
 | `superpowers:test-driven-development` | Phase 3 TDD discipline |
-| `superpowers:requesting-code-review` | Phase 3 Claude review |
-| `openai/codex-plugin-cc` | Phase 3 adversarial review |
+| `superpowers:requesting-code-review` | Phase 3 Claude code review |
 | `superpowers:verification-before-completion` | Phase 4 evidence collection |
 | `superpowers:finishing-a-development-branch` | Phase 5 commit + PR |
 
@@ -113,9 +117,23 @@ For each task:
 
 ## Adversarial Review
 
+Adversarial LLM review applies at every phase — not just code. Human reviewers approve faster and less critically than AI agents with an explicit adversarial mandate. Requiring AI review before human approval catches architectural gaps, security issues, and missing edge cases that a human would likely accept in a casual read.
+
+### Phase 1 & 2 — Doc Review
+
+Dispatch Codex (`codex:rescue` skill) with an explicit adversarial mandate to review the spec or plan. Focus areas:
+- **Spec:** architectural gaps, underspecified behaviour, security risks, internal contradictions, missing edge cases
+- **Plan:** missing tasks, wrong task order, underspecified acceptance criteria, implementation risks
+
+Address all High/P1 findings before presenting to the user for approval. Present Medium/P2 findings to the user for a decision.
+
+**Precedent:** The OpenAI agent review of `docs/design-spec.md` and `docs/implementation-plan.md` (between Tasks 2 and 3) caught five significant gaps: SSE job identity, path traversal risk, deep-dive transcript fallback underspecification, output folder ambiguity, and Obsidian vault URI semantics. These were architectural decisions that would have affected Tasks 3–10 if left vague.
+
+### Phase 3 — Code Review (per task)
+
 Each task is reviewed by two independent models:
 
 1. **Claude** (`requesting-code-review` skill) — checks correctness, security, spec adherence, TypeScript types
-2. **Codex** (`openai/codex-plugin-cc` plugin) — adversarial challenge of weaknesses and design decisions
+2. **Codex** (`codex:rescue` skill) — adversarial challenge of weaknesses, edge cases, and design decisions
 
 The developer adjudicates conflicting feedback. Both reviews must complete before a task is marked done.
