@@ -1,35 +1,17 @@
-import type { Config } from 'jest';
+import nextJest from 'next/jest.js';
 
-const tsJestOptions = {
-  tsconfig: {
-    moduleResolution: 'node16',
-    module: 'commonjs',
-    jsx: 'react-jsx',
-  },
-};
+const createJestConfig = nextJest({ dir: './' });
 
-const config: Config = {
-  projects: [
-    {
-      displayName: 'node',
-      testEnvironment: 'node',
-      testMatch: [
-        '<rootDir>/tests/lib/**/*.test.ts',
-        '<rootDir>/tests/api/**/*.test.ts',
-        '<rootDir>/tests/smoke.test.ts',
-      ],
-      transform: { '^.+\\.tsx?$': ['ts-jest', tsJestOptions] },
-      moduleNameMapper: { '^@/(.*)$': '<rootDir>/$1' },
-    },
-    {
-      displayName: 'jsdom',
-      testEnvironment: 'jest-environment-jsdom',
-      testMatch: ['<rootDir>/tests/components/**/*.test.tsx'],
-      transform: { '^.+\\.tsx?$': ['ts-jest', tsJestOptions] },
-      moduleNameMapper: { '^@/(.*)$': '<rootDir>/$1' },
-      setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
-    },
+// Component tests declare /** @jest-environment jsdom */ at the top of each file.
+// All other tests (lib, api, smoke) run in the default node environment.
+export default createJestConfig({
+  testEnvironment: 'node',
+  moduleNameMapper: { '^@/(.*)$': '<rootDir>/$1' },
+  setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
+  testMatch: [
+    '<rootDir>/tests/lib/**/*.test.ts',
+    '<rootDir>/tests/api/**/*.test.ts',
+    '<rootDir>/tests/smoke.test.ts',
+    '<rootDir>/tests/components/**/*.test.tsx',
   ],
-};
-
-export default config;
+});

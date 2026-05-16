@@ -21,7 +21,13 @@
       "Bash(timeout 15 npm run dev)",
       "Skill(superpowers:requesting-code-review)",
       "Bash(git init *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git hash-object *)",
+      "Bash(echo \"EMPTY=$\\(git hash-object -t tree /dev/null\\)\")",
+      "Skill(codex:setup)",
+      "Bash(node \"/Users/kujinlee/.claude/plugins/cache/openai-codex/codex/1.0.4/scripts/codex-companion.mjs\" setup --json)",
+      "Skill(codex:rescue)"
     ]
   }
 }
