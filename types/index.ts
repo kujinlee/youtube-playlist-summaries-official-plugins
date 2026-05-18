@@ -85,6 +85,7 @@ export type ProgressEventType = ProgressEvent['type'];
 export interface GeminiSummaryResponse {
   summary: string;
   ratings: Ratings;
+  overallScore: number;
 }
 
 // --- Sort types for GET /api/videos ---
