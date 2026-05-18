@@ -5,11 +5,13 @@
 ### Task 1: Project Scaffold
 **Output:** Working Next.js + TypeScript + Tailwind app
 
+- `git init` — initialize repository before any other work
 - `npx create-next-app@latest` with TypeScript + Tailwind + App Router
 - Install dependencies: `@google/generative-ai`, `youtube-transcript`, `md-to-pdf`, `googleapis`
 - Install dev dependencies: `jest`, `ts-jest`, `@testing-library/react`, `@playwright/test`
 - Configure `jest.config.ts`, `tsconfig.json`
 - Create `.env.local` with placeholder keys
+- Initial commit
 - **Tests:** Jest config runs, `npm run dev` starts without error
 
 ---

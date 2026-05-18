@@ -1,10 +1,11 @@
+import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { readIndex, writeIndex, upsertVideo, updateVideoFields } from '../../lib/index-store';
+import { readIndex, updateVideoFields, upsertVideo, writeIndex } from '../../lib/index-store';
 import type { PlaylistIndex, Video } from '../../types';
 
-const TEST_DIR = path.join(os.homedir(), `.test-index-store-${Date.now()}`);
+const TEST_DIR = path.join(os.homedir(), `.test-index-store-${crypto.randomUUID()}`);
 
 function makeVideo(overrides: Partial<Video> = {}): Video {
   return {
@@ -37,6 +38,10 @@ describe('readIndex', () => {
 
     expect(result.videos).toEqual([]);
     expect(result.outputFolder).toBe(dir);
+  });
+
+  it('rejects outputFolder outside home directory', () => {
+    expect(() => readIndex('/etc')).toThrow(expect.objectContaining({ statusCode: 400 }));
   });
 });
 
@@ -85,6 +90,30 @@ describe('upsertVideo', () => {
     expect(result.videos).toHaveLength(1);
     expect(result.videos[0].title).toBe('Updated');
   });
+
+  it('rejects invalid videoId', () => {
+    const dir = path.join(TEST_DIR, 'upsert-invalid-id');
+    fs.mkdirSync(dir, { recursive: true });
+
+    expect(() => upsertVideo(dir, makeVideo({ id: '../passwd' }))).toThrow(
+      expect.objectContaining({ statusCode: 400 }),
+    );
+  });
+});
+
+describe('writeIndex', () => {
+  it('rejects an index containing a video with an invalid ID', () => {
+    const dir = path.join(TEST_DIR, 'write-invalid-id');
+    fs.mkdirSync(dir, { recursive: true });
+
+    const index: PlaylistIndex = {
+      playlistUrl: 'https://www.youtube.com/playlist?list=PLtest123',
+      outputFolder: dir,
+      videos: [makeVideo({ id: '../passwd' })],
+    };
+
+    expect(() => writeIndex(dir, index)).toThrow(expect.objectContaining({ statusCode: 400 }));
+  });
 });
 
 describe('updateVideoFields', () => {
@@ -102,5 +131,34 @@ describe('updateVideoFields', () => {
     expect(result.videos[0].summaryPdf).toBe('vid333333333.pdf');
     expect(result.videos[0].title).toBe(video.title);
     expect(result.videos[0].ratings).toEqual(video.ratings);
+  });
+
+  it('does not allow fields.id to override the video identity', () => {
+    const dir = path.join(TEST_DIR, 'update-id-override');
+    fs.mkdirSync(dir, { recursive: true });
+
+    const video = makeVideo({ id: 'vid555555555' });
+    upsertVideo(dir, video);
+
+    updateVideoFields(dir, 'vid555555555', { id: 'vid999999999' } as Partial<Video>);
+
+    const result = readIndex(dir);
+    expect(result.videos[0].id).toBe('vid555555555');
+  });
+
+  it('throws when video ID not found in index', () => {
+    const dir = path.join(TEST_DIR, 'update-missing');
+    fs.mkdirSync(dir, { recursive: true });
+
+    expect(() => updateVideoFields(dir, 'vid444444444', { summaryMd: 'x.md' })).toThrow('Video not found');
+  });
+
+  it('rejects invalid videoId', () => {
+    const dir = path.join(TEST_DIR, 'update-invalid-id');
+    fs.mkdirSync(dir, { recursive: true });
+
+    expect(() => updateVideoFields(dir, '../passwd', {})).toThrow(
+      expect.objectContaining({ statusCode: 400 }),
+    );
   });
 });
