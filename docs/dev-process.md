@@ -16,6 +16,17 @@ Never rely on context summary alone — it is a compressed snapshot and can be s
 
 ---
 
+## Reference Docs (Read On Demand)
+
+These files are not @-included — read them when the trigger condition is met.
+
+| Doc | Read when |
+|---|---|
+| `docs/implementation-plan.md` | Session resume (find next uncommitted task); start of each task |
+| `docs/design-spec.md` | Phase 4 verification checklist; any spec ambiguity during implementation |
+
+---
+
 ## Phases
 
 0. **Project Setup** (before Phase 1)
