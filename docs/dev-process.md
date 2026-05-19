@@ -5,6 +5,17 @@ This file is the canonical source for the workflow. It lives in the project repo
 
 ---
 
+## Session Resume
+
+At session start, verify progress from ground-truth sources before acting:
+1. `git log --oneline` — which tasks are committed
+2. `ls tests/lib/ docs/reviews/` — what work exists on disk
+3. Cross-reference `docs/implementation-plan.md` — find first uncommitted task
+
+Never rely on context summary alone — it is a compressed snapshot and can be stale after `/compact`.
+
+---
+
 ## Phases
 
 0. **Project Setup** (before Phase 1)
