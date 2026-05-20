@@ -120,7 +120,7 @@ describe('runIngestion', () => {
   });
 
   it('stores overallScore from generateSummary in the index entry', async () => {
-    const ratings = { usefulness: 4, depth: 3, originality: 5, recency: 2, completeness: 1 };
+    const ratings = { usefulness: 4, depth: 3, originality: 5, recency: 2, completeness: 1 } as const;
     const overallScore = (4 + 3 + 5 + 2 + 1) / 5; // 3
     mockFetchPlaylistVideos.mockResolvedValue([makeVideoMeta('vid1')]);
     mockFetchTranscript.mockResolvedValue('transcript');

@@ -24,7 +24,7 @@ export function assertOutputFolder(outputFolder: string): void {
     }
   } catch (err: unknown) {
     const nodeErr = err as NodeJS.ErrnoException;
-    if (nodeErr.statusCode === 400) throw err;
+    if ((nodeErr as any).statusCode === 400) throw err;
     // ENOENT means path doesn't exist yet — no symlink to follow, trust resolved path
     if (nodeErr.code !== 'ENOENT') throw err;
   }
