@@ -42,6 +42,7 @@ These files are not @-included — read them when the trigger condition is met.
    - Gate: adversarial review + user approval
 
 3. **Implementation** (per task)
+   - At task start: create a TaskCreate checklist (see Per-Task Checklist below) — do not write any code until the list exists
    - Write failing tests → implement → Claude code review → Codex adversarial review → address → mark done
    - Save each review to `docs/reviews/task-N-<name>-review.md` (Claude) and `docs/reviews/task-N-<name>-codex.md` (Codex)
    - TDD: tests written before implementation; must be failing first
@@ -66,8 +67,32 @@ These files are not @-included — read them when the trigger condition is met.
 | `superpowers:writing-plans` | 2 — task breakdown |
 | `superpowers:test-driven-development` | 3 — TDD (behaviors specified upfront) |
 | `superpowers:requesting-code-review` | 3 — Claude code review |
+| `TaskCreate` / `TaskUpdate` | 3 — per-task checklist (create at task start, mark each step done) |
 | `superpowers:verification-before-completion` | 4 — evidence collection |
 | `superpowers:finishing-a-development-branch` | 5 — commit + PR |
+
+---
+
+## Per-Task Checklist
+
+At the start of every implementation task, create the following items with `TaskCreate` before writing any code. Mark each `completed` with `TaskUpdate` as you finish it — do not batch.
+
+```
+[ ] Write failing tests (RED)
+[ ] Run tests — confirm failure for the right reason
+[ ] Implement (GREEN)
+[ ] Run tests — confirm all pass
+[ ] Run full suite — confirm no regressions
+[ ] Claude code review (superpowers:requesting-code-review)
+[ ] Write docs/reviews/task-N-<name>-review.md
+[ ] Codex adversarial review (codex:rescue)
+[ ] Write docs/reviews/task-N-<name>-codex.md
+[ ] Address all High/P1 and Important findings
+[ ] Re-run tests — confirm still green
+[ ] Commit
+```
+
+**Rule:** a step is not done until it is marked done. If a step is skipped or deferred, it stays open — do not mark it complete.
 
 ---
 
