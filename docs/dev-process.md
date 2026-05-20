@@ -78,6 +78,7 @@ These files are not @-included — read them when the trigger condition is met.
 At the start of every implementation task, create the following items with `TaskCreate` before writing any code. Mark each `completed` with `TaskUpdate` as you finish it — do not batch.
 
 ```
+[ ] Enumerate all behaviors + edge cases from acceptance criteria
 [ ] Write failing tests (RED)
 [ ] Run tests — confirm failure for the right reason
 [ ] Implement (GREEN)
@@ -93,6 +94,8 @@ At the start of every implementation task, create the following items with `Task
 ```
 
 **Rule:** a step is not done until it is marked done. If a step is skipped or deferred, it stays open — do not mark it complete.
+
+**Enumerate step:** for each behavior in the acceptance criteria, also ask: what if the input is missing or invalid? what if each external call fails? what if it fails mid-chain? every answer that isn't "impossible" becomes a test case before RED begins.
 
 ---
 
