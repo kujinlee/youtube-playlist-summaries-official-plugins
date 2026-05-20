@@ -78,7 +78,7 @@ These files are not @-included — read them when the trigger condition is met.
 At the start of every implementation task, create the following items with `TaskCreate` before writing any code. Mark each `completed` with `TaskUpdate` as you finish it — do not batch.
 
 ```
-[ ] Enumerate all behaviors + edge cases from acceptance criteria
+[ ] Enumerate all behaviors + edge cases in plan file (table: behavior, trigger, expected)
 [ ] Write failing tests (RED)
 [ ] Run tests — confirm failure for the right reason
 [ ] Implement (GREEN)
@@ -95,7 +95,9 @@ At the start of every implementation task, create the following items with `Task
 
 **Rule:** a step is not done until it is marked done. If a step is skipped or deferred, it stays open — do not mark it complete.
 
-**Enumerate step:** for each behavior in the acceptance criteria, also ask: what if the input is missing or invalid? what if each external call fails? what if it fails mid-chain? every answer that isn't "impossible" becomes a test case before RED begins.
+**Enumerate step:** Write the behaviors table in the task's plan file **before writing any test code**. For each behavior also ask: what if the input is missing or invalid? what if each external call fails? what if it fails mid-chain? Every answer that isn't "impossible" becomes a row in the table and a test case.
+
+**Plan file format — required section:** Each task plan must include an **Enumerated Behaviors** table before any implementation design. Columns: `# | Behavior | Trigger | Expected`. Must include edge cases. This table is the contract tests are written against and that code reviewers check for coverage gaps. Surviving context compression is a key reason to write it in the plan file rather than in conversation.
 
 ---
 

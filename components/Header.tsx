@@ -1,15 +1,21 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 interface HeaderProps {
   defaultOutputFolder: string;
   onIngest: (playlistUrl: string, outputFolder: string) => void;
+  disabled?: boolean;
 }
 
-export default function Header({ defaultOutputFolder, onIngest }: HeaderProps) {
+export default function Header({ defaultOutputFolder, onIngest, disabled = false }: HeaderProps) {
   const [playlistUrl, setPlaylistUrl] = useState('');
   const [outputFolder, setOutputFolder] = useState(defaultOutputFolder);
+
+  // Sync when settings load after mount
+  useEffect(() => {
+    setOutputFolder(defaultOutputFolder);
+  }, [defaultOutputFolder]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -31,7 +37,7 @@ export default function Header({ defaultOutputFolder, onIngest }: HeaderProps) {
           value={outputFolder}
           onChange={(e) => setOutputFolder(e.target.value)}
         />
-        <button type="submit" disabled={playlistUrl.trim() === ''}>
+        <button type="submit" disabled={disabled || playlistUrl.trim() === ''}>
           Fetch &amp; Summarize
         </button>
       </form>
