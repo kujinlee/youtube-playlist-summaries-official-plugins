@@ -7,7 +7,7 @@ import type { PlaylistIndex, Video } from '../types';
 const INDEX_FILE = 'playlist-index.json';
 const VIDEO_ID_RE = /^[A-Za-z0-9_-]{1,20}$/;
 
-function assertOutputFolder(outputFolder: string): void {
+export function assertOutputFolder(outputFolder: string): void {
   const resolved = path.resolve(outputFolder);
   const home = os.homedir();
   const withinHome = (p: string) => p === home || p.startsWith(home + path.sep);
@@ -30,7 +30,7 @@ function assertOutputFolder(outputFolder: string): void {
   }
 }
 
-function assertVideoId(id: string): void {
+export function assertVideoId(id: string): void {
   if (!VIDEO_ID_RE.test(id)) {
     throw Object.assign(new Error(`invalid videoId: ${id}`), { statusCode: 400 });
   }
