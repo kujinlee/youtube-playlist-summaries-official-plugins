@@ -344,7 +344,7 @@ describe('Page — show archive (behavior 8)', () => {
 });
 
 describe('Page — deep dive (behaviors 9–10)', () => {
-  it('posts to deep-dive route and renders overlay when menu action triggered (behavior 9)', async () => {
+  it('posts to deep-dive route and renders status bar when menu action triggered (behavior 9)', async () => {
     const { fetchMock } = await renderPage([makeVideo('v1')], {
       'POST /api/videos/v1/deep-dive': { jobId: 'dd-job-1' },
     });
@@ -363,11 +363,11 @@ describe('Page — deep dive (behaviors 9–10)', () => {
         '/api/videos/v1/deep-dive',
         expect.objectContaining({ method: 'POST' }),
       );
-      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      expect(screen.getByRole('status', { name: /deep dive progress/i })).toBeInTheDocument();
     });
   });
 
-  it('hides overlay and refetches on DeepDiveOverlay close (behavior 10)', async () => {
+  it('hides status bar and refetches on dismiss (behavior 10)', async () => {
     const { fetchMock } = await renderPage([makeVideo('v1')], {
       'POST /api/videos/v1/deep-dive': { jobId: 'dd-job-1' },
     });
@@ -380,18 +380,18 @@ describe('Page — deep dive (behaviors 9–10)', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /deep dive/i }));
     });
-    await waitFor(() => screen.getByRole('dialog'));
+    await waitFor(() => screen.getByRole('status', { name: /deep dive progress/i }));
 
     const initialVideoCalls = (fetchMock.mock.calls as [string][]).filter(
       (c) => c[0].startsWith('/api/videos') && !c[0].includes('deep-dive'),
     ).length;
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /close/i }));
+      fireEvent.click(screen.getByRole('button', { name: /dismiss/i }));
     });
 
     await waitFor(() => {
-      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(screen.queryByRole('status', { name: /deep dive progress/i })).toBeNull();
       const videoCalls = (fetchMock.mock.calls as [string][]).filter(
         (c) => c[0].startsWith('/api/videos') && !c[0].includes('deep-dive'),
       ).length;

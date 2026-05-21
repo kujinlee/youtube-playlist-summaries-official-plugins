@@ -39,6 +39,8 @@ These files are not @-included — read them when the trigger condition is met.
    - **For projects with a frontend:** brainstorming includes wireframe + design tokens. `docs/design-spec.md` must contain a `## UI Design` section (ASCII wireframe, token table, badge/component specs) before any Tailwind or styling code is written. The gate is unchanged — user approves the full spec, which now includes the UI section.
    - **For projects that write files:** `docs/design-spec.md` must contain a `## Output File Format` section with: filename convention (with example), required frontmatter/header fields, and an annotated sample file body. No pipeline or file-writing task begins until this section is approved.
    - **For projects with a list/table UI:** `docs/design-spec.md` must enumerate every sort, filter, and grouping operation the user needs — column, direction semantics, and what undefined/missing values do. Discovering missing operations after implementation counts as a spec gap.
+   - **For any UI component that triggers an async operation (fetch, ingest, AI generation):** The spec must answer before any component task begins: (1) Blocking or non-blocking? (overlay vs. status bar vs. inline indicator) — default to non-blocking unless the user cannot do anything useful during the operation. (2) What does the user need to see/do while the operation runs? (3) What triggers dismissal? A full-screen blocking overlay requires explicit justification in the spec; "simpler to build" is not justification. Use the brainstorming Visual Companion to show a non-blocking alternative before deciding.
+   - **For tasks that include UI components generating URLs or containing modals/overlays:** `docs/design-spec.md` must contain a `## URL Contracts` table (`Component | Link text | Full URL with all params`) — one row per distinct link — and a `## Overlay Dismissal` table (`Component | Mechanism | Expected result`) — one row per dismissal path. Gate: user approves both tables before any component task begins.
 
 2. **Writing Plans** → `docs/implementation-plan.md`
    - Codex adversarial review (plan)
@@ -103,6 +105,13 @@ At the start of every implementation task, create the following items with `Task
 
 **Plan file format — required section:** Each task plan must include an **Enumerated Behaviors** table before any implementation design. Columns: `# | Behavior | Trigger | Expected`. Must include edge cases. This table is the contract tests are written against and that code reviewers check for coverage gaps. Surviving context compression is a key reason to write it in the plan file rather than in conversation.
 
+**Mandatory behavior categories** — check these before writing any rows:
+- **URL-generating components:** One row per link, Expected = exact href with every query param named (e.g. `/api/pdf/[id]?outputFolder=…&type=summary`). A row that names the route but omits params is incomplete.
+- **Modal/overlay/status-bar components:** One row per dismissal mechanism (backdrop click, Escape, close button, auto-close on done). Zero dismissal rows = incomplete.
+- **Optional-prop rendering:** One row for the null/absent state and one for the non-null/present state of each nullable prop. Happy-path-only = incomplete.
+
+If a task touches URL-generating components, overlays, or optional props and the behaviors table has zero rows in the relevant category, the Enumerate step is not done.
+
 **Behaviors adversarial review (conditional):** After enumerating behaviors and before writing tests, run Codex adversarial review of the behaviors table when the task has any of: >8 behaviors, SSE/async state machine, multiple error paths, or concurrent interactions. Skip for simple rendering, pure data transforms, or single-function tasks.
 
 ---
@@ -130,6 +139,14 @@ See `docs/plugins.md` — TDD conflict resolution.
 Unit (jest + ts-jest) → Component (@testing-library/react) → E2E (Playwright)
 
 Mock external API calls at the lib boundary. No real API calls in unit/component tests.
+
+### E2E quality rules
+
+Violating any rule below means the E2E step is not done.
+
+- **Link assertions — assert ALL params, not just one.** Wrong: `expect(url.searchParams.get('type')).toBe('summary')`. Right: one `expect` per param listed in the URL Contracts table (`type`, `outputFolder`, etc.).
+- **Status bar / overlay dismissal — test ALL dismissal paths.** For each mechanism (✕ button, Escape, auto-close on done), write one test block that exercises that specific path.
+- **Conditional rendering — fixtures must cover null and non-null.** For any nullable prop (e.g. `summaryPdf`, `deepDiveMd`), the E2E fixture set must include at least one video where the prop is `null` and one where it is set.
 
 ---
 

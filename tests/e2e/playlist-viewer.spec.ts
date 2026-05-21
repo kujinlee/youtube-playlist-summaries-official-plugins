@@ -281,6 +281,7 @@ test.describe('playlist viewer', () => {
     const href = await pdfLink.getAttribute('href');
     const url = new URL(href!, 'http://localhost');
     expect(url.pathname).toBe('/api/pdf/vid-1');
+    expect(url.searchParams.get('outputFolder')).toBe(OUTPUT_FOLDER);
     expect(url.searchParams.get('type')).toBe('summary');
   });
 
@@ -301,7 +302,8 @@ test.describe('playlist viewer', () => {
     const url = new URL(href!);
     expect(url.protocol).toBe('obsidian:');
     expect(url.searchParams.get('vault')).toBe(OUTPUT_FOLDER);
-    expect(url.searchParams.get('file')).toBe('vid-1');
+    // summaryMd is 'summary' (no .md) → file param is 'summary', not the raw video id
+    expect(url.searchParams.get('file')).toBe('summary');
   });
 
   // Edge case: settings API failure — page still loads with empty folder

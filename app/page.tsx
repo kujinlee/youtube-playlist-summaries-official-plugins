@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ProgressEvent, SortColumn, SortOrder, Video } from '@/types';
-import DeepDiveOverlay from '@/components/DeepDiveOverlay';
+import DeepDiveStatusBar from '@/components/DeepDiveStatusBar';
 import Header from '@/components/Header';
 import SortBar from '@/components/SortBar';
 import VideoList from '@/components/VideoList';
@@ -25,7 +25,7 @@ export default function Page() {
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   const [showArchive, setShowArchive] = useState(false);
   const [ingest, setIngest] = useState<IngestState>(IDLE_INGEST);
-  const [deepDive, setDeepDive] = useState<{ videoId: string; jobId: string } | null>(null);
+  const [deepDive, setDeepDive] = useState<{ videoId: string; jobId: string; title: string } | null>(null);
 
   const ingestESRef = useRef<EventSource | null>(null);
   const mountedRef = useRef(true);
@@ -167,6 +167,7 @@ export default function Page() {
 
   const handleDeepDive = useCallback(
     async (videoId: string) => {
+      const title = videos.find((v) => v.id === videoId)?.title ?? '';
       try {
         const res = await fetch(`/api/videos/${encodeURIComponent(videoId)}/deep-dive`, {
           method: 'POST',
@@ -175,12 +176,12 @@ export default function Page() {
         });
         if (!res.ok || !mountedRef.current) return;
         const data = await res.json();
-        setDeepDive({ videoId, jobId: data.jobId });
+        setDeepDive({ videoId, jobId: data.jobId, title });
       } catch {
-        // ignore — no overlay opened
+        // ignore — no status bar opened
       }
     },
-    [outputFolder],
+    [outputFolder, videos],
   );
 
   const handleDeepDiveClose = useCallback(() => {
@@ -296,9 +297,10 @@ export default function Page() {
       </div>
 
       {deepDive && (
-        <DeepDiveOverlay
+        <DeepDiveStatusBar
           videoId={deepDive.videoId}
           jobId={deepDive.jobId}
+          title={deepDive.title}
           onClose={handleDeepDiveClose}
         />
       )}
