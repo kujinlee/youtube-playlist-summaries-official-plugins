@@ -63,12 +63,16 @@ export default function VideoRow({ video, rank, outputFolder, onDeepDive, onArch
             ☰
           </button>
           {menuOpen && (
-            <VideoMenu
-              video={video}
-              outputFolder={outputFolder}
-              onDeepDive={onDeepDive}
-              onArchive={onArchive}
-            />
+            <>
+              <div aria-hidden="true" className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+              <VideoMenu
+                video={video}
+                outputFolder={outputFolder}
+                onDeepDive={onDeepDive}
+                onArchive={onArchive}
+                onClose={() => setMenuOpen(false)}
+              />
+            </>
           )}
         </div>
       </td>

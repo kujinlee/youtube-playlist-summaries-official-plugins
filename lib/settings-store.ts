@@ -10,9 +10,12 @@ interface Settings {
 export function readSettings(): Settings {
   try {
     const raw = fs.readFileSync(SETTINGS_FILE, 'utf-8');
-    return JSON.parse(raw) as Settings;
+    const settings = JSON.parse(raw) as Settings;
+    const folder = settings.outputFolder ?? '';
+    return { outputFolder: folder ? path.resolve(folder) : folder };
   } catch {
-    return { outputFolder: process.env.OUTPUT_FOLDER ?? '' };
+    const folder = process.env.OUTPUT_FOLDER ?? '';
+    return { outputFolder: folder ? path.resolve(folder) : folder };
   }
 }
 

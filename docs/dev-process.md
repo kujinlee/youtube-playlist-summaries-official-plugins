@@ -53,6 +53,8 @@ These files are not @-included — read them when the trigger condition is met.
    - TDD: tests written before implementation; must be failing first
 
 4. **Verification**
+   - Before clicking anything: enumerate ALL UX test cases as a `TaskCreate` list — one task per scenario (happy path, each error state, each dismissal path, each disabled state). No ad-hoc clicking before the list exists.
+   - Work through the list in order; mark each `completed` with `TaskUpdate` immediately after verifying it. Do not batch.
    - Run actual app; step through `docs/design-spec.md` checklist with evidence
    - Tool: `verification-before-completion`
 
@@ -139,6 +141,24 @@ See `docs/plugins.md` — TDD conflict resolution.
 Unit (jest + ts-jest) → Component (@testing-library/react) → E2E (Playwright)
 
 Mock external API calls at the lib boundary. No real API calls in unit/component tests.
+
+### Fast feedback loop
+
+Run the narrowest test that covers the changed code first — full suite only before commit.
+
+| Changed file | Run first |
+|---|---|
+| `components/Foo.tsx` | `npx jest Foo` |
+| `lib/bar.ts` | `npx jest bar` |
+| Visual / interaction bug | `npx playwright test --grep "keyword" --headed` |
+| Cross-component wiring, SSE, routing | `npx playwright test` |
+
+**Watch mode** eliminates manual re-runs during active work:
+```bash
+npm test -- --watch   # hit p to filter by file, t to filter by test name
+```
+
+**Rule:** targeted test green → full `npm test` once → commit. Never skip the full suite before committing, but never wait for it during iteration.
 
 ### E2E quality rules
 

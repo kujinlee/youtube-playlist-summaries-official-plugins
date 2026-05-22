@@ -165,7 +165,8 @@ describe('VideoRow', () => {
       it('is a link with correct obsidian:// href', () => {
         openMenu();
         const link = screen.getByRole('link', { name: /open in obsidian/i });
-        const expectedVault = encodeURIComponent(OUTPUT_FOLDER);
+        // vault= is the basename of outputFolder ('/Users/test/vault' → 'vault')
+        const expectedVault = encodeURIComponent('vault');
         // summaryMd is 'summary.md' → strip .md → 'summary'
         const expectedFile = encodeURIComponent('summary');
         expect(link).toHaveAttribute(
@@ -174,7 +175,7 @@ describe('VideoRow', () => {
         );
       });
 
-      it('encodes special characters in outputFolder', () => {
+      it('encodes special characters in vault name', () => {
         const specialFolder = '/Users/test/my vault & notes';
         render(
           <table>
@@ -191,7 +192,8 @@ describe('VideoRow', () => {
         );
         fireEvent.click(screen.getByRole('button', { name: /menu/i }));
         const link = screen.getByRole('link', { name: /open in obsidian/i });
-        expect(link.getAttribute('href')).toContain(encodeURIComponent(specialFolder));
+        // vault= is the basename ('my vault & notes'), special chars must be encoded
+        expect(link.getAttribute('href')).toContain(encodeURIComponent('my vault & notes'));
       });
     });
 
@@ -248,7 +250,8 @@ describe('VideoRow', () => {
       it('has correct obsidian:// href with deep-dive file when enabled', () => {
         openMenu({ deepDiveMd: 'abc123-deep-dive.md' });
         const link = screen.getByRole('link', { name: /open deep dive in obsidian/i });
-        const expectedVault = encodeURIComponent(OUTPUT_FOLDER);
+        // vault= is the basename of outputFolder ('/Users/test/vault' → 'vault')
+        const expectedVault = encodeURIComponent('vault');
         const expectedFile = encodeURIComponent('abc123-deep-dive');
         expect(link).toHaveAttribute(
           'href',

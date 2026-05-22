@@ -196,8 +196,8 @@ test.describe('playlist viewer', () => {
     expect(sortedUrls.some((u) => u.includes('sortColumn=overall'))).toBe(true);
   });
 
-  // Behaviors 5 & 6: deep dive overlay opens and reaches done state
-  test('deep dive: overlay opens, shows progress, then done state', async ({ page }) => {
+  // Behavior 5: deep dive status bar opens, shows progress, reaches done state
+  test('deep dive: status bar opens, shows progress, then done state', async ({ page }) => {
     const video = makeVideo({ id: 'vid-1' });
 
     await stubSettings(page);
@@ -211,15 +211,171 @@ test.describe('playlist viewer', () => {
     await page.goto('/');
     await expect(page.getByText('Test Video')).toBeVisible();
 
-    // Open menu and click Deep Dive
     await page.getByRole('button', { name: 'Menu' }).click();
     await page.getByRole('button', { name: /deep dive/i }).click();
 
-    // Overlay mounts in running state — progressbar visible before SSE done arrives
+    // Status bar mounts in running state — progressbar visible before SSE done arrives
     await expect(page.getByRole('progressbar')).toBeVisible();
 
-    // Done state: overlay shows ✓ Done
-    await expect(page.getByRole('status')).toContainText('✓ Done');
+    // Done state: status bar shows ✓ Done
+    await expect(page.getByRole('status', { name: /deep dive progress/i })).toContainText('✓ Done');
+  });
+
+  // Behavior 6: status bar shows the triggered video's title
+  test('deep dive: status bar shows the triggered video title', async ({ page }) => {
+    const video = makeVideo({ id: 'vid-1', title: 'My Specific Video' });
+
+    await stubSettings(page);
+    await stubVideos(page, [video]);
+    await stubDeepDive(page, 'vid-1');
+    await stubDeepDiveStream(page, 'vid-1', [
+      { type: 'step', step: 'Fetching transcript', current: 1, total: 2 },
+    ]);
+
+    await page.goto('/');
+    await expect(page.getByText('My Specific Video')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Menu' }).click();
+    await page.getByRole('button', { name: /deep dive/i }).click();
+
+    await expect(page.getByRole('status', { name: /deep dive progress/i }))
+      .toContainText('My Specific Video');
+  });
+
+  // Behavior 7: status bar is non-blocking — video table stays interactive
+  test('deep dive: video table stays interactive while status bar is running', async ({ page }) => {
+    const video1 = makeVideo({ id: 'vid-1', title: 'Video One' });
+    const video2 = makeVideo({ id: 'vid-2', title: 'Video Two' });
+
+    await stubSettings(page);
+    await stubVideos(page, [video1, video2]);
+    await stubDeepDive(page, 'vid-1');
+    // Stream stays open: only a step event, no done — keeps bar in running state
+    await stubDeepDiveStream(page, 'vid-1', [
+      { type: 'step', step: 'Working…', current: 1, total: 5 },
+    ]);
+
+    await page.goto('/');
+    await expect(page.getByText('Video One')).toBeVisible();
+
+    // Start deep dive on video 1
+    await page.getByRole('button', { name: 'Menu' }).first().click();
+    await page.getByRole('button', { name: /deep dive/i }).click();
+    // Close the dropdown so it doesn't block clicks on video 2's row
+    await page.keyboard.press('Escape');
+
+    // Status bar is running — confirm it's present and NOT a dialog
+    await expect(page.getByRole('status', { name: /deep dive progress/i })).toBeVisible();
+    await expect(page.getByRole('dialog')).not.toBeVisible().catch(() => {
+      // dialog may not exist at all, which is correct
+    });
+    expect(await page.locator('[role="dialog"]').count()).toBe(0);
+
+    // Video table is still interactive: can open a menu on video 2 while bar runs
+    await page.getByRole('button', { name: 'Menu' }).last().click();
+    await expect(page.getByRole('menu')).toBeVisible();
+  });
+
+  // Behavior 8: ✕ dismiss closes the bar mid-run and triggers video list refetch
+  test('deep dive: dismiss button closes status bar and refetches videos', async ({ page }) => {
+    const video = makeVideo({ id: 'vid-1' });
+
+    await stubSettings(page);
+    await stubVideos(page, [video]);
+    await stubDeepDive(page, 'vid-1');
+    await stubDeepDiveStream(page, 'vid-1', [
+      { type: 'step', step: 'Working…', current: 1, total: 5 },
+    ]);
+
+    const videoGetUrls: string[] = [];
+    await page.route('**/api/videos**', (route) => {
+      if (route.request().method() !== 'GET' || route.request().url().includes('/api/videos/')) {
+        route.fallback(); return;
+      }
+      videoGetUrls.push(route.request().url());
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ videos: [video] }) });
+    });
+
+    await page.goto('/');
+    await expect(page.getByText('Test Video')).toBeVisible();
+    const callsBefore = videoGetUrls.length;
+
+    await page.getByRole('button', { name: 'Menu' }).click();
+    await page.getByRole('button', { name: /deep dive/i }).click();
+    await expect(page.getByRole('status', { name: /deep dive progress/i })).toBeVisible();
+
+    await page.getByRole('button', { name: /dismiss/i }).click();
+
+    // Status bar gone
+    await expect(page.getByRole('status', { name: /deep dive progress/i })).not.toBeVisible();
+    // Refetch triggered
+    expect(videoGetUrls.length).toBeGreaterThan(callsBefore);
+  });
+
+  // Behavior 9: error state shows message and Show/Hide Logs toggle
+  test('deep dive: error state shows message and log toggle', async ({ page }) => {
+    const video = makeVideo({ id: 'vid-1' });
+
+    await stubSettings(page);
+    await stubVideos(page, [video]);
+    await stubDeepDive(page, 'vid-1');
+    await stubDeepDiveStream(page, 'vid-1', [
+      { type: 'error', log: 'Gemini API quota exceeded' },
+    ]);
+
+    await page.goto('/');
+    await expect(page.getByText('Test Video')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Menu' }).click();
+    await page.getByRole('button', { name: /deep dive/i }).click();
+
+    // Error message visible in status bar
+    await expect(page.getByRole('status', { name: /deep dive progress/i }))
+      .toContainText('Gemini API quota exceeded');
+
+    // Show Logs button present, log panel hidden by default
+    const showLogsBtn = page.getByRole('button', { name: /show logs/i });
+    await expect(showLogsBtn).toBeVisible();
+    await expect(page.getByRole('region', { name: /logs/i })).not.toBeVisible();
+
+    // Click Show Logs — panel expands
+    await showLogsBtn.click();
+    await expect(page.getByRole('region', { name: /logs/i })).toBeVisible();
+    await expect(page.getByRole('region', { name: /logs/i }))
+      .toContainText('Gemini API quota exceeded');
+
+    // Click Hide Logs — panel collapses
+    await page.getByRole('button', { name: /hide logs/i }).click();
+    await expect(page.getByRole('region', { name: /logs/i })).not.toBeVisible();
+
+    // Status bar still present (error does NOT auto-dismiss)
+    await expect(page.getByRole('status', { name: /deep dive progress/i })).toBeVisible();
+  });
+
+  // Behavior 10: auto-dismiss — bar disappears after done without user action
+  test('deep dive: status bar auto-dismisses after done without user action', async ({ page }) => {
+    const video = makeVideo({ id: 'vid-1' });
+
+    await stubSettings(page);
+    await stubVideos(page, [video]);
+    await stubDeepDive(page, 'vid-1');
+    await stubDeepDiveStream(page, 'vid-1', [
+      { type: 'done' },
+    ]);
+
+    await page.goto('/');
+    await expect(page.getByText('Test Video')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Menu' }).click();
+    await page.getByRole('button', { name: /deep dive/i }).click();
+
+    // Bar reaches done state
+    await expect(page.getByRole('status', { name: /deep dive progress/i }))
+      .toContainText('✓ Done');
+
+    // Bar disappears on its own within 5s (auto-dismiss timer is 3s)
+    await expect(page.getByRole('status', { name: /deep dive progress/i }))
+      .not.toBeVisible({ timeout: 5000 });
   });
 
   // Behavior 7: archive action greys row
@@ -301,7 +457,8 @@ test.describe('playlist viewer', () => {
     const href = await obsidianLink.getAttribute('href');
     const url = new URL(href!);
     expect(url.protocol).toBe('obsidian:');
-    expect(url.searchParams.get('vault')).toBe(OUTPUT_FOLDER);
+    // vault= is the basename of the output folder (Obsidian matches by vault name, not full path)
+    expect(url.searchParams.get('vault')).toBe('test-out');
     // summaryMd is 'summary' (no .md) → file param is 'summary', not the raw video id
     expect(url.searchParams.get('file')).toBe('summary');
   });
