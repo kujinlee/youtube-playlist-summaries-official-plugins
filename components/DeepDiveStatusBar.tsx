@@ -97,7 +97,7 @@ export default function DeepDiveStatusBar({ videoId, jobId, title, onClose }: De
             aria-valuemax={100}
           >
             <div
-              className={`h-full rounded-full transition-all duration-300 ${barColor}`}
+              className={`h-full rounded-full transition-all duration-300 ${barColor} ${state.status === 'running' ? 'animate-pulse' : ''}`}
               style={{ width: `${progress}%` }}
             />
           </div>

@@ -30,7 +30,8 @@ export async function runDeepDive(
   }
 
   onProgress({ type: 'start' });
-  onProgress({ type: 'step', videoId, step: 'Generating deep-dive analysis…' });
+  // Step numbering: always total=3. URL path uses steps 1 and 3; fallback uses all three.
+  onProgress({ type: 'step', videoId, step: 'Generating deep-dive analysis…', current: 1, total: 3 });
 
   let deepDiveRaw: string;
   let mode: 'url' | 'transcript-fallback';
@@ -40,7 +41,7 @@ export async function runDeepDive(
     mode = 'url';
   } catch (urlErr) {
     const urlMsg = urlErr instanceof Error ? urlErr.message : String(urlErr);
-    onProgress({ type: 'step', videoId, step: 'URL failed — fetching transcript for fallback…' });
+    onProgress({ type: 'step', videoId, step: 'Fetching transcript for fallback…', current: 2, total: 3 });
     let transcript: string;
     try {
       transcript = await fetchTranscript(videoId);
@@ -103,7 +104,7 @@ export async function runDeepDive(
   await fs.promises.writeFile(mdPath, mdContent, 'utf-8');
 
   const pdfPath = path.join(outputFolder, pdfFilename);
-  onProgress({ type: 'step', videoId, step: 'Generating PDF…' });
+  onProgress({ type: 'step', videoId, step: 'Generating PDF…', current: 3, total: 3 });
   await generatePdf(mdContent, pdfPath);
 
   updateVideoFields(outputFolder, videoId, {
@@ -111,6 +112,5 @@ export async function runDeepDive(
     deepDivePdf: pdfFilename,
   });
 
-  onProgress({ type: 'step', videoId, step: `mode: ${mode}` });
   onProgress({ type: 'done' });
 }

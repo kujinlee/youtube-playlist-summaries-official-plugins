@@ -106,13 +106,12 @@ describe('runDeepDive', () => {
     expect(mockFetchTranscript).not.toHaveBeenCalled();
   });
 
-  it('emits a step event recording mode: url on url success', async () => {
+  it('emits first step with current=1, total=3 on url success', async () => {
     const events: ProgressEvent[] = [];
     await runDeepDive(VIDEO_ID, outputFolder, (e) => events.push(e));
 
-    expect(
-      events.some((e) => e.type === 'step' && 'step' in e && e.step.includes('mode: url')),
-    ).toBe(true);
+    const firstStep = events.find((e) => e.type === 'step' && 'step' in e && e.step.includes('Generating deep-dive'));
+    expect(firstStep).toMatchObject({ type: 'step', current: 1, total: 3 });
   });
 
   it('on Gemini URL failure, fetches transcript and uses transcript-based deep-dive', async () => {
@@ -124,15 +123,14 @@ describe('runDeepDive', () => {
     expect(mockGenerateDeepDiveFromTranscript).toHaveBeenCalledWith('transcript text', 'en');
   });
 
-  it('emits a step event recording mode: transcript-fallback when fallback is used', async () => {
+  it('emits fallback step with current=2, total=3 when url fails', async () => {
     mockGenerateDeepDive.mockRejectedValueOnce(new Error('Gemini deep-dive failed: URL not supported'));
 
     const events: ProgressEvent[] = [];
     await runDeepDive(VIDEO_ID, outputFolder, (e) => events.push(e));
 
-    expect(
-      events.some((e) => e.type === 'step' && 'step' in e && e.step.includes('mode: transcript-fallback')),
-    ).toBe(true);
+    const fallbackStep = events.find((e) => e.type === 'step' && 'step' in e && e.step.includes('fallback'));
+    expect(fallbackStep).toMatchObject({ type: 'step', current: 2, total: 3 });
   });
 
   it('updates index with deepDiveMd and deepDivePdf after success', async () => {
@@ -187,6 +185,14 @@ describe('runDeepDive', () => {
         deepDivePdf: `${SUMMARY_BASE}-deep-dive.pdf`,
       }),
     );
+  });
+
+  it('emits PDF step with current=3, total=3', async () => {
+    const events: ProgressEvent[] = [];
+    await runDeepDive(VIDEO_ID, outputFolder, (e) => events.push(e));
+
+    const pdfStep = events.find((e) => e.type === 'step' && 'step' in e && e.step.includes('PDF'));
+    expect(pdfStep).toMatchObject({ type: 'step', current: 3, total: 3 });
   });
 
   it('written MD file has YAML frontmatter with video_id and lang', async () => {
