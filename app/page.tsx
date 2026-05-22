@@ -1,8 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ProgressEvent, SortColumn, SortOrder, Video } from '@/types';
+import type { FilterState, ProgressEvent, SortColumn, SortOrder, Video } from '@/types';
+import { FILTER_DEFAULTS } from '@/types';
 import DeepDiveStatusBar from '@/components/DeepDiveStatusBar';
+import FilterBar from '@/components/FilterBar';
 import Header from '@/components/Header';
 import SortBar from '@/components/SortBar';
 import VideoList from '@/components/VideoList';
@@ -24,6 +26,8 @@ export default function Page() {
   const [sortColumn, setSortColumn] = useState<SortColumn | null>(null);
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   const [showArchive, setShowArchive] = useState(false);
+  const [filters, setFilters] = useState<FilterState>(FILTER_DEFAULTS);
+  const [currentPlaylistUrl, setCurrentPlaylistUrl] = useState('');
   const [ingest, setIngest] = useState<IngestState>(IDLE_INGEST);
   const [deepDive, setDeepDive] = useState<{ videoId: string; jobId: string; title: string } | null>(null);
 
@@ -60,6 +64,7 @@ export default function Page() {
         if (res.ok && mountedRef.current && seq === fetchSeqRef.current) {
           const data = await res.json();
           setVideos(data.videos ?? []);
+          if (data.playlistUrl) setCurrentPlaylistUrl(data.playlistUrl);
         }
       } catch {
         // leave existing video list unchanged on network error
@@ -165,6 +170,14 @@ export default function Page() {
     [fetchVideos, outputFolder],
   );
 
+  const handleSync = useCallback((folder: string) => {
+    if (currentPlaylistUrl) handleIngest(currentPlaylistUrl, folder);
+  }, [handleIngest, currentPlaylistUrl]);
+
+  const handleFilterChange = useCallback((patch: Partial<FilterState>) => {
+    setFilters((prev) => ({ ...prev, ...patch }));
+  }, []);
+
   const handleDeepDive = useCallback(
     async (videoId: string) => {
       const title = videos.find((v) => v.id === videoId)?.title ?? '';
@@ -212,18 +225,33 @@ export default function Page() {
   // Cleanup ingest SSE on unmount
   useEffect(() => () => { ingestESRef.current?.close(); }, []);
 
-  // Stats computed client-side from current video list
-  const totalVideos = videos.length;
+  // Client-side filtered list (sort comes from API, archive+filters applied here)
+  const filteredVideos = videos
+    .filter((v) => showArchive || !v.archived)
+    .filter((v) =>
+      !filters.searchText ||
+      v.title.toLowerCase().includes(filters.searchText.toLowerCase()) ||
+      (v.channel ?? '').toLowerCase().includes(filters.searchText.toLowerCase()),
+    )
+    .filter((v) => filters.language === 'all' || v.language === filters.language)
+    .filter((v) => filters.videoType === 'all' || v.videoType === filters.videoType)
+    .filter((v) => filters.audience === 'all' || v.audience === filters.audience)
+    .filter((v) => v.overallScore >= filters.minScore);
+
+  // Stats computed from filtered list
+  const totalVideos = filteredVideos.length;
   const avgScore = totalVideos > 0
-    ? (videos.reduce((sum, v) => sum + v.overallScore, 0) / totalVideos).toFixed(2)
+    ? (filteredVideos.reduce((sum, v) => sum + v.overallScore, 0) / totalVideos).toFixed(2)
     : '—';
-  const koreanCount = videos.filter((v) => v.language === 'ko').length;
+  const koreanCount = filteredVideos.filter((v) => v.language === 'ko').length;
 
   return (
     <main className="min-h-screen bg-zinc-950">
       <Header
         defaultOutputFolder={outputFolder}
         onIngest={handleIngest}
+        onSync={handleSync}
+        syncEnabled={!!currentPlaylistUrl}
         disabled={ingest.status === 'running'}
       />
 
@@ -272,10 +300,10 @@ export default function Page() {
         </div>
       </section>
 
-      {/* Controls row */}
+      {/* Filter row */}
       <div className="flex items-center justify-between px-6 py-2 border-b border-zinc-800">
-        <SortBar activeColumn={sortColumn} order={sortOrder} onSort={handleSort} />
-        <label className="flex items-center gap-2 text-sm text-zinc-400 cursor-pointer">
+        <FilterBar filters={filters} onChange={handleFilterChange} />
+        <label className="flex items-center gap-2 text-sm text-zinc-400 cursor-pointer ml-4">
           <input
             type="checkbox"
             checked={showArchive}
@@ -286,11 +314,16 @@ export default function Page() {
         </label>
       </div>
 
+      {/* Sort row */}
+      <div className="px-6 py-2 border-b border-zinc-800">
+        <SortBar activeColumn={sortColumn} order={sortOrder} onSort={handleSort} />
+      </div>
+
       <div className="px-6 py-4">
         <VideoList
-          videos={videos}
+          videos={filteredVideos}
           outputFolder={outputFolder}
-          showArchive={showArchive}
+          showArchive={true}
           onDeepDive={handleDeepDive}
           onArchive={handleArchive}
         />

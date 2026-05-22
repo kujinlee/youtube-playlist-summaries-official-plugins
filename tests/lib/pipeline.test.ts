@@ -337,6 +337,67 @@ describe('runIngestion', () => {
       expect.objectContaining({ id: 'vid2', removedFromPlaylist: false }),
     );
   });
+
+  it('stamps 1-based playlistIndex on new videos based on playlist order', async () => {
+    mockFetchPlaylistVideos.mockResolvedValue([makeVideoMeta('vid1'), makeVideoMeta('vid2'), makeVideoMeta('vid3')]);
+    mockFetchTranscript.mockResolvedValue('transcript');
+    mockGenerateSummary.mockResolvedValue(makeSummaryResponse());
+
+    await runIngestion(PLAYLIST_URL, outputFolder, () => {});
+
+    expect(mockUpsertVideo).toHaveBeenCalledWith(
+      outputFolder,
+      expect.objectContaining({ id: 'vid1', playlistIndex: 1 }),
+    );
+    expect(mockUpsertVideo).toHaveBeenCalledWith(
+      outputFolder,
+      expect.objectContaining({ id: 'vid2', playlistIndex: 2 }),
+    );
+    expect(mockUpsertVideo).toHaveBeenCalledWith(
+      outputFolder,
+      expect.objectContaining({ id: 'vid3', playlistIndex: 3 }),
+    );
+  });
+
+  it('stamps playlistIndex on already-indexed videos via reconciliation writeIndex call', async () => {
+    const existingVid1 = makeIndexedVideo('vid1');
+    const existingVid2 = makeIndexedVideo('vid2');
+    mockReadIndex.mockReturnValue({
+      playlistUrl: PLAYLIST_URL,
+      outputFolder,
+      videos: [existingVid1, existingVid2],
+    });
+    mockFetchPlaylistVideos.mockResolvedValue([makeVideoMeta('vid1'), makeVideoMeta('vid2')]);
+
+    await runIngestion(PLAYLIST_URL, outputFolder, () => {});
+
+    // Already-indexed: upsertVideo not called for processing (only potentially for removed-reconciliation)
+    // writeIndex must be called at the end with both videos having playlistIndex set
+    const lastWriteCall = mockWriteIndex.mock.calls[mockWriteIndex.mock.calls.length - 1];
+    const writtenVideos: Video[] = lastWriteCall[1].videos;
+    expect(writtenVideos).toContainEqual(expect.objectContaining({ id: 'vid1', playlistIndex: 1 }));
+    expect(writtenVideos).toContainEqual(expect.objectContaining({ id: 'vid2', playlistIndex: 2 }));
+  });
+
+  it('preserves existing playlistIndex for videos no longer in the playlist', async () => {
+    const existingVid1 = makeIndexedVideo('vid1', { playlistIndex: 1 });
+    const removedVid2 = makeIndexedVideo('vid2', { playlistIndex: 2, archived: true, removedFromPlaylist: true });
+    mockReadIndex.mockReturnValue({
+      playlistUrl: PLAYLIST_URL,
+      outputFolder,
+      videos: [existingVid1, removedVid2],
+    });
+    // vid2 no longer in playlist
+    mockFetchPlaylistVideos.mockResolvedValue([makeVideoMeta('vid1')]);
+
+    await runIngestion(PLAYLIST_URL, outputFolder, () => {});
+
+    const lastWriteCall = mockWriteIndex.mock.calls[mockWriteIndex.mock.calls.length - 1];
+    const writtenVideos: Video[] = lastWriteCall[1].videos;
+    // vid2 is not in metas, so its existing playlistIndex=2 is preserved
+    const vid2Written = writtenVideos.find((v) => v.id === 'vid2');
+    expect(vid2Written?.playlistIndex).toBe(2);
+  });
 });
 
 describe('slugify', () => {

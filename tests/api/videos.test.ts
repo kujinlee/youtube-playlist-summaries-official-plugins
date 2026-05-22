@@ -84,4 +84,11 @@ describe('GET /api/videos', () => {
     const res = await GET(new Request('http://localhost/api/videos'));
     expect(res.status).toBe(400);
   });
+
+  it('includes playlistUrl from index in the response', async () => {
+    const res = await get();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.playlistUrl).toBe('https://youtube.com/playlist?list=PLtest');
+  });
 });

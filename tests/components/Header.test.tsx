@@ -78,3 +78,118 @@ describe('Header', () => {
     expect(screen.getByDisplayValue('/my/vault')).toBeInTheDocument();
   });
 });
+
+describe('Header — Sync button', () => {
+  it('does not render Sync button when onSync is not provided', () => {
+    render(<Header defaultOutputFolder="/folder" onIngest={jest.fn()} />);
+    expect(screen.queryByRole('button', { name: /sync/i })).toBeNull();
+  });
+
+  it('renders Sync button when onSync is provided and syncEnabled=true', () => {
+    render(
+      <Header
+        defaultOutputFolder="/folder"
+        onIngest={jest.fn()}
+        onSync={jest.fn()}
+        syncEnabled={true}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /sync/i })).toBeInTheDocument();
+  });
+
+  it('Sync button is enabled when syncEnabled=true and not disabled', () => {
+    render(
+      <Header
+        defaultOutputFolder="/folder"
+        onIngest={jest.fn()}
+        onSync={jest.fn()}
+        syncEnabled={true}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /sync/i })).toBeEnabled();
+  });
+
+  it('Sync button is disabled when global disabled=true', () => {
+    render(
+      <Header
+        defaultOutputFolder="/folder"
+        onIngest={jest.fn()}
+        onSync={jest.fn()}
+        syncEnabled={true}
+        disabled={true}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /sync/i })).toBeDisabled();
+  });
+
+  it('Sync button is disabled when syncEnabled=false', () => {
+    render(
+      <Header
+        defaultOutputFolder="/folder"
+        onIngest={jest.fn()}
+        onSync={jest.fn()}
+        syncEnabled={false}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /sync/i })).toBeDisabled();
+  });
+
+  it('calls onSync with current output folder when Sync button is clicked', () => {
+    const onSync = jest.fn();
+    render(
+      <Header
+        defaultOutputFolder="/folder"
+        onIngest={jest.fn()}
+        onSync={onSync}
+        syncEnabled={true}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /sync/i }));
+    expect(onSync).toHaveBeenCalledWith('/folder');
+  });
+
+  it('calls onSync with updated folder when user has changed the folder input', () => {
+    const onSync = jest.fn();
+    render(
+      <Header
+        defaultOutputFolder="/original"
+        onIngest={jest.fn()}
+        onSync={onSync}
+        syncEnabled={true}
+      />,
+    );
+    fireEvent.change(screen.getByDisplayValue('/original'), { target: { value: '/new-folder' } });
+    fireEvent.click(screen.getByRole('button', { name: /sync/i }));
+    expect(onSync).toHaveBeenCalledWith('/new-folder');
+  });
+
+  it('Sync button has disabled attribute when syncEnabled=false (prevents click)', () => {
+    render(
+      <Header
+        defaultOutputFolder="/folder"
+        onIngest={jest.fn()}
+        onSync={jest.fn()}
+        syncEnabled={false}
+      />,
+    );
+    // asserting disabled is the correct way to verify the button cannot be activated;
+    // fireEvent.click on a disabled button has ambiguous behavior across JSDOM versions.
+    expect(screen.getByRole('button', { name: /sync/i })).toBeDisabled();
+  });
+
+  it('Sync button click does not trigger form submission (no URL input required)', () => {
+    const onIngest = jest.fn();
+    const onSync = jest.fn();
+    render(
+      <Header
+        defaultOutputFolder="/folder"
+        onIngest={onIngest}
+        onSync={onSync}
+        syncEnabled={true}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /sync/i }));
+    expect(onIngest).not.toHaveBeenCalled();
+    expect(onSync).toHaveBeenCalledTimes(1);
+  });
+});

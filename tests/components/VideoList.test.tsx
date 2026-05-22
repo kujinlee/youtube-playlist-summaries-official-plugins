@@ -131,6 +131,30 @@ describe('VideoList — archive filtering (showArchive=false)', () => {
   });
 });
 
+describe('VideoList — playlistIndex rank', () => {
+  it('passes playlistIndex as rank when video has playlistIndex set', () => {
+    const video = { ...makeVideo('v1'), playlistIndex: 41 };
+    renderList({ videos: [video] });
+    expect(screen.getByTestId('video-row')).toHaveAttribute('data-rank', '41');
+  });
+
+  it('falls back to 1-indexed loop position when playlistIndex is absent', () => {
+    renderList({ videos: [makeVideo('v1'), makeVideo('v2')] });
+    const rows = screen.getAllByTestId('video-row');
+    expect(rows[0]).toHaveAttribute('data-rank', '1');
+    expect(rows[1]).toHaveAttribute('data-rank', '2');
+  });
+
+  it('playlistIndex values are stable regardless of display order', () => {
+    const v1 = { ...makeVideo('v1'), playlistIndex: 5 };
+    const v2 = { ...makeVideo('v2'), playlistIndex: 2 };
+    renderList({ videos: [v1, v2] });
+    const rows = screen.getAllByTestId('video-row');
+    expect(rows[0]).toHaveAttribute('data-rank', '5');
+    expect(rows[1]).toHaveAttribute('data-rank', '2');
+  });
+});
+
 describe('VideoList — archive visibility (showArchive=true)', () => {
   it('shows archived rows in the DOM when showArchive=true', () => {
     renderList({ videos: [makeVideo('a1', true)], showArchive: true });

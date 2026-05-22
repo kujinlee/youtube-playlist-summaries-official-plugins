@@ -55,6 +55,7 @@ export const VideoSchema = z.object({
   channel: z.string().optional(),
   tags: z.array(z.string()).optional(),
   removedFromPlaylist: z.boolean().optional(),
+  playlistIndex: z.number().int().positive().optional(),
 });
 export type Video = z.infer<typeof VideoSchema>;
 
@@ -105,6 +106,22 @@ export interface GeminiSummaryResponse {
   audience?: Audience;
   tags?: string[];
 }
+
+// --- Filter state for client-side filtering ---
+export interface FilterState {
+  searchText: string;
+  language: 'all' | 'en' | 'ko';
+  videoType: 'all' | VideoType;
+  audience: 'all' | Audience;
+  minScore: number;
+}
+export const FILTER_DEFAULTS: FilterState = {
+  searchText: '',
+  language: 'all',
+  videoType: 'all',
+  audience: 'all',
+  minScore: 0,
+};
 
 // --- Sort types for GET /api/videos ---
 type RatingSortColumn = keyof Ratings;

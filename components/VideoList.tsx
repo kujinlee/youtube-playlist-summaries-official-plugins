@@ -42,11 +42,14 @@ export default function VideoList({
         </tr>
       </thead>
       <tbody>
+        {/* Archive filtering is the caller's responsibility via filteredVideos in page.tsx.
+            showArchive={true} is always passed from the app; this prop is preserved for
+            component-level testing and API backward-compatibility. */}
         {visible.map((video, i) => (
           <VideoRow
             key={video.id}
             video={video}
-            rank={i + 1}
+            rank={video.playlistIndex ?? i + 1}
             outputFolder={outputFolder}
             onDeepDive={onDeepDive}
             onArchive={onArchive}

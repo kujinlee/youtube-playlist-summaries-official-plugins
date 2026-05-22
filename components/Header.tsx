@@ -5,10 +5,18 @@ import { useEffect, useState } from 'react';
 interface HeaderProps {
   defaultOutputFolder: string;
   onIngest: (playlistUrl: string, outputFolder: string) => void;
+  onSync?: (folder: string) => void;
+  syncEnabled?: boolean;
   disabled?: boolean;
 }
 
-export default function Header({ defaultOutputFolder, onIngest, disabled = false }: HeaderProps) {
+export default function Header({
+  defaultOutputFolder,
+  onIngest,
+  onSync,
+  syncEnabled = false,
+  disabled = false,
+}: HeaderProps) {
   const [playlistUrl, setPlaylistUrl] = useState('');
   const [outputFolder, setOutputFolder] = useState(defaultOutputFolder);
 
@@ -46,6 +54,16 @@ export default function Header({ defaultOutputFolder, onIngest, disabled = false
         >
           Fetch &amp; Summarize
         </button>
+        {onSync && (
+          <button
+            type="button"
+            onClick={() => onSync(outputFolder)}
+            disabled={disabled || !syncEnabled}
+            className="rounded border border-zinc-700 hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed px-4 py-2 text-sm font-medium text-zinc-400 hover:text-zinc-100 transition-colors"
+          >
+            Sync
+          </button>
+        )}
       </form>
     </header>
   );

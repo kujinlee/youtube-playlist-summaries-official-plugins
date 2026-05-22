@@ -262,6 +262,7 @@ export async function runIngestion(
         deepDiveMd: null,
         deepDivePdf: null,
         processedAt: new Date().toISOString(),
+        playlistIndex: current,
         ...(videoType !== undefined && { videoType }),
         ...(audience !== undefined && { audience }),
         ...(meta.channelTitle !== undefined && { channel: meta.channelTitle }),
@@ -290,6 +291,20 @@ export async function runIngestion(
       upsertVideo(outputFolder, { ...video, removedFromPlaylist: false });
     }
   }
+
+  // Stamp playlistIndex for all videos (new videos already stamped above; this covers
+  // already-indexed videos that were skipped during the main loop).
+  const positionMap = new Map(metas.map((m, idx) => [m.videoId, idx + 1]));
+  const afterReconcile = readIndex(outputFolder);
+  // Prefer existing playlistIndex (stable ID stamped at first ingest) — only fill in
+  // if not yet set. This prevents duplicate ranks when the playlist is reordered after
+  // a video is removed: removed videos keep their original position, current videos keep
+  // theirs, so no two videos share the same index.
+  const videosWithIndex = afterReconcile.videos.map((v) => ({
+    ...v,
+    playlistIndex: v.playlistIndex ?? positionMap.get(v.id),
+  }));
+  writeIndex(outputFolder, { ...afterReconcile, videos: videosWithIndex });
 
   onProgress({ type: 'done', total });
 }
