@@ -85,14 +85,21 @@ describe('VideoRow', () => {
       expect(screen.getByRole('button', { name: /menu/i })).toBeInTheDocument();
     });
 
-    it('applies opacity-40 to the row when video is archived', () => {
+    it('applies opacity-40 to data cells (not the row) when video is archived', () => {
       renderRow({ archived: true });
-      expect(screen.getByRole('row')).toHaveClass('opacity-40');
+      // opacity-40 must be on cells, not on <tr>, to avoid creating a CSS stacking
+      // context that would make the absolutely-positioned VideoMenu unclickable.
+      expect(screen.getByRole('row')).not.toHaveClass('opacity-40');
+      const cells = screen.getAllByRole('cell');
+      // At least the rank cell (first) should carry opacity-40
+      expect(cells[0]).toHaveClass('opacity-40');
     });
 
     it('does not apply opacity-40 when video is not archived', () => {
       renderRow({ archived: false });
       expect(screen.getByRole('row')).not.toHaveClass('opacity-40');
+      const cells = screen.getAllByRole('cell');
+      expect(cells[0]).not.toHaveClass('opacity-40');
     });
 
     it('renders videoType badge when videoType is set', () => {
