@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { NextResponse } from 'next/server';
 import { assertOutputFolder } from '../../../lib/index-store';
 import { runIngestion } from '../../../lib/pipeline';
-import { createJob, deleteJob } from '../../../lib/job-registry';
+import { createJob, deleteJob, emitJobEvent } from '../../../lib/job-registry';
 import type { ProgressEvent } from '../../../types';
 
 export async function POST(request: Request) {
@@ -20,12 +20,12 @@ export async function POST(request: Request) {
   }
 
   const jobId = crypto.randomUUID();
-  const emitter = createJob(jobId);
+  createJob(jobId);
   let finished = false;
 
   // Start pipeline in background; do not await
   runIngestion(playlistUrl, outputFolder, (event: ProgressEvent) => {
-    emitter.emit('progress', event);
+    emitJobEvent(jobId, event);
     if (event.type === 'done' || event.type === 'error') {
       finished = true;
       deleteJob(jobId);
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
   }).catch((err) => {
     if (finished) return;
     finished = true;
-    emitter.emit('progress', { type: 'error', log: err instanceof Error ? err.message : String(err) });
+    emitJobEvent(jobId, { type: 'error', log: err instanceof Error ? err.message : String(err) });
     deleteJob(jobId);
   });
 

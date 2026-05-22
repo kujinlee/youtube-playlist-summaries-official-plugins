@@ -1,4 +1,4 @@
-import { getJob } from '../../../../../../lib/job-registry';
+import { subscribeJob } from '../../../../../../lib/job-registry';
 import type { ProgressEvent } from '../../../../../../types';
 
 type Params = { params: Promise<{ id: string }> };
@@ -11,27 +11,29 @@ export async function GET(request: Request, _ctx: Params) {
     return new Response(JSON.stringify({ error: 'jobId is required' }), { status: 400 });
   }
 
-  const emitter = getJob(jobId);
-  if (!emitter) {
-    return new Response(JSON.stringify({ error: 'job not found' }), { status: 404 });
-  }
-
-  let onProgress: ((event: ProgressEvent) => void) | null = null;
+  // ReadableStream.start() is synchronous — unsubscribe is set (or stays null) before the
+  // constructor returns, so we can check it for the 404 guard below.
+  let unsubscribe: (() => void) | null = null;
   const stream = new ReadableStream({
     start(controller) {
-      onProgress = (event: ProgressEvent) => {
+      unsubscribe = subscribeJob(jobId, (event: ProgressEvent) => {
         controller.enqueue(`data: ${JSON.stringify(event)}\n\n`);
         if (event.type === 'done' || event.type === 'error') {
-          emitter.removeListener('progress', onProgress!);
+          unsubscribe?.();
+          unsubscribe = null;
           controller.close();
         }
-      };
-      emitter.on('progress', onProgress);
+      });
+      if (!unsubscribe) controller.close();
     },
     cancel() {
-      if (onProgress) emitter.removeListener('progress', onProgress);
+      unsubscribe?.();
     },
   });
+
+  if (!unsubscribe) {
+    return new Response(JSON.stringify({ error: 'job not found' }), { status: 404 });
+  }
 
   return new Response(stream, {
     headers: {

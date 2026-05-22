@@ -9,7 +9,8 @@ import * as indexStore from '../../lib/index-store';
 import * as deepDiveLib from '../../lib/deep-dive';
 
 const mockCreateJob = jest.mocked(jobRegistry.createJob);
-const mockGetJob = jest.mocked(jobRegistry.getJob);
+const mockEmitJobEvent = jest.mocked(jobRegistry.emitJobEvent);
+const mockSubscribeJob = jest.mocked(jobRegistry.subscribeJob);
 const mockAssertOutputFolder = jest.mocked(indexStore.assertOutputFolder);
 const mockAssertVideoId = jest.mocked(indexStore.assertVideoId);
 const mockRunDeepDive = jest.mocked(deepDiveLib.runDeepDive);
@@ -32,7 +33,8 @@ describe('POST /api/videos/[id]/deep-dive', () => {
   beforeEach(() => {
     mockAssertOutputFolder.mockImplementation(() => {});
     mockAssertVideoId.mockImplementation(() => {});
-    mockCreateJob.mockReturnValue({ on: jest.fn(), emit: jest.fn(), removeAllListeners: jest.fn() } as never);
+    mockCreateJob.mockImplementation(() => {});
+    mockEmitJobEvent.mockImplementation(() => {});
     mockRunDeepDive.mockResolvedValue(undefined);
   });
 
@@ -62,7 +64,7 @@ describe('GET /api/videos/[id]/deep-dive/stream', () => {
   afterEach(() => jest.clearAllMocks());
 
   it('returns 404 for unknown jobId', async () => {
-    mockGetJob.mockReturnValue(undefined);
+    mockSubscribeJob.mockReturnValue(null);
     const res = await GET_STREAM(
       new Request(`http://localhost/api/videos/${VIDEO_ID}/deep-dive/stream?jobId=unknown`),
       { params: Promise.resolve({ id: VIDEO_ID }) },
@@ -79,8 +81,7 @@ describe('GET /api/videos/[id]/deep-dive/stream', () => {
   });
 
   it('returns 200 with text/event-stream for known jobId', async () => {
-    const { EventEmitter } = await import('events');
-    mockGetJob.mockReturnValue(new EventEmitter());
+    mockSubscribeJob.mockImplementation((_jobId, _listener) => () => {});
 
     const res = await GET_STREAM(
       new Request(`http://localhost/api/videos/${VIDEO_ID}/deep-dive/stream?jobId=known-job`),

@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { NextResponse } from 'next/server';
 import { assertOutputFolder, assertVideoId } from '../../../../../lib/index-store';
 import { runDeepDive } from '../../../../../lib/deep-dive';
-import { createJob, deleteJob } from '../../../../../lib/job-registry';
+import { createJob, deleteJob, emitJobEvent } from '../../../../../lib/job-registry';
 import type { ProgressEvent } from '../../../../../types';
 
 type Params = { params: Promise<{ id: string }> };
@@ -22,11 +22,11 @@ export async function POST(request: Request, { params }: Params) {
   }
 
   const jobId = crypto.randomUUID();
-  const emitter = createJob(jobId);
+  createJob(jobId);
   let finished = false;
 
   runDeepDive(videoId, outputFolder, (event: ProgressEvent) => {
-    emitter.emit('progress', event);
+    emitJobEvent(jobId, event);
     if (event.type === 'done' || event.type === 'error') {
       finished = true;
       deleteJob(jobId);
@@ -35,7 +35,7 @@ export async function POST(request: Request, { params }: Params) {
     if (finished) return;
     finished = true;
     console.error('[deep-dive] failed for video', videoId, err);
-    emitter.emit('progress', { type: 'error', log: err instanceof Error ? err.message : String(err) });
+    emitJobEvent(jobId, { type: 'error', log: err instanceof Error ? err.message : String(err) });
     deleteJob(jobId);
   });
 
