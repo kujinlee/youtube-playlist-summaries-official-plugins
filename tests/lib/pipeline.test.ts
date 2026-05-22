@@ -209,6 +209,26 @@ describe('runIngestion', () => {
     );
   });
 
+  it('appends -2 suffix when slug filename already exists on disk', async () => {
+    // Simulate a pre-existing file with the same slug (e.g. from a prior video with the same title)
+    fs.writeFileSync(path.join(outputFolder, 'hello-world.md'), 'existing content');
+
+    const meta = { ...makeVideoMeta('vid1'), title: 'Hello World' };
+    mockFetchPlaylistVideos.mockResolvedValue([meta]);
+    mockFetchTranscript.mockResolvedValue('transcript');
+    mockGenerateSummary.mockResolvedValue(makeSummaryResponse());
+
+    await runIngestion(PLAYLIST_URL, outputFolder, () => {});
+
+    expect(mockUpsertVideo).toHaveBeenCalledWith(
+      outputFolder,
+      expect.objectContaining({
+        summaryMd: 'hello-world-2.md',
+        summaryPdf: 'hello-world-2.pdf',
+      }),
+    );
+  });
+
   it('writes markdown file starting with YAML frontmatter (--- tags:)', async () => {
     const meta = { ...makeVideoMeta('vid1'), title: 'Test Video', channelTitle: 'Test Channel' };
     mockFetchPlaylistVideos.mockResolvedValue([meta]);

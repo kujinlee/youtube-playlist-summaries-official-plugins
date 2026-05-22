@@ -202,7 +202,13 @@ export async function runIngestion(
       onProgress({ type: 'step', videoId: meta.videoId, title: meta.title, step: 'Generating summary…', current, total });
       const { summary, ratings, overallScore, videoType, audience, tags } = await generateSummary(transcript, language);
 
-      const baseName = slugify(meta.title);
+      const slug = slugify(meta.title);
+      let baseName = slug;
+      let counter = 2;
+      while (fs.existsSync(path.join(outputFolder, `${baseName}.md`))) {
+        baseName = `${slug}-${counter}`;
+        counter++;
+      }
       const mdPath = path.join(outputFolder, `${baseName}.md`);
       const pdfPath = path.join(outputFolder, `${baseName}.pdf`);
 
