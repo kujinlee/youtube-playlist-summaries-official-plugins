@@ -9,7 +9,7 @@ jest.mock('../../lib/gemini');
 jest.mock('../../lib/pdf');
 jest.mock('../../lib/index-store');
 
-import { runIngestion, slugify, formatDuration, parseFrontmatterField, reconstructVideo, recoverOrphanedVideos } from '../../lib/pipeline';
+import { runIngestion, slugify, formatDuration, parseFrontmatterField, reconstructVideo, recoverOrphanedVideos, migrateToSlugFilenames } from '../../lib/pipeline';
 import * as youtube from '../../lib/youtube';
 import * as gemini from '../../lib/gemini';
 import * as pdf from '../../lib/pdf';
@@ -192,7 +192,7 @@ describe('runIngestion', () => {
     );
   });
 
-  it('uses rank-prefixed slug filename for first video (i=0 → 001)', async () => {
+  it('uses slug-only filename (no rank prefix) for the video', async () => {
     const meta = { ...makeVideoMeta('vid1'), title: 'Hello World' };
     mockFetchPlaylistVideos.mockResolvedValue([meta]);
     mockFetchTranscript.mockResolvedValue('transcript');
@@ -203,8 +203,8 @@ describe('runIngestion', () => {
     expect(mockUpsertVideo).toHaveBeenCalledWith(
       outputFolder,
       expect.objectContaining({
-        summaryMd: expect.stringMatching(/^001_hello-world\.md$/),
-        summaryPdf: expect.stringMatching(/^001_hello-world\.pdf$/),
+        summaryMd: 'hello-world.md',
+        summaryPdf: 'hello-world.pdf',
       }),
     );
   });
@@ -522,5 +522,82 @@ describe('recoverOrphanedVideos', () => {
     recoverOrphanedVideos(tempDir);
 
     expect(mockUpsertVideo).not.toHaveBeenCalled();
+  });
+});
+
+describe('migrateToSlugFilenames', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = path.join(os.tmpdir(), `migrate-${crypto.randomUUID()}`);
+    fs.mkdirSync(tempDir, { recursive: true });
+    mockAssertOutputFolder.mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    jest.clearAllMocks();
+  });
+
+  function makeVideoInIndex(overrides: Partial<Video> = {}): Video {
+    return makeIndexedVideo('vid1', { summaryMd: '001_test-video.md', summaryPdf: '001_test-video.pdf', ...overrides });
+  }
+
+  it('renames prefixed md and pdf files on disk and updates index', () => {
+    fs.writeFileSync(path.join(tempDir, '001_test-video.md'), 'content');
+    fs.writeFileSync(path.join(tempDir, '001_test-video.pdf'), 'pdf');
+    mockReadIndex.mockReturnValue({ playlistUrl: '', outputFolder: tempDir, videos: [makeVideoInIndex()] });
+
+    migrateToSlugFilenames(tempDir);
+
+    expect(fs.existsSync(path.join(tempDir, 'test-video.md'))).toBe(true);
+    expect(fs.existsSync(path.join(tempDir, 'test-video.pdf'))).toBe(true);
+    expect(fs.existsSync(path.join(tempDir, '001_test-video.md'))).toBe(false);
+    expect(mockWriteIndex).toHaveBeenCalledWith(
+      tempDir,
+      expect.objectContaining({
+        videos: expect.arrayContaining([expect.objectContaining({ summaryMd: 'test-video.md', summaryPdf: 'test-video.pdf' })]),
+      }),
+    );
+  });
+
+  it('also migrates prefixed deep-dive filenames', () => {
+    const video = makeVideoInIndex({ deepDiveMd: '001_test-video-deep-dive.md', deepDivePdf: '001_test-video-deep-dive.pdf' });
+    fs.writeFileSync(path.join(tempDir, '001_test-video-deep-dive.md'), 'dd');
+    mockReadIndex.mockReturnValue({ playlistUrl: '', outputFolder: tempDir, videos: [video] });
+
+    migrateToSlugFilenames(tempDir);
+
+    expect(fs.existsSync(path.join(tempDir, 'test-video-deep-dive.md'))).toBe(true);
+    expect(mockWriteIndex).toHaveBeenCalledWith(
+      tempDir,
+      expect.objectContaining({
+        videos: expect.arrayContaining([expect.objectContaining({ deepDiveMd: 'test-video-deep-dive.md' })]),
+      }),
+    );
+  });
+
+  it('skips files already using slug-only names', () => {
+    const video = makeVideoInIndex({ summaryMd: 'test-video.md', summaryPdf: 'test-video.pdf' });
+    mockReadIndex.mockReturnValue({ playlistUrl: '', outputFolder: tempDir, videos: [video] });
+
+    migrateToSlugFilenames(tempDir);
+
+    expect(mockWriteIndex).not.toHaveBeenCalled();
+  });
+
+  it('does not rename if source file does not exist on disk', () => {
+    mockReadIndex.mockReturnValue({ playlistUrl: '', outputFolder: tempDir, videos: [makeVideoInIndex()] });
+
+    migrateToSlugFilenames(tempDir);
+
+    // File doesn't exist on disk — index still gets updated with new name
+    expect(mockWriteIndex).toHaveBeenCalledWith(
+      tempDir,
+      expect.objectContaining({
+        videos: expect.arrayContaining([expect.objectContaining({ summaryMd: 'test-video.md' })]),
+      }),
+    );
+    expect(fs.existsSync(path.join(tempDir, 'test-video.md'))).toBe(false);
   });
 });

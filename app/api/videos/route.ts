@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { assertOutputFolder, readIndex } from '../../../lib/index-store';
-import { recoverOrphanedVideos } from '../../../lib/pipeline';
+import { recoverOrphanedVideos, migrateToSlugFilenames } from '../../../lib/pipeline';
 import type { SortColumn, SortOrder, Video } from '../../../types';
 
 const AUDIENCE_ORDER: Record<string, number> = { Beginner: 1, Intermediate: 2, Advanced: 3 };
@@ -48,8 +48,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'invalid outputFolder' }, { status: 400 });
   }
 
-  // Best-effort: recover any MD files written by a prior interrupted ingest.
+  // Best-effort: recover orphaned MD files and migrate legacy prefixed filenames.
   try { recoverOrphanedVideos(outputFolder); } catch { /* non-fatal */ }
+  try { migrateToSlugFilenames(outputFolder); } catch { /* non-fatal */ }
 
   const sortColumn = (searchParams.get('sortColumn') ?? 'name') as SortColumn;
   const sortOrder = (searchParams.get('sortOrder') ?? 'asc') as SortOrder;
