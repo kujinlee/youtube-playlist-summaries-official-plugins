@@ -125,4 +125,21 @@ types/index.ts                    ← shared TypeScript types + Zod schemas
 docs/
   design-spec.md                  ← full feature specification
   ADR.md                          ← architecture decision records
+  available-skills.md             ← all Claude Code skills/agents/commands with trigger types
+```
+
+## Development (Claude Code)
+
+This project is built with Claude Code using a gate-based workflow (brainstorm → spec → plan → TDD → review).
+
+| Doc | Purpose |
+|---|---|
+| [`docs/available-skills.md`](docs/available-skills.md) | All Claude Code skills, agents, and commands available in this project — invoke strings, trigger type (`auto + /slash`, `/command`, `agent`), and descriptions |
+| [`docs/dev-process.md`](docs/dev-process.md) | Phase-by-phase development workflow and per-task checklist |
+| [`docs/plugins.md`](docs/plugins.md) | Required plugins, skill conflict resolution, and cleanup guidance |
+
+To regenerate the skills reference after installing or updating plugins:
+
+```bash
+python3 scripts/regen-skills-doc.py
 ```
