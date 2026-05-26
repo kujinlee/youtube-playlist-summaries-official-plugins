@@ -135,19 +135,20 @@ PLUGIN_META: dict[str, dict[str, str]] = {
 }
 
 # Built-in FleetView skills — not installed via plugins; hardcoded here.
-FLEETVIEW_SKILLS: list[tuple[str, str, str]] = [
-    ("verify",                   "`verify`",                 "Run the app and observe behavior to confirm a change works end-to-end (not just tests)."),
-    ("run",                      "`run`",                    "Launch this project's app to see a change working live."),
-    ("init",                     "`init`",                   "Initialize a new CLAUDE.md with codebase documentation."),
-    ("code-review",              "`code-review`",            "Review current diff for correctness bugs. Pass `--comment` to post as inline PR comments."),
-    ("security-review",          "`security-review`",        "Security-focused code review."),
-    ("update-config",            "`update-config`",          "Configure Claude Code via `settings.json` — hooks, permissions, env vars, automated behaviors."),
-    ("keybindings-help",         "`keybindings-help`",       "Customize keyboard shortcuts in `~/.claude/keybindings.json`."),
-    ("fewer-permission-prompts", "`fewer-permission-prompts`","Scan transcripts for common read-only calls; add prioritized allowlist to reduce prompts."),
-    ("loop",                     "`loop`",                   "Run a prompt or slash command on a recurring interval (e.g. `/loop 5m /foo`)."),
-    ("schedule",                 "`schedule`",               "Create/manage scheduled remote agents on a cron schedule or one-time delay."),
-    ("claude-api",               "`claude-api`",             "Build, debug, and optimize Claude API / Anthropic SDK apps with prompt caching."),
-    ("statusline-setup",         "*(agent)*",                "Configure the Claude Code status line setting."),
+# Tuple: (name, invoke, trigger, description)
+FLEETVIEW_SKILLS: list[tuple[str, str, str, str]] = [
+    ("verify",                   "`verify`",                  "`auto + /slash`", "Run the app and observe behavior to confirm a change works end-to-end (not just tests)."),
+    ("run",                      "`run`",                     "`auto + /slash`", "Launch this project's app to see a change working live."),
+    ("init",                     "`init`",                    "`auto + /slash`", "Initialize a new CLAUDE.md with codebase documentation."),
+    ("code-review",              "`code-review`",             "`auto + /slash`", "Review current diff for correctness bugs. Pass `--comment` to post as inline PR comments."),
+    ("security-review",          "`security-review`",         "`auto + /slash`", "Security-focused code review."),
+    ("update-config",            "`update-config`",           "`auto + /slash`", "Configure Claude Code via `settings.json` — hooks, permissions, env vars, automated behaviors."),
+    ("keybindings-help",         "`keybindings-help`",        "`auto + /slash`", "Customize keyboard shortcuts in `~/.claude/keybindings.json`."),
+    ("fewer-permission-prompts", "`fewer-permission-prompts`","`auto + /slash`", "Scan transcripts for common read-only calls; add prioritized allowlist to reduce prompts."),
+    ("loop",                     "`loop`",                    "`auto + /slash`", "Run a prompt or slash command on a recurring interval (e.g. `/loop 5m /foo`)."),
+    ("schedule",                 "`schedule`",                "`auto + /slash`", "Create/manage scheduled remote agents on a cron schedule or one-time delay."),
+    ("claude-api",               "`claude-api`",              "`auto + /slash`", "Build, debug, and optimize Claude API / Anthropic SDK apps with prompt caching."),
+    ("statusline-setup",         "*(agent)*",                 "agent (Task tool)", "Configure the Claude Code status line setting."),
 ]
 
 # Project-specific skill conflict routing (mirrors docs/plugins.md).
@@ -174,9 +175,15 @@ def load_json(path: Path, default: dict) -> dict:
         return default
 
 
-def parse_frontmatter(text: str) -> dict[str, str]:
+def parse_frontmatter(text: str) -> dict:
     """
-    Extract `name` and `description` from YAML-style frontmatter.
+    Extract fields from YAML-style frontmatter.
+
+    Returns a dict with at minimum:
+      name                     : str
+      description              : str
+      disable-model-invocation : bool  (default False)
+      user-invocable           : bool  (default True)
 
     Handles three description formats:
       description: single line value
@@ -186,7 +193,7 @@ def parse_frontmatter(text: str) -> dict[str, str]:
     """
     m = re.match(r"^---\s*\n(.*?)\n---", text, re.DOTALL)
     if not m:
-        return {}
+        return {"name": "", "description": "", "disable-model-invocation": False, "user-invocable": True}
     fm = m.group(1)
 
     name_m = re.search(r"^name:\s*(.+)$", fm, re.MULTILINE)
@@ -202,7 +209,18 @@ def parse_frontmatter(text: str) -> dict[str, str]:
         inline_m = re.search(r"^description:\s*(.+)$", fm, re.MULTILINE)
         desc = inline_m.group(1).strip().strip('"') if inline_m else ""
 
-    return {"name": name, "description": desc}
+    # Boolean override fields that control how a skill is triggered.
+    # disable-model-invocation: true  → Claude won't auto-fire; user must use /slash
+    # user-invocable: false           → Claude auto-fires only; user cannot invoke
+    disable_m  = re.search(r"^disable-model-invocation:\s*true\b", fm, re.MULTILINE | re.IGNORECASE)
+    user_inv_m = re.search(r"^user-invocable:\s*false\b",          fm, re.MULTILINE | re.IGNORECASE)
+
+    return {
+        "name": name,
+        "description": desc,
+        "disable-model-invocation": bool(disable_m),
+        "user-invocable": not bool(user_inv_m),
+    }
 
 
 def read_desc(md_path: Path) -> tuple[str, str]:
@@ -215,6 +233,37 @@ def read_desc(md_path: Path) -> tuple[str, str]:
         return name, desc
     except Exception:
         return md_path.stem, ""
+
+
+def invocation_type(md_path: Path, kind: str) -> str:
+    """
+    Return the Trigger column value for a row.
+
+    kind: 'skill' | 'agent' | 'command'
+
+    Possible return values and their meanings:
+      `auto + /slash`   — Claude auto-fires AND user can type /skill-name
+      `/slash only`     — user must type /skill-name; Claude won't auto-fire
+                          (SKILL.md has disable-model-invocation: true)
+      `auto only`       — Claude auto-fires only; user cannot invoke
+                          (SKILL.md has user-invocable: false)
+      `/command`        — explicit /command-name only; never auto-triggered
+      agent (Task tool) — spawned by Claude's Task tool; not user-invocable
+    """
+    if kind == "agent":
+        return "agent (Task tool)"
+    if kind == "command":
+        return "`/command`"
+    # kind == "skill" — inspect frontmatter for override flags
+    try:
+        fm = parse_frontmatter(md_path.read_text())
+        if fm.get("disable-model-invocation"):
+            return "`/slash only`"
+        if not fm.get("user-invocable", True):
+            return "`auto only`"
+    except Exception:
+        pass
+    return "`auto + /slash`"
 
 
 def clip(desc: str, max_chars: int = 150) -> str:
@@ -253,7 +302,7 @@ def plugin_cache_dir(plugin_id: str) -> Path:
 # ── table builders ─────────────────────────────────────────────────────────────
 
 def _table_header() -> list[str]:
-    return ["| Name | Invoke | Description |", "|---|---|---|"]
+    return ["| Name | Invoke | Trigger | Description |", "|---|---|---|---|"]
 
 
 def skills_rows(plugin_dir: Path, plugin_id: str) -> list[str]:
@@ -270,8 +319,9 @@ def skills_rows(plugin_dir: Path, plugin_id: str) -> list[str]:
             continue
         skill_name = skill_md.parent.name
         name, desc = read_desc(skill_md)
-        invoke = f"`{short}:{skill_name}`"
-        rows.append(f"| **{name}** | {invoke} | {clip(desc)} |")
+        invoke  = f"`{short}:{skill_name}`"
+        trigger = invocation_type(skill_md, "skill")
+        rows.append(f"| **{name}** | {invoke} | {trigger} | {clip(desc)} |")
     return rows
 
 
@@ -287,8 +337,8 @@ def agents_rows(plugin_dir: Path, plugin_id: str) -> list[str]:
     rows = []
     for f in sorted(agents_dir.glob("*.md")):
         name, desc = read_desc(f)
-        invoke = f"`{short}:{name}` *(agent)*"
-        rows.append(f"| **{name}** | {invoke} | {clip(desc)} |")
+        invoke = f"`{short}:{name}`"
+        rows.append(f"| **{name}** | {invoke} | agent (Task tool) | {clip(desc)} |")
     return rows
 
 
@@ -304,7 +354,7 @@ def commands_rows(plugin_dir: Path) -> list[str]:
     for f in sorted(cmds_dir.glob("*.md")):
         name, desc = read_desc(f)
         invoke = f"`/{name}`"
-        rows.append(f"| **{name}** | {invoke} | {clip(desc)} |")
+        rows.append(f"| **{name}** | {invoke} | `/command` | {clip(desc)} |")
     return rows
 
 
@@ -397,6 +447,20 @@ def build() -> str:
         "",
         "---",
         "",
+        "## Invocation Types",
+        "",
+        "The **Trigger** column in each table tells you who fires the skill and how:",
+        "",
+        "| Trigger | Who invokes | How |",
+        "|---|---|---|",
+        "| `auto + /slash` | Claude **or** you | Claude fires it when context matches; you can also type `/skill-name` explicitly |",
+        "| `/slash only` | You only | Must type `/skill-name` — Claude won't auto-fire (`disable-model-invocation: true` in SKILL.md) |",
+        "| `auto only` | Claude only | Claude auto-fires only; cannot be user-invoked (`user-invocable: false` in SKILL.md) |",
+        "| `/command` | You only | Explicit `/command-name` — commands are never auto-triggered by Claude |",
+        "| `agent (Task tool)` | Claude only | Spawned as a subagent via Task tool — not directly invocable by the user |",
+        "",
+        "---",
+        "",
     ]
 
     # ── superpowers ─────────────────────────────────────────────────────────────
@@ -428,10 +492,11 @@ def build() -> str:
     if LOCAL_SKILLS.exists():
         for skill_md in sorted(LOCAL_SKILLS.rglob("SKILL.md")):
             name, desc = read_desc(skill_md)
-            lines.append(f"| **{name}** | `{name}` | {clip(desc)} |")
+            trigger = invocation_type(skill_md, "skill")
+            lines.append(f"| **{name}** | `{name}` | {trigger} | {clip(desc)} |")
             local_count += 1
     if local_count == 0:
-        lines.append("| *(no .agents/skills/ found)* | — | — |")
+        lines.append("| *(no .agents/skills/ found)* | — | — | — |")
 
     lines += ["", "---", ""]
 
@@ -448,10 +513,10 @@ def build() -> str:
         "",
     ]
     lines.extend(_table_header())
-    # Prepend the two user-facing entry points (not in SKILL.md)
+    # Prepend the two user-facing entry points (not backed by SKILL.md files)
     lines += [
-        "| **setup** | `codex:setup` | Check whether the local Codex CLI is ready; optionally toggle the stop-time review gate. |",
-        "| **rescue** | `codex:rescue` | **Primary adversarial review entry point.** Spec (Phase 1), plan (Phase 2), code (Phase 3). Always pass `--fresh`. |",
+        "| **setup** | `codex:setup` | `auto + /slash` | Check whether the local Codex CLI is ready; optionally toggle the stop-time review gate. |",
+        "| **rescue** | `codex:rescue` | `auto + /slash` | **Primary adversarial review entry point.** Spec (Phase 1), plan (Phase 2), code (Phase 3). Always pass `--fresh`. |",
     ]
     lines.extend(skills_rows(cx_dir, CODEX_ID))
     lines += ["", "---", ""]
@@ -473,8 +538,8 @@ def build() -> str:
         "",
     ]
     lines.extend(_table_header())
-    for name, invoke, desc in FLEETVIEW_SKILLS:
-        lines.append(f"| **{name}** | {invoke} | {desc} |")
+    for name, invoke, trigger, desc in FLEETVIEW_SKILLS:
+        lines.append(f"| **{name}** | {invoke} | {trigger} | {desc} |")
     lines += ["", "---", ""]
 
     # ── disabled plugins ────────────────────────────────────────────────────────
