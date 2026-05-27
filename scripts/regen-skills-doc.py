@@ -39,9 +39,11 @@ CLAUDE_DIR   = Path(os.environ.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude")
 PLUGIN_CACHE = CLAUDE_DIR / "plugins" / "cache"
 INSTALLED    = CLAUDE_DIR / "plugins" / "installed_plugins.json"
 SETTINGS     = CLAUDE_DIR / "settings.json"
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-LOCAL_SKILLS = PROJECT_ROOT / ".agents" / "skills"
-OUTPUT       = PROJECT_ROOT / "docs" / "available-skills.md"
+PROJECT_ROOT         = Path(__file__).resolve().parent.parent
+LOCAL_SKILLS         = PROJECT_ROOT / ".agents" / "skills"
+LOCAL_COMMANDS       = PROJECT_ROOT / ".claude" / "commands"   # project-local custom commands
+GLOBAL_COMMANDS      = CLAUDE_DIR / "commands"                 # user-global custom commands
+OUTPUT               = PROJECT_ROOT / "docs" / "available-skills.md"
 
 # ── constants ──────────────────────────────────────────────────────────────────
 
@@ -343,11 +345,23 @@ def agents_rows(plugin_dir: Path, plugin_id: str) -> list[str]:
 
 
 def commands_rows(plugin_dir: Path) -> list[str]:
-    """One row per .md file in the commands/ directory."""
+    """One row per .md file in the commands/ directory of a plugin."""
     latest = latest_dir(plugin_dir)
     if not latest:
         return []
     cmds_dir = latest / "commands"
+    if not cmds_dir.exists():
+        return []
+    rows = []
+    for f in sorted(cmds_dir.glob("*.md")):
+        name, desc = read_desc(f)
+        invoke = f"`/{name}`"
+        rows.append(f"| **{name}** | {invoke} | `/command` | {clip(desc)} |")
+    return rows
+
+
+def custom_commands_rows(cmds_dir: Path) -> list[str]:
+    """One row per .md file in a flat custom commands directory (.claude/commands/)."""
     if not cmds_dir.exists():
         return []
     rows = []
@@ -528,6 +542,34 @@ def build() -> str:
             meta  = PLUGIN_META.get(pid, {})
             intro = meta.get("desc", "")
             plugin_section(lines, pid, installed, enabled=True, intro=intro)
+        lines += ["---", ""]
+
+    # ── custom commands (.claude/commands/) ────────────────────────────────────
+    project_cmd_rows = custom_commands_rows(LOCAL_COMMANDS)
+    global_cmd_rows  = custom_commands_rows(GLOBAL_COMMANDS)
+
+    if project_cmd_rows or global_cmd_rows:
+        lines += ["## 🗂️ Custom Commands", ""]
+        if project_cmd_rows:
+            lines += [
+                f"### Project-local — `{LOCAL_COMMANDS.relative_to(PROJECT_ROOT)}`",
+                "",
+                "Checked into the repo; available only in this project.",
+                "",
+            ]
+            lines.extend(_table_header())
+            lines.extend(project_cmd_rows)
+            lines.append("")
+        if global_cmd_rows:
+            lines += [
+                f"### User-global — `~/.claude/commands/`",
+                "",
+                "Available across all projects for this user.",
+                "",
+            ]
+            lines.extend(_table_header())
+            lines.extend(global_cmd_rows)
+            lines.append("")
         lines += ["---", ""]
 
     # ── built-in fleetview ──────────────────────────────────────────────────────

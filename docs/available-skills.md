@@ -1,6 +1,6 @@
 # Available Skills Reference
 
-> **Generated** 2026-05-25 · `scripts/regen-skills-doc.py`
+> **Generated** 2026-05-27 · `scripts/regen-skills-doc.py`
 > Re-run after: `/plugin install`, `/plugin update`, `/plugin enable/disable`,
 > or `npx skills@latest add/remove mattpocock/skills`.
 
@@ -228,7 +228,7 @@ Session continuity — saves state to `.remember/now.md` for clean resumption ne
 |---|---|---|---|
 | **remember** | `remember:remember` | `auto + /slash` | Save session state for clean continuation next session. |
 
-### 🟣 security-guidance — `security-guidance@claude-plugins-official` vd45efab8c85b ✅
+### 🟣 security-guidance — `security-guidance@claude-plugins-official` v2.0.0 ✅
 
 Security-focused code review and vulnerability guidance.
 
@@ -242,7 +242,7 @@ Create, edit, eval, and benchmark Claude Code skills.
 |---|---|---|---|
 | **skill-creator** | `skill-creator:skill-creator` | `auto + /slash` | Create new skills, modify and improve existing skills, and measure skill performance. |
 
-### 🟣 supabase — `supabase@claude-plugins-official` v0.1.6 ✅
+### 🟣 supabase — `supabase@claude-plugins-official` v0.1.9 ✅
 
 Postgres performance optimization and best practices from Supabase.
 
@@ -256,6 +256,18 @@ Postgres performance optimization and best practices from Supabase.
 TypeScript LSP integration for diagnostics and in-context code intelligence.
 
 *(no skills, agents, or commands found — plugin may need updating)*
+
+---
+
+## 🗂️ Custom Commands
+
+### Project-local — `.claude/commands`
+
+Checked into the repo; available only in this project.
+
+| Name | Invoke | Trigger | Description |
+|---|---|---|---|
+| **session-skills** | `/session-skills` | `/command` | Show readable skill and slash-command usage for the current Claude Code session |
 
 ---
 
