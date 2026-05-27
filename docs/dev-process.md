@@ -24,7 +24,7 @@ These files are not @-included — read them when the trigger condition is met.
 |---|---|
 | `docs/implementation-plan.md` | Session resume (find next uncommitted task); start of each task |
 | `docs/design-spec.md` | Phase 4 verification checklist; any spec ambiguity during implementation |
-| `docs/available-skills.md` | Unsure which skill to use or how to invoke it; after installing or updating plugins. Regenerate with `python3 scripts/regen-skills-doc.py` |
+| `docs/available-skills.md` | Unsure which skill to use or how to invoke it; after installing or updating plugins. Say **"sync docs"** or run `/sync-docs` (`sync-docs` skill) to regenerate. |
 
 ---
 
