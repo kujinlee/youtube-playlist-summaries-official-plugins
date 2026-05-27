@@ -79,6 +79,7 @@ Installed via `npx skills@latest add mattpocock/skills` — lives in `.agents/sk
 | **improve-codebase-architecture** | `improve-codebase-architecture` | `auto + /slash` | Find deepening opportunities in a codebase, informed by the domain language in CONTEXT.md and the decisions in docs/adr/. |
 | **prototype** | `prototype` | `auto + /slash` | Build a throwaway prototype to flesh out a design before committing to it. |
 | **setup-matt-pocock-skills** | `setup-matt-pocock-skills` | `/slash only` | Sets up an `## Agent skills` block in AGENTS.md/CLAUDE. |
+| **sync-docs** | `sync-docs` | `auto + /slash` | Use when plugins, skills, or commands have changed and the project docs need updating — after /plugin install, /plugin update, /plugin enable/disable,… |
 | **tdd** | `tdd` | `auto + /slash` | Test-driven development with red-green-refactor loop. |
 | **to-issues** | `to-issues` | `auto + /slash` | Break a plan, spec, or PRD into independently-grabbable issues on the project issue tracker using tracer-bullet vertical slices. |
 | **to-prd** | `to-prd` | `auto + /slash` | Turn the current conversation context into a PRD and publish it to the project issue tracker. |
