@@ -85,112 +85,86 @@ describe('Header — Sync button', () => {
     expect(screen.queryByRole('button', { name: /sync/i })).toBeNull();
   });
 
-  it('renders Sync button when onSync is provided and syncEnabled=true', () => {
-    render(
-      <Header
-        defaultOutputFolder="/folder"
-        onIngest={jest.fn()}
-        onSync={jest.fn()}
-        syncEnabled={true}
-      />,
-    );
+  it('renders Sync button when onSync is provided', () => {
+    render(<Header defaultOutputFolder="/folder" onIngest={jest.fn()} onSync={jest.fn()} />);
     expect(screen.getByRole('button', { name: /sync/i })).toBeInTheDocument();
   });
 
-  it('Sync button is enabled when syncEnabled=true and not disabled', () => {
-    render(
-      <Header
-        defaultOutputFolder="/folder"
-        onIngest={jest.fn()}
-        onSync={jest.fn()}
-        syncEnabled={true}
-      />,
-    );
+  it('Sync button is disabled when playlist URL field is empty', () => {
+    render(<Header defaultOutputFolder="/folder" onIngest={jest.fn()} onSync={jest.fn()} />);
+    expect(screen.getByRole('button', { name: /sync/i })).toBeDisabled();
+  });
+
+  it('Sync button is enabled when playlist URL field has content', () => {
+    render(<Header defaultOutputFolder="/folder" onIngest={jest.fn()} onSync={jest.fn()} />);
+    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
+      target: { value: 'https://youtube.com/playlist?list=PLtest' },
+    });
     expect(screen.getByRole('button', { name: /sync/i })).toBeEnabled();
   });
 
-  it('Sync button is disabled when global disabled=true', () => {
+  it('Sync button is disabled when global disabled=true even with URL present', () => {
     render(
       <Header
         defaultOutputFolder="/folder"
         onIngest={jest.fn()}
         onSync={jest.fn()}
-        syncEnabled={true}
         disabled={true}
       />,
     );
+    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
+      target: { value: 'https://youtube.com/playlist?list=PLtest' },
+    });
     expect(screen.getByRole('button', { name: /sync/i })).toBeDisabled();
   });
 
-  it('Sync button is disabled when syncEnabled=false', () => {
-    render(
-      <Header
-        defaultOutputFolder="/folder"
-        onIngest={jest.fn()}
-        onSync={jest.fn()}
-        syncEnabled={false}
-      />,
-    );
-    expect(screen.getByRole('button', { name: /sync/i })).toBeDisabled();
-  });
-
-  it('calls onSync with current output folder when Sync button is clicked', () => {
+  it('calls onSync with folder AND playlistUrl when Sync button is clicked', () => {
     const onSync = jest.fn();
     render(
-      <Header
-        defaultOutputFolder="/folder"
-        onIngest={jest.fn()}
-        onSync={onSync}
-        syncEnabled={true}
-      />,
+      <Header defaultOutputFolder="/folder" onIngest={jest.fn()} onSync={onSync} />,
     );
+    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
+      target: { value: 'https://youtube.com/playlist?list=PLtest' },
+    });
     fireEvent.click(screen.getByRole('button', { name: /sync/i }));
-    expect(onSync).toHaveBeenCalledWith('/folder');
+    expect(onSync).toHaveBeenCalledWith('/folder', 'https://youtube.com/playlist?list=PLtest');
   });
 
   it('calls onSync with updated folder when user has changed the folder input', () => {
     const onSync = jest.fn();
-    render(
-      <Header
-        defaultOutputFolder="/original"
-        onIngest={jest.fn()}
-        onSync={onSync}
-        syncEnabled={true}
-      />,
-    );
+    render(<Header defaultOutputFolder="/original" onIngest={jest.fn()} onSync={onSync} />);
+    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
+      target: { value: 'https://youtube.com/playlist?list=PLtest' },
+    });
     fireEvent.change(screen.getByDisplayValue('/original'), { target: { value: '/new-folder' } });
     fireEvent.click(screen.getByRole('button', { name: /sync/i }));
-    expect(onSync).toHaveBeenCalledWith('/new-folder');
+    expect(onSync).toHaveBeenCalledWith('/new-folder', 'https://youtube.com/playlist?list=PLtest');
   });
 
-  it('Sync button has disabled attribute when syncEnabled=false (prevents click)', () => {
-    render(
-      <Header
-        defaultOutputFolder="/folder"
-        onIngest={jest.fn()}
-        onSync={jest.fn()}
-        syncEnabled={false}
-      />,
-    );
-    // asserting disabled is the correct way to verify the button cannot be activated;
-    // fireEvent.click on a disabled button has ambiguous behavior across JSDOM versions.
-    expect(screen.getByRole('button', { name: /sync/i })).toBeDisabled();
-  });
-
-  it('Sync button click does not trigger form submission (no URL input required)', () => {
+  it('Sync button click does not trigger form submission (onIngest not called)', () => {
     const onIngest = jest.fn();
     const onSync = jest.fn();
     render(
-      <Header
-        defaultOutputFolder="/folder"
-        onIngest={onIngest}
-        onSync={onSync}
-        syncEnabled={true}
-      />,
+      <Header defaultOutputFolder="/folder" onIngest={onIngest} onSync={onSync} />,
     );
+    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
+      target: { value: 'https://youtube.com/playlist?list=PLtest' },
+    });
     fireEvent.click(screen.getByRole('button', { name: /sync/i }));
     expect(onIngest).not.toHaveBeenCalled();
     expect(onSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('Sync button has green styling when enabled', () => {
+    render(
+      <Header defaultOutputFolder="/folder" onIngest={jest.fn()} onSync={jest.fn()} />,
+    );
+    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
+      target: { value: 'https://youtube.com/playlist?list=PLtest' },
+    });
+    const syncBtn = screen.getByRole('button', { name: /sync/i });
+    // Check for green Tailwind class presence (enabled state)
+    expect(syncBtn.className).toMatch(/green/);
   });
 });
 
@@ -259,5 +233,154 @@ describe('Header — playlist folder auto-suggestion', () => {
 
     await act(async () => { jest.runAllTimers(); });
     expect(screen.getByDisplayValue(BASE)).toBeInTheDocument();
+  });
+});
+
+describe('Header — Browse button', () => {
+  const originalPlatform = navigator.platform;
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    Object.defineProperty(navigator, 'platform', { value: originalPlatform, configurable: true });
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  function setMac() {
+    Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true });
+  }
+  function setNonMac() {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+  }
+
+  it('renders Browse button on macOS', () => {
+    setMac();
+    render(<Header defaultOutputFolder="/folder" onIngest={jest.fn()} />);
+    expect(screen.getByRole('button', { name: /browse/i })).toBeInTheDocument();
+  });
+
+  it('does not render Browse button on non-macOS', () => {
+    setNonMac();
+    render(<Header defaultOutputFolder="/folder" onIngest={jest.fn()} />);
+    expect(screen.queryByRole('button', { name: /browse/i })).toBeNull();
+  });
+
+  it('calls GET /api/pick-folder when Browse is clicked and updates folder on success', async () => {
+    setMac();
+    global.fetch = (jest.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ folderPath: '/Users/kujin/picked' }) })
+    ) as jest.Mock;
+
+    render(<Header defaultOutputFolder="/original" onIngest={jest.fn()} />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /browse/i }));
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith('/api/pick-folder');
+    expect(screen.getByDisplayValue('/Users/kujin/picked')).toBeInTheDocument();
+  });
+
+  it('leaves folder unchanged when Browse is cancelled', async () => {
+    setMac();
+    global.fetch = (jest.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ cancelled: true }) })
+    ) as jest.Mock;
+
+    render(<Header defaultOutputFolder="/original" onIngest={jest.fn()} />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /browse/i }));
+    });
+
+    expect(screen.getByDisplayValue('/original')).toBeInTheDocument();
+  });
+
+  it('leaves folder unchanged when fetch throws a network error', async () => {
+    setMac();
+    global.fetch = (jest.fn().mockRejectedValueOnce(new Error('Network error'))) as jest.Mock;
+
+    render(<Header defaultOutputFolder="/original" onIngest={jest.fn()} />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /browse/i }));
+    });
+
+    expect(screen.getByDisplayValue('/original')).toBeInTheDocument();
+  });
+});
+
+describe('Header — URL auto-fill from currentPlaylistUrl prop', () => {
+  it('auto-fills URL field when currentPlaylistUrl prop is set and user has not typed', () => {
+    const { rerender } = render(
+      <Header defaultOutputFolder="/folder" onIngest={jest.fn()} currentPlaylistUrl="" />,
+    );
+    rerender(
+      <Header
+        defaultOutputFolder="/folder"
+        onIngest={jest.fn()}
+        currentPlaylistUrl="https://youtube.com/playlist?list=PLauto"
+      />,
+    );
+    expect(
+      (screen.getByPlaceholderText(/playlist url/i) as HTMLInputElement).value,
+    ).toBe('https://youtube.com/playlist?list=PLauto');
+  });
+
+  it('does NOT auto-fill URL when user has manually typed in the URL field', () => {
+    const { rerender } = render(
+      <Header defaultOutputFolder="/folder" onIngest={jest.fn()} currentPlaylistUrl="" />,
+    );
+    // User types their own URL first
+    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
+      target: { value: 'https://youtube.com/playlist?list=PLmanual' },
+    });
+    // metadata arrives
+    rerender(
+      <Header
+        defaultOutputFolder="/folder"
+        onIngest={jest.fn()}
+        currentPlaylistUrl="https://youtube.com/playlist?list=PLauto"
+      />,
+    );
+    // manual entry must not be overwritten
+    expect(
+      (screen.getByPlaceholderText(/playlist url/i) as HTMLInputElement).value,
+    ).toBe('https://youtube.com/playlist?list=PLmanual');
+  });
+
+  it('resumes auto-fill after Browse success (urlEditedByUser reset)', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true });
+    global.fetch = (jest.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ folderPath: '/new-folder' }) })
+    ) as jest.Mock;
+
+    const { rerender } = render(
+      <Header defaultOutputFolder="/folder" onIngest={jest.fn()} currentPlaylistUrl="" />,
+    );
+
+    // User types their own URL (sets urlEditedByUser = true)
+    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
+      target: { value: 'https://youtube.com/playlist?list=PLmanual' },
+    });
+
+    // User browses to a new folder (resets urlEditedByUser = false)
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /browse/i }));
+    });
+
+    // Now auto-fill should work again
+    rerender(
+      <Header
+        defaultOutputFolder="/folder"
+        onIngest={jest.fn()}
+        currentPlaylistUrl="https://youtube.com/playlist?list=PLnew"
+      />,
+    );
+    expect(
+      (screen.getByPlaceholderText(/playlist url/i) as HTMLInputElement).value,
+    ).toBe('https://youtube.com/playlist?list=PLnew');
+
+    Object.defineProperty(navigator, 'platform', { value: navigator.platform, configurable: true });
   });
 });
