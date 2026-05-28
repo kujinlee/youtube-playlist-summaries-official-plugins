@@ -32,6 +32,8 @@ export const VideoMetaSchema = z.object({
   youtubeUrl: z.string().url(),
   durationSeconds: z.number().int().nonnegative(),
   channelTitle: z.string().optional(),
+  videoPublishedAt: z.string().datetime().optional(),
+  addedToPlaylistAt: z.string().datetime().optional(),
 });
 export type VideoMeta = z.infer<typeof VideoMetaSchema>;
 
@@ -56,6 +58,8 @@ export const VideoSchema = z.object({
   tags: z.array(z.string()).optional(),
   removedFromPlaylist: z.boolean().optional(),
   playlistIndex: z.number().int().positive().optional(),
+  videoPublishedAt: z.string().datetime().optional(),
+  addedToPlaylistAt: z.string().datetime().optional(),
 });
 export type Video = z.infer<typeof VideoSchema>;
 
@@ -129,5 +133,5 @@ export const FILTER_DEFAULTS: FilterState = {
 // --- Sort types for GET /api/videos ---
 type RatingSortColumn = keyof Ratings;
 // 'overall' maps to Video.overallScore; all others map directly to Ratings fields.
-export type SortColumn = 'name' | 'overall' | RatingSortColumn | 'language' | 'videoType' | 'audience' | 'playlistIndex';
+export type SortColumn = 'name' | 'overall' | RatingSortColumn | 'language' | 'videoType' | 'audience' | 'playlistIndex' | 'videoPublishedAt' | 'addedToPlaylistAt';
 export type SortOrder = 'asc' | 'desc';
