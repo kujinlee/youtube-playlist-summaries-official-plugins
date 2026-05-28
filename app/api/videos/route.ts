@@ -27,12 +27,6 @@ function sortVideos(videos: Video[], column: SortColumn, order: SortOrder): Vide
     } else if (column === 'playlistIndex') {
       aVal = a.playlistIndex ?? 0;
       bVal = b.playlistIndex ?? 0;
-    } else if (column === 'videoPublishedAt') {
-      aVal = a.videoPublishedAt ?? '';
-      bVal = b.videoPublishedAt ?? '';
-    } else if (column === 'addedToPlaylistAt') {
-      aVal = a.addedToPlaylistAt ?? '';
-      bVal = b.addedToPlaylistAt ?? '';
     } else {
       aVal = a.ratings[column as keyof typeof a.ratings];
       bVal = b.ratings[column as keyof typeof b.ratings];
