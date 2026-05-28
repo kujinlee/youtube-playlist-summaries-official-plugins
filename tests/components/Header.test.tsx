@@ -350,6 +350,7 @@ describe('Header — URL auto-fill from currentPlaylistUrl prop', () => {
   });
 
   it('resumes auto-fill after Browse success (urlEditedByUser reset)', async () => {
+    const savedPlatform = navigator.platform;
     Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true });
     global.fetch = (jest.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ folderPath: '/new-folder' }) })
@@ -381,6 +382,6 @@ describe('Header — URL auto-fill from currentPlaylistUrl prop', () => {
       (screen.getByPlaceholderText(/playlist url/i) as HTMLInputElement).value,
     ).toBe('https://youtube.com/playlist?list=PLnew');
 
-    Object.defineProperty(navigator, 'platform', { value: navigator.platform, configurable: true });
+    Object.defineProperty(navigator, 'platform', { value: savedPlatform, configurable: true });
   });
 });
