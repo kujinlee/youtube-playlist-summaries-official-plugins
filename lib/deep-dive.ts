@@ -61,7 +61,7 @@ export async function runDeepDive(
   // Derive filename from summary filename — keeps human-readable rank-slug naming consistent
   const base = (video.summaryMd ?? videoId).replace(/\.md$/, '');
   const mdFilename = `${base}-deep-dive.md`;
-  const pdfFilename = `${base}-deep-dive.pdf`;
+  const pdfFilename = `pdfs/${base}-deep-dive.pdf`;
 
   // Strip any leading H1 Gemini may have generated — we add our own standardized header
   const body = deepDiveRaw.replace(/^#\s+[^\n]*\n+/, '');
@@ -103,6 +103,7 @@ export async function runDeepDive(
   const mdPath = path.join(outputFolder, mdFilename);
   await fs.promises.writeFile(mdPath, mdContent, 'utf-8');
 
+  await fs.promises.mkdir(path.join(outputFolder, 'pdfs'), { recursive: true });
   const pdfPath = path.join(outputFolder, pdfFilename);
   onProgress({ type: 'step', videoId, step: 'Generating PDF…', current: 3, total: 3 });
   await generatePdf(mdContent, pdfPath);

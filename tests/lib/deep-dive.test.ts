@@ -141,7 +141,7 @@ describe('runDeepDive', () => {
       VIDEO_ID,
       expect.objectContaining({
         deepDiveMd: `${SUMMARY_BASE}-deep-dive.md`,
-        deepDivePdf: `${SUMMARY_BASE}-deep-dive.pdf`,
+        deepDivePdf: `pdfs/${SUMMARY_BASE}-deep-dive.pdf`,
       }),
     );
   });
@@ -182,7 +182,7 @@ describe('runDeepDive', () => {
       VIDEO_ID,
       expect.objectContaining({
         deepDiveMd: `${SUMMARY_BASE}-deep-dive.md`,
-        deepDivePdf: `${SUMMARY_BASE}-deep-dive.pdf`,
+        deepDivePdf: `pdfs/${SUMMARY_BASE}-deep-dive.pdf`,
       }),
     );
   });
@@ -242,7 +242,7 @@ describe('runDeepDive', () => {
       VIDEO_ID,
       expect.objectContaining({
         deepDiveMd: `${VIDEO_ID}-deep-dive.md`,
-        deepDivePdf: `${VIDEO_ID}-deep-dive.pdf`,
+        deepDivePdf: `pdfs/${VIDEO_ID}-deep-dive.pdf`,
       }),
     );
   });
