@@ -12,11 +12,6 @@ interface HeaderProps {
   disabled?: boolean;
 }
 
-// Checked at render time so tests can override navigator.platform per-test
-function getIsMac() {
-  return typeof navigator !== 'undefined' && navigator.platform.includes('Mac');
-}
-
 export default function Header({
   defaultOutputFolder,
   baseOutputFolder,
@@ -27,10 +22,21 @@ export default function Header({
 }: HeaderProps) {
   const [playlistUrl, setPlaylistUrl] = useState('');
   const [outputFolder, setOutputFolder] = useState(defaultOutputFolder);
-  const [isMac] = useState(getIsMac); // stable after mount; useState(fn) calls fn once
+  // Start false (matches server render); set to true after hydration on macOS.
+  // Using useEffect ensures the SSR and client initial renders are identical,
+  // avoiding hydration mismatches when navigator is unavailable on the server.
+  const [isMac, setIsMac] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // true once the user types into the URL field; resets to false on Browse success or folder change
   const urlEditedByUser = useRef(false);
+
+  // Detect macOS after hydration — runs only on the client, so SSR and initial
+  // client render both see isMac=false (no Browse button), then it flips to true
+  // on macOS. Tests can override navigator.platform before render; the effect
+  // fires synchronously inside act(), so test assertions see the correct value.
+  useEffect(() => {
+    setIsMac(typeof navigator !== 'undefined' && navigator.platform.includes('Mac'));
+  }, []);
 
   // Keep folder in sync when settings load after mount
   useEffect(() => {
