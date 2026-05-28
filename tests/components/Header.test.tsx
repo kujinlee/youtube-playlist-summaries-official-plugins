@@ -308,6 +308,18 @@ describe('Header — Browse button', () => {
 
     expect(screen.getByDisplayValue('/original')).toBeInTheDocument();
   });
+
+  it('leaves folder unchanged when server returns a non-ok response', async () => {
+    setMac();
+    global.fetch = (jest.fn().mockResolvedValueOnce({ ok: false })) as jest.Mock;
+
+    render(<Header defaultOutputFolder="/original" onIngest={jest.fn()} />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /browse/i }));
+    });
+
+    expect(screen.getByDisplayValue('/original')).toBeInTheDocument();
+  });
 });
 
 describe('Header — URL auto-fill from currentPlaylistUrl prop', () => {

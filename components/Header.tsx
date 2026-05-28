@@ -78,6 +78,7 @@ export default function Header({
   const handleBrowse = useCallback(async () => {
     try {
       const res = await fetch('/api/pick-folder');
+      if (!res.ok) return; // treat non-2xx as no-op — folder input unchanged
       const data = (await res.json()) as { folderPath?: string; cancelled?: boolean };
       if (data.folderPath) {
         setOutputFolder(data.folderPath);
