@@ -9,12 +9,15 @@ import * as indexStore from '../../lib/index-store';
 import * as pipeline from '../../lib/pipeline';
 
 const mockCreateJob = jest.mocked(jobRegistry.createJob);
+const mockDeleteJob = jest.mocked(jobRegistry.deleteJob);
 const mockEmitJobEvent = jest.mocked(jobRegistry.emitJobEvent);
 const mockSubscribeJob = jest.mocked(jobRegistry.subscribeJob);
 const mockResetJobRegistry = jest.mocked(jobRegistry._resetJobRegistry);
 const mockIsIngestionRunning = jest.mocked(jobRegistry.isIngestionRunning);
 const mockAssertOutputFolder = jest.mocked(indexStore.assertOutputFolder);
 const mockRunIngestion = jest.mocked(pipeline.runIngestion);
+
+import type { ProgressEvent } from '../../types';
 
 const OUTPUT_FOLDER = '/tmp/out';
 const PLAYLIST_URL = 'https://youtube.com/playlist?list=PLtest';
@@ -31,6 +34,7 @@ describe('POST /api/ingest', () => {
   beforeEach(() => {
     mockAssertOutputFolder.mockImplementation(() => {});
     mockCreateJob.mockImplementation(() => {});
+    mockDeleteJob.mockImplementation(() => {});
     mockEmitJobEvent.mockImplementation(() => {});
     mockResetJobRegistry.mockImplementation(() => {});
     mockIsIngestionRunning.mockReturnValue(false); // default: no active job
@@ -62,6 +66,30 @@ describe('POST /api/ingest', () => {
     const res = await postIngest({ playlistUrl: PLAYLIST_URL, outputFolder: OUTPUT_FOLDER });
     expect(res.status).toBe(409);
   });
+
+  it('does not delete the job when a per-video error is emitted (videoId present)', async () => {
+    let capturedCallback: ((event: ProgressEvent) => void) | undefined;
+    mockRunIngestion.mockImplementation(async (_url, _folder, onProgress) => {
+      capturedCallback = onProgress;
+    });
+
+    await postIngest({ playlistUrl: PLAYLIST_URL, outputFolder: OUTPUT_FOLDER });
+    capturedCallback?.({ type: 'error', videoId: 'vid1', title: 'Video 1', log: 'transcript unavailable' });
+
+    expect(mockDeleteJob).not.toHaveBeenCalled();
+  });
+
+  it('deletes the job when a fatal pipeline error is emitted (no videoId)', async () => {
+    let capturedCallback: ((event: ProgressEvent) => void) | undefined;
+    mockRunIngestion.mockImplementation(async (_url, _folder, onProgress) => {
+      capturedCallback = onProgress;
+    });
+
+    await postIngest({ playlistUrl: PLAYLIST_URL, outputFolder: OUTPUT_FOLDER });
+    capturedCallback?.({ type: 'error', log: 'YOUTUBE_API_KEY is not set' });
+
+    expect(mockDeleteJob).toHaveBeenCalled();
+  });
 });
 
 describe('GET /api/ingest/stream', () => {
@@ -84,5 +112,49 @@ describe('GET /api/ingest/stream', () => {
     const res = await GET_STREAM(new Request('http://localhost/api/ingest/stream?jobId=known-job'));
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toContain('text/event-stream');
+  });
+
+  it('does not unsubscribe after a per-video error (stream stays open)', async () => {
+    // unsubscribe() being called is the signal that the stream controller was closed.
+    // A per-video error (videoId present) must NOT trigger it.
+    const unsubscribeFn = jest.fn();
+    let emit: (event: ProgressEvent) => void = () => {};
+    mockSubscribeJob.mockImplementation((_jobId, listener) => {
+      emit = listener;
+      return unsubscribeFn;
+    });
+
+    await GET_STREAM(new Request('http://localhost/api/ingest/stream?jobId=job1'));
+
+    emit({ type: 'error', videoId: 'vid1', title: 'V1', log: 'no transcript' });
+    expect(unsubscribeFn).not.toHaveBeenCalled();
+  });
+
+  it('unsubscribes (closes stream) on a done event', async () => {
+    const unsubscribeFn = jest.fn();
+    let emit: (event: ProgressEvent) => void = () => {};
+    mockSubscribeJob.mockImplementation((_jobId, listener) => {
+      emit = listener;
+      return unsubscribeFn;
+    });
+
+    await GET_STREAM(new Request('http://localhost/api/ingest/stream?jobId=job2'));
+
+    emit({ type: 'done' });
+    expect(unsubscribeFn).toHaveBeenCalled();
+  });
+
+  it('unsubscribes (closes stream) on a fatal error (no videoId)', async () => {
+    const unsubscribeFn = jest.fn();
+    let emit: (event: ProgressEvent) => void = () => {};
+    mockSubscribeJob.mockImplementation((_jobId, listener) => {
+      emit = listener;
+      return unsubscribeFn;
+    });
+
+    await GET_STREAM(new Request('http://localhost/api/ingest/stream?jobId=job3'));
+
+    emit({ type: 'error', log: 'YOUTUBE_API_KEY is not set' });
+    expect(unsubscribeFn).toHaveBeenCalled();
   });
 });

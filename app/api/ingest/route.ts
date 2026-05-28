@@ -30,7 +30,10 @@ export async function POST(request: Request) {
   // Start pipeline in background; do not await
   runIngestion(playlistUrl, outputFolder, (event: ProgressEvent) => {
     emitJobEvent(jobId, event);
-    if (event.type === 'done' || event.type === 'error') {
+    // Per-video errors (videoId present) are non-fatal — the pipeline continues.
+    // Only delete the job for terminal events: done, or a fatal error (no videoId).
+    const isFatal = event.type === 'done' || (event.type === 'error' && !('videoId' in event && event.videoId));
+    if (isFatal) {
       finished = true;
       deleteJob(jobId);
     }
