@@ -42,6 +42,11 @@ export default function VideoMenu({ video, outputFolder, baseOutputFolder, onDee
       className="absolute left-0 top-full z-20 mt-1 w-52 rounded-md bg-zinc-800 border border-zinc-700 shadow-xl py-1"
     >
       <li role="none">
+        <a href={video.youtubeUrl} onClick={onClose} target="_blank" rel="noopener noreferrer" className={itemClass}>
+          Watch on YouTube
+        </a>
+      </li>
+      <li role="none">
         <a href={obsidianHref(baseOutputFolder, outputFolder, summaryFile)} onClick={onClose} target="_blank" rel="noopener noreferrer" className={itemClass}>
           Open in Obsidian
         </a>

@@ -374,9 +374,19 @@ describe('VideoRow', () => {
       });
     });
 
-    describe('all 6 menu items present', () => {
-      it('renders all 6 actions', () => {
+    describe('Watch on YouTube', () => {
+      it('is a link pointing to video.youtubeUrl', () => {
+        openMenu();
+        const link = screen.getByRole('link', { name: /watch on youtube/i });
+        expect(link).toHaveAttribute('href', 'https://www.youtube.com/watch?v=abc123');
+        expect(link).toHaveAttribute('target', '_blank');
+      });
+    });
+
+    describe('all 7 menu items present', () => {
+      it('renders all 7 actions', () => {
         openMenu({ deepDiveMd: 'abc123-deep-dive.md', deepDivePdf: 'abc123-deep-dive.pdf' });
+        expect(screen.getByRole('link', { name: /watch on youtube/i })).toBeInTheDocument();
         expect(screen.getByRole('link', { name: /open in obsidian/i })).toBeInTheDocument();
         expect(screen.getByRole('link', { name: /view summary pdf/i })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /^deep dive$/i })).toBeInTheDocument();
