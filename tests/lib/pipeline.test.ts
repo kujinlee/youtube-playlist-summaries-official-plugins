@@ -416,6 +416,77 @@ describe('runIngestion', () => {
     expect(mockUpsertVideo).toHaveBeenCalledTimes(1);
   });
 
+  it('stamps videoPublishedAt and addedToPlaylistAt on new videos from VideoMeta', async () => {
+    const meta = {
+      ...makeVideoMeta('vid1'),
+      videoPublishedAt: '2024-11-12T14:30:00Z',
+      addedToPlaylistAt: '2025-01-03T09:00:00Z',
+    };
+    mockFetchPlaylistVideos.mockResolvedValue([meta]);
+    mockFetchTranscript.mockResolvedValue('transcript');
+    mockGenerateSummary.mockResolvedValue(makeSummaryResponse());
+
+    await runIngestion(PLAYLIST_URL, outputFolder, () => {});
+
+    expect(mockUpsertVideo).toHaveBeenCalledWith(
+      outputFolder,
+      expect.objectContaining({
+        id: 'vid1',
+        videoPublishedAt: '2024-11-12T14:30:00Z',
+        addedToPlaylistAt: '2025-01-03T09:00:00Z',
+      }),
+    );
+  });
+
+  it('backfills dates on already-indexed videos via reconciliation writeIndex call', async () => {
+    const existingVid = makeIndexedVideo('vid1'); // no dates
+    mockReadIndex.mockReturnValue({ playlistUrl: PLAYLIST_URL, outputFolder, videos: [existingVid] });
+
+    const meta = {
+      ...makeVideoMeta('vid1'),
+      videoPublishedAt: '2024-11-12T14:30:00Z',
+      addedToPlaylistAt: '2025-01-03T09:00:00Z',
+    };
+    mockFetchPlaylistVideos.mockResolvedValue([meta]);
+
+    await runIngestion(PLAYLIST_URL, outputFolder, () => {});
+
+    const lastWriteCall = mockWriteIndex.mock.calls[mockWriteIndex.mock.calls.length - 1];
+    const writtenVideos: Video[] = lastWriteCall[1].videos;
+    expect(writtenVideos).toContainEqual(
+      expect.objectContaining({
+        id: 'vid1',
+        videoPublishedAt: '2024-11-12T14:30:00Z',
+        addedToPlaylistAt: '2025-01-03T09:00:00Z',
+      }),
+    );
+  });
+
+  it('preserves existing dates for already-indexed videos on re-sync', async () => {
+    const existingVid = makeIndexedVideo('vid1', {
+      videoPublishedAt: '2024-11-12T14:30:00Z',
+      addedToPlaylistAt: '2025-01-03T09:00:00Z',
+    });
+    mockReadIndex.mockReturnValue({ playlistUrl: PLAYLIST_URL, outputFolder, videos: [existingVid] });
+
+    // Re-sync provides different dates (shouldn't matter — existing values win)
+    const meta = {
+      ...makeVideoMeta('vid1'),
+      videoPublishedAt: '2024-12-01T00:00:00Z',
+      addedToPlaylistAt: '2025-02-01T00:00:00Z',
+    };
+    mockFetchPlaylistVideos.mockResolvedValue([meta]);
+
+    await runIngestion(PLAYLIST_URL, outputFolder, () => {});
+
+    const lastWriteCall = mockWriteIndex.mock.calls[mockWriteIndex.mock.calls.length - 1];
+    const writtenVideos: Video[] = lastWriteCall[1].videos;
+    const written = writtenVideos.find((v) => v.id === 'vid1');
+    // Original values preserved — ?? ensures write-once semantics
+    expect(written?.videoPublishedAt).toBe('2024-11-12T14:30:00Z');
+    expect(written?.addedToPlaylistAt).toBe('2025-01-03T09:00:00Z');
+  });
+
   it('emits cancelled (not done) and stops processing when AbortSignal fires between videos', async () => {
     const controller = new AbortController();
     mockFetchPlaylistVideos.mockResolvedValue([makeVideoMeta('vid1'), makeVideoMeta('vid2')]);

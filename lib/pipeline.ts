@@ -269,6 +269,8 @@ export async function runIngestion(
         ...(audience !== undefined && { audience }),
         ...(meta.channelTitle !== undefined && { channel: meta.channelTitle }),
         ...(tags !== undefined && { tags }),
+        ...(meta.videoPublishedAt !== undefined && { videoPublishedAt: meta.videoPublishedAt }),
+        ...(meta.addedToPlaylistAt !== undefined && { addedToPlaylistAt: meta.addedToPlaylistAt }),
       };
       // Index updated immediately after md write — reduces orphan window to PDF generation only.
       upsertVideo(outputFolder, video);
@@ -299,14 +301,16 @@ export async function runIngestion(
   // Stamp playlistIndex for all videos (new videos already stamped above; this covers
   // already-indexed videos that were skipped during the main loop).
   const positionMap = new Map(metas.map((m, idx) => [m.videoId, idx + 1]));
+  const publishedMap = new Map(metas.map((m) => [m.videoId, m.videoPublishedAt]));
+  const addedMap = new Map(metas.map((m) => [m.videoId, m.addedToPlaylistAt]));
   const afterReconcile = readIndex(outputFolder);
-  // Prefer existing playlistIndex (stable ID stamped at first ingest) — only fill in
-  // if not yet set. This prevents duplicate ranks when the playlist is reordered after
-  // a video is removed: removed videos keep their original position, current videos keep
-  // theirs, so no two videos share the same index.
+  // Prefer existing values (write-once semantics via ??): playlistIndex, videoPublishedAt,
+  // addedToPlaylistAt are all stable IDs stamped at first ingest and never updated.
   const videosWithIndex = afterReconcile.videos.map((v) => ({
     ...v,
     playlistIndex: v.playlistIndex ?? positionMap.get(v.id),
+    videoPublishedAt: v.videoPublishedAt ?? publishedMap.get(v.id),
+    addedToPlaylistAt: v.addedToPlaylistAt ?? addedMap.get(v.id),
   }));
   writeIndex(outputFolder, { ...afterReconcile, videos: videosWithIndex });
 
