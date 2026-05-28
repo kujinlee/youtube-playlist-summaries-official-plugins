@@ -27,7 +27,7 @@ describe('GET /api/pick-folder', () => {
 
   it('returns folderPath on success, strips trailing slash', async () => {
     setPlatform('darwin');
-    mockExecFileSync.mockReturnValue(Buffer.from('/Users/kujin/notes/\n'));
+    mockExecFileSync.mockReturnValue('/Users/kujin/notes/\n' as unknown as ReturnType<typeof execFileSync>);
     const res = await GET();
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -36,7 +36,7 @@ describe('GET /api/pick-folder', () => {
 
   it('returns folderPath unchanged when no trailing slash present', async () => {
     setPlatform('darwin');
-    mockExecFileSync.mockReturnValue(Buffer.from('/Users/kujin/notes'));
+    mockExecFileSync.mockReturnValue('/Users/kujin/notes' as unknown as ReturnType<typeof execFileSync>);
     const res = await GET();
     const body = await res.json();
     expect(body.folderPath).toBe('/Users/kujin/notes');

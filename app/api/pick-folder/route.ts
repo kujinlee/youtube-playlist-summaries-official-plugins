@@ -12,8 +12,8 @@ export async function GET() {
     const raw = execFileSync(
       'osascript',
       ['-e', 'POSIX path of (choose folder with prompt "Select output folder:")'],
-      { timeout: 60_000 },
-    ).toString().trim();
+      { timeout: 60_000, encoding: 'utf8' },
+    ).trim();
     // osascript appends a trailing slash — normalise it away
     const folderPath = raw.endsWith('/') ? raw.slice(0, -1) : raw;
     return NextResponse.json({ folderPath });
