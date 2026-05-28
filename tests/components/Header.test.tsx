@@ -361,6 +361,32 @@ describe('Header — URL auto-fill from currentPlaylistUrl prop', () => {
     ).toBe('https://youtube.com/playlist?list=PLmanual');
   });
 
+  it('does NOT auto-fill URL after user types URL then manually edits folder (guard stays active)', () => {
+    const { rerender } = render(
+      <Header defaultOutputFolder="/folder" onIngest={jest.fn()} currentPlaylistUrl="" />,
+    );
+    // User types their own URL (sets urlEditedByUser = true)
+    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
+      target: { value: 'https://youtube.com/playlist?list=PLmanual' },
+    });
+    // User manually edits the folder path (guard must NOT reset)
+    fireEvent.change(screen.getByDisplayValue('/folder'), {
+      target: { value: '/folder-renamed' },
+    });
+    // Metadata arrives from the server
+    rerender(
+      <Header
+        defaultOutputFolder="/folder"
+        onIngest={jest.fn()}
+        currentPlaylistUrl="https://youtube.com/playlist?list=PLauto"
+      />,
+    );
+    // User's manually typed URL must not be overwritten
+    expect(
+      (screen.getByPlaceholderText(/playlist url/i) as HTMLInputElement).value,
+    ).toBe('https://youtube.com/playlist?list=PLmanual');
+  });
+
   it('resumes auto-fill after Browse success (urlEditedByUser reset)', async () => {
     const savedPlatform = navigator.platform;
     Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true });

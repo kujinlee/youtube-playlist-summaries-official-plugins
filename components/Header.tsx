@@ -91,7 +91,9 @@ export default function Header({
 
   const handleFolderChange = useCallback((value: string) => {
     setOutputFolder(value);
-    urlEditedByUser.current = false;
+    // Do NOT reset urlEditedByUser here: if the user has typed their own URL
+    // and then adjusts the folder path, their URL should remain intact.
+    // The guard resets only on Browse success (explicit fresh-folder navigation).
   }, []);
 
   const handleUrlChange = useCallback((value: string) => {
