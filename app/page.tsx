@@ -188,6 +188,14 @@ export default function Page() {
     if (url) handleIngest(url, folder);
   }, [handleIngest]);
 
+  // Called by Header when Browse picks a new folder — re-fetches videos so
+  // currentPlaylistUrl is loaded from the folder's playlist-index.json, which
+  // then auto-fills the URL field via the currentPlaylistUrl prop.
+  const handleFolderChange = useCallback((folder: string) => {
+    const { col, order } = sortRef.current;
+    fetchVideos(folder, col, order);
+  }, [fetchVideos]);
+
   const handleCancel = useCallback(async () => {
     const jobId = ingestJobIdRef.current;
     if (!jobId) return;
@@ -281,6 +289,7 @@ export default function Page() {
         currentPlaylistUrl={currentPlaylistUrl}
         onIngest={handleIngest}
         onSync={handleSync}
+        onFolderChange={handleFolderChange}
         disabled={ingest.status === 'running'}
       />
 

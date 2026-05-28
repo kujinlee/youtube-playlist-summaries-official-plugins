@@ -9,6 +9,7 @@ interface HeaderProps {
   currentPlaylistUrl?: string;
   onIngest: (playlistUrl: string, outputFolder: string) => void;
   onSync?: (folder: string, playlistUrl: string) => void;
+  onFolderChange?: (folder: string) => void;
   disabled?: boolean;
 }
 
@@ -18,6 +19,7 @@ export default function Header({
   currentPlaylistUrl,
   onIngest,
   onSync,
+  onFolderChange,
   disabled = false,
 }: HeaderProps) {
   const [playlistUrl, setPlaylistUrl] = useState('');
@@ -89,11 +91,12 @@ export default function Header({
       if (data.folderPath) {
         setOutputFolder(data.folderPath);
         urlEditedByUser.current = false; // browsing a new folder resets the guard
+        onFolderChange?.(data.folderPath); // notify page.tsx to re-fetch metadata
       }
     } catch {
       // silently ignore — folder input unchanged
     }
-  }, []);
+  }, [onFolderChange]);
 
   const handleFolderChange = useCallback((value: string) => {
     setOutputFolder(value);
