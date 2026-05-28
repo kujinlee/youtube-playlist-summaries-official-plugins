@@ -113,4 +113,73 @@ describe('GET /api/videos', () => {
     const body = await res.json();
     expect(body.playlistUrl).toBe('https://youtube.com/playlist?list=PLtest');
   });
+
+  describe('sort by videoPublishedAt', () => {
+    it('sorts by videoPublishedAt ascending (oldest first)', async () => {
+      mockReadIndex.mockReturnValue(makeIndex([
+        { ...makeVideo('vid1', 3), videoPublishedAt: '2025-03-01T00:00:00.000Z' },
+        { ...makeVideo('vid2', 3), videoPublishedAt: '2024-11-12T00:00:00.000Z' },
+        { ...makeVideo('vid3', 3), videoPublishedAt: '2025-01-20T00:00:00.000Z' },
+      ]));
+      const res = await get({ sortColumn: 'videoPublishedAt', sortOrder: 'asc' });
+      const { videos } = await res.json();
+      expect(videos.map((v: Video) => v.id)).toEqual(['vid2', 'vid3', 'vid1']);
+    });
+
+    it('sorts by videoPublishedAt descending (newest first)', async () => {
+      mockReadIndex.mockReturnValue(makeIndex([
+        { ...makeVideo('vid1', 3), videoPublishedAt: '2025-03-01T00:00:00.000Z' },
+        { ...makeVideo('vid2', 3), videoPublishedAt: '2024-11-12T00:00:00.000Z' },
+        { ...makeVideo('vid3', 3), videoPublishedAt: '2025-01-20T00:00:00.000Z' },
+      ]));
+      const res = await get({ sortColumn: 'videoPublishedAt', sortOrder: 'desc' });
+      const { videos } = await res.json();
+      expect(videos.map((v: Video) => v.id)).toEqual(['vid1', 'vid3', 'vid2']);
+    });
+
+    it('sorts videos with missing videoPublishedAt to the bottom (asc)', async () => {
+      mockReadIndex.mockReturnValue(makeIndex([
+        { ...makeVideo('vid1', 3), videoPublishedAt: '2025-01-01T00:00:00.000Z' },
+        { ...makeVideo('vid2', 3) }, // no date
+        { ...makeVideo('vid3', 3), videoPublishedAt: '2024-06-01T00:00:00.000Z' },
+      ]));
+      const res = await get({ sortColumn: 'videoPublishedAt', sortOrder: 'asc' });
+      const { videos } = await res.json();
+      expect(videos.map((v: Video) => v.id)).toEqual(['vid3', 'vid1', 'vid2']);
+    });
+
+    it('sorts videos with missing videoPublishedAt to the bottom (desc)', async () => {
+      mockReadIndex.mockReturnValue(makeIndex([
+        { ...makeVideo('vid1', 3), videoPublishedAt: '2025-01-01T00:00:00.000Z' },
+        { ...makeVideo('vid2', 3) }, // no date
+        { ...makeVideo('vid3', 3), videoPublishedAt: '2024-06-01T00:00:00.000Z' },
+      ]));
+      const res = await get({ sortColumn: 'videoPublishedAt', sortOrder: 'desc' });
+      const { videos } = await res.json();
+      expect(videos.map((v: Video) => v.id)).toEqual(['vid1', 'vid3', 'vid2']);
+    });
+  });
+
+  describe('sort by addedToPlaylistAt', () => {
+    it('sorts by addedToPlaylistAt descending (newest first)', async () => {
+      mockReadIndex.mockReturnValue(makeIndex([
+        { ...makeVideo('vid1', 3), addedToPlaylistAt: '2025-04-01T00:00:00.000Z' },
+        { ...makeVideo('vid2', 3), addedToPlaylistAt: '2025-01-15T00:00:00.000Z' },
+        { ...makeVideo('vid3', 3), addedToPlaylistAt: '2025-06-10T00:00:00.000Z' },
+      ]));
+      const res = await get({ sortColumn: 'addedToPlaylistAt', sortOrder: 'desc' });
+      const { videos } = await res.json();
+      expect(videos.map((v: Video) => v.id)).toEqual(['vid3', 'vid1', 'vid2']);
+    });
+
+    it('sorts videos with missing addedToPlaylistAt to the bottom (desc)', async () => {
+      mockReadIndex.mockReturnValue(makeIndex([
+        { ...makeVideo('vid1', 3), addedToPlaylistAt: '2025-04-01T00:00:00.000Z' },
+        { ...makeVideo('vid2', 3) }, // no date
+      ]));
+      const res = await get({ sortColumn: 'addedToPlaylistAt', sortOrder: 'desc' });
+      const { videos } = await res.json();
+      expect(videos.map((v: Video) => v.id)).toEqual(['vid1', 'vid2']);
+    });
+  });
 });

@@ -27,6 +27,14 @@ function sortVideos(videos: Video[], column: SortColumn, order: SortOrder): Vide
     } else if (column === 'playlistIndex') {
       aVal = a.playlistIndex ?? 0;
       bVal = b.playlistIndex ?? 0;
+    } else if (column === 'videoPublishedAt' || column === 'addedToPlaylistAt') {
+      const aDate = a[column];
+      const bDate = b[column];
+      if (!aDate && !bDate) return 0;
+      if (!aDate) return 1;  // nulls always to bottom
+      if (!bDate) return -1;
+      const cmp = aDate.localeCompare(bDate);
+      return order === 'asc' ? cmp : -cmp;
     } else {
       aVal = a.ratings[column as keyof typeof a.ratings];
       bVal = b.ratings[column as keyof typeof b.ratings];
