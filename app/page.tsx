@@ -184,9 +184,9 @@ export default function Page() {
     [fetchVideos, outputFolder],
   );
 
-  const handleSync = useCallback((folder: string) => {
-    if (currentPlaylistUrl) handleIngest(currentPlaylistUrl, folder);
-  }, [handleIngest, currentPlaylistUrl]);
+  const handleSync = useCallback((folder: string, url: string) => {
+    if (url) handleIngest(url, folder);
+  }, [handleIngest]);
 
   const handleCancel = useCallback(async () => {
     const jobId = ingestJobIdRef.current;
@@ -278,9 +278,9 @@ export default function Page() {
       <Header
         defaultOutputFolder={outputFolder}
         baseOutputFolder={baseOutputFolder}
+        currentPlaylistUrl={currentPlaylistUrl}
         onIngest={handleIngest}
         onSync={handleSync}
-        syncEnabled={!!currentPlaylistUrl}
         disabled={ingest.status === 'running'}
       />
 
