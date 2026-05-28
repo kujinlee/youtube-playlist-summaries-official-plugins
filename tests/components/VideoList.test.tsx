@@ -176,11 +176,11 @@ describe('VideoList — sort column headers', () => {
     );
   }
 
-  it('renders 11 sort buttons in the column header row when onSort is provided', () => {
+  it('renders 13 sort buttons in the column header row when onSort is provided', () => {
     renderWithSort();
     const headers = screen.getAllByRole('columnheader');
     const sortableHeaders = headers.filter((th) => th.querySelector('button') !== null);
-    expect(sortableHeaders).toHaveLength(11);
+    expect(sortableHeaders).toHaveLength(13);
   });
 
   it('clicking # column calls onSort("playlistIndex", "asc") when unsorted', () => {
@@ -249,6 +249,34 @@ describe('VideoList — sort column headers', () => {
     renderWithSort({ sortColumn: 'overall', sortOrder: 'asc' });
     const titleBtn = screen.getByRole('button', { name: 'Title' });
     expect(titleBtn.textContent).not.toMatch(/[↑↓]/);
+  });
+
+  it('first click on Published calls onSort("videoPublishedAt", "desc")', () => {
+    const onSort = jest.fn();
+    renderWithSort({ onSort });
+    fireEvent.click(screen.getByRole('button', { name: /published on youtube/i }));
+    expect(onSort).toHaveBeenCalledWith('videoPublishedAt', 'desc');
+  });
+
+  it('first click on Added calls onSort("addedToPlaylistAt", "desc")', () => {
+    const onSort = jest.fn();
+    renderWithSort({ onSort });
+    fireEvent.click(screen.getByRole('button', { name: /added to playlist/i }));
+    expect(onSort).toHaveBeenCalledWith('addedToPlaylistAt', 'desc');
+  });
+
+  it('clicking active Published (desc) calls onSort with asc', () => {
+    const onSort = jest.fn();
+    renderWithSort({ sortColumn: 'videoPublishedAt', sortOrder: 'desc', onSort });
+    fireEvent.click(screen.getByRole('button', { name: /published on youtube/i }));
+    expect(onSort).toHaveBeenCalledWith('videoPublishedAt', 'asc');
+  });
+
+  it('first click on non-date column (Title) still calls onSort with asc', () => {
+    const onSort = jest.fn();
+    renderWithSort({ onSort });
+    fireEvent.click(screen.getByRole('button', { name: /^title$/i }));
+    expect(onSort).toHaveBeenCalledWith('name', 'asc');
   });
 
   it('column headers are plain text (no buttons) when onSort is not provided', () => {

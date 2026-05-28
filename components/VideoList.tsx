@@ -20,6 +20,8 @@ const COLUMNS: { key: SortColumn; label: string; fullName: string; align: 'left'
   { key: 'language', label: 'Lang', fullName: 'Language', align: 'left' },
   { key: 'videoType', label: 'Type', fullName: 'Type', align: 'left' },
   { key: 'audience', label: 'Audience', fullName: 'Audience', align: 'left' },
+  { key: 'videoPublishedAt', label: 'Published', fullName: 'Published on YouTube', align: 'left' },
+  { key: 'addedToPlaylistAt', label: 'Added', fullName: 'Added to playlist', align: 'left' },
   { key: 'usefulness', label: 'USE', fullName: 'Usefulness', align: 'right' },
   { key: 'depth', label: 'DPT', fullName: 'Depth', align: 'right' },
   { key: 'originality', label: 'ORI', fullName: 'Originality', align: 'right' },
@@ -27,6 +29,8 @@ const COLUMNS: { key: SortColumn; label: string; fullName: string; align: 'left'
   { key: 'completeness', label: 'CMP', fullName: 'Completeness', align: 'right' },
   { key: 'overall', label: 'OVR', fullName: 'Overall', align: 'right' },
 ];
+
+const DATE_COLS: SortColumn[] = ['videoPublishedAt', 'addedToPlaylistAt'];
 
 const TH = 'px-3 py-2 text-xs font-medium uppercase';
 
@@ -46,7 +50,14 @@ export default function VideoList({
 
   function handleHeaderClick(col: SortColumn) {
     if (!onSort) return;
-    const nextOrder: SortOrder = col === sortColumn && sortOrder === 'asc' ? 'desc' : 'asc';
+    let nextOrder: SortOrder;
+    if (col === sortColumn) {
+      nextOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+    } else if (DATE_COLS.includes(col)) {
+      nextOrder = 'desc';
+    } else {
+      nextOrder = 'asc';
+    }
     onSort(col, nextOrder);
   }
 
