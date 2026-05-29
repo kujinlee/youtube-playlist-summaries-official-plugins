@@ -66,7 +66,7 @@ The callback chain: `Page` → `VideoList` → `VideoRow` → `StarRating` / `No
 
 **Security / threat model:** This is a local single-user app with no network exposure by design. No authentication beyond `assertOutputFolder` + `assertVideoId` path guards is applied — consistent with all other write routes (archive, deep-dive). Same-origin CSRF protection is not needed for a localhost-only app.
 
-**Concurrency:** `updateVideoFields` uses a read-modify-write pattern shared by all write routes in this app. Concurrent saves from the same browser session are extremely unlikely for a single user; no locking is added now. See [ADR 0001](../adr/0001-no-locking-on-index-writes.md) — this must be revisited before team or multi-user deployment.
+**Concurrency:** `updateVideoFields` uses a read-modify-write pattern shared by all write routes in this app. Concurrent saves from the same browser session are extremely unlikely for a single user; no locking is added now. See [ADR-005](../../ADR.md#adr-005-no-locking-on-playlist-indexjson-writes) — this must be revisited before team or multi-user deployment.
 
 **Response table:**
 
@@ -259,7 +259,7 @@ First click on `My Score` header → descending (highest personal score first).
 - Exporting annotations
 - Sharing annotations across devices
 - Integration of personal score into the `overallScore` calculation (overallScore remains AI-only)
-- Concurrency locking — see [ADR 0001](../adr/0001-no-locking-on-index-writes.md) for the full analysis and migration path before team deployment
+- Concurrency locking — see [ADR-005](../../ADR.md#adr-005-no-locking-on-playlist-indexjson-writes) for the full analysis and migration path before team deployment
 
 ## Files Changed
 

@@ -162,3 +162,41 @@ If interface drift between layers becomes a recurring source of bugs, consider
 adding contract tests (e.g. using a shared Zod schema as the source of truth
 between the route handler and the component mock). The existing `types/index.ts`
 Zod schemas partially address this already.
+
+---
+
+## ADR-005: No locking on playlist-index.json writes
+
+**Status:** Accepted (single-user local use) — revisit before team deployment
+
+**Date:** 2026-05-28
+
+**Context:**
+Every write operation in this app (ingestion, archive, deep-dive, personal review) follows the same read-modify-write pattern against `playlist-index.json`:
+
+```
+readIndex()  →  modify in memory  →  writeIndex() (atomic rename via .tmp)
+```
+
+The `writeIndex` step is atomic at the filesystem level (rename is atomic on POSIX), so a write will never produce a corrupt or partially-written file. However, the **read-modify-write sequence as a whole is not atomic**. If two concurrent requests read the same index, modify different fields, and write back, the second write silently overwrites the first:
+
+```
+Request A: reads index  →  sets video 1 personalScore=4  →  writes
+Request B: reads index  →  sets video 2 personalScore=5  →  writes
+                                                            ↑ A's change is lost
+```
+
+Affected routes: `POST /ingest`, `POST /videos/[id]/archive`, `POST /videos/[id]/deep-dive`, `POST /videos/[id]/review` — any route that calls `upsertVideo`, `updateVideoFields`, or `writeIndex` directly.
+
+**Decision:**
+No locking is added at this time. The app is a single-user local tool. The race window is a few milliseconds, and losing an annotation or archive flag requires two writes to the same playlist index to interleave within that window — practically impossible for one person at one keyboard. Adding per-`outputFolder` file locking now would add a dependency, complicate every write route, and introduce lock-timeout failure modes.
+
+**Unsafe today:** same playlist open in multiple tabs writing simultaneously; background ingestion running while user archives/reviews in the UI.
+
+**Before team/multi-user deployment:** choose one of —
+- **Option A (recommended):** per-`outputFolder` async file lock (`proper-lockfile`) — low risk, no schema changes
+- **Option B:** optimistic concurrency with a `version` field in `PlaylistIndex` — `409 Conflict` on stale write, client retries
+- **Option C:** replace `playlist-index.json` with SQLite — right answer if the app becomes a team tool
+
+**When to revisit:**
+When the app will be served to more than one user simultaneously, background ingestion will run on a server, or the same playlist will be accessible from multiple devices.
