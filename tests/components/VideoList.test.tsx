@@ -11,24 +11,25 @@ jest.mock('@/components/VideoRow', () => {
     outputFolder,
     onDeepDive,
     onArchive,
+    dimUnscored,
+    onAnnotationChange,
   }: {
     video: Video;
     rank: number;
     outputFolder: string;
     baseOutputFolder: string;
+    dimUnscored: boolean;
     onDeepDive: (videoId: string) => void;
     onArchive: (videoId: string, action: 'archive' | 'unarchive') => void;
+    onAnnotationChange: (videoId: string, patch: unknown) => void;
   }) => (
-    <tr
-      data-testid="video-row"
-      data-video-id={video.id}
-      data-rank={rank}
-      data-output-folder={outputFolder}
-      onClick={() => {
-        onDeepDive(video.id);
-        onArchive(video.id, 'archive');
-      }}
-    />
+    <tr data-testid={`row-${video.id}`} data-dim={String(dimUnscored)}>
+      <td>{rank}</td>
+      <td>{outputFolder}</td>
+      <td><button onClick={() => onDeepDive(video.id)}>deep-dive</button></td>
+      <td><button onClick={() => onArchive(video.id, 'archive')}>archive</button></td>
+      <td><button onClick={() => onAnnotationChange(video.id, { personalScore: 4 })}>annotate</button></td>
+    </tr>
   );
   MockVideoRow.displayName = 'MockVideoRow';
   return MockVideoRow;
@@ -52,6 +53,8 @@ const makeVideo = (id: string, archived = false): Video => ({
   processedAt: '2024-01-01T00:00:00.000Z',
 });
 
+const baseVideo = makeVideo('base-v1');
+
 function renderList({
   videos = [] as Video[],
   showArchive = false,
@@ -73,41 +76,46 @@ function renderList({
 describe('VideoList — core rendering', () => {
   it('renders one VideoRow per non-archived video', () => {
     renderList({ videos: [makeVideo('v1'), makeVideo('v2')] });
-    expect(screen.getAllByTestId('video-row')).toHaveLength(2);
+    expect(screen.getByTestId('row-v1')).toBeInTheDocument();
+    expect(screen.getByTestId('row-v2')).toBeInTheDocument();
   });
 
   it('renders nothing when videos array is empty', () => {
     const { container } = renderList({ videos: [] });
-    expect(screen.queryByTestId('video-row')).toBeNull();
+    expect(container.querySelector('[data-testid^="row-"]')).toBeNull();
     expect(container.querySelector('table')).toBeNull();
   });
 
   it('passes video and outputFolder props through to VideoRow (prop-forwarding)', () => {
     renderList({ videos: [makeVideo('v1')] });
-    const row = screen.getByTestId('video-row');
-    expect(row).toHaveAttribute('data-video-id', 'v1');
-    expect(row).toHaveAttribute('data-output-folder', OUTPUT_FOLDER);
+    // outputFolder is rendered as text in the second <td> of the mock row
+    expect(screen.getByTestId('row-v1')).toBeInTheDocument();
+    expect(screen.getByTestId('row-v1')).toHaveTextContent(OUTPUT_FOLDER);
   });
 
   it('passes 1-indexed rank to each VideoRow', () => {
     renderList({ videos: [makeVideo('v1'), makeVideo('v2'), makeVideo('v3')] });
-    const rows = screen.getAllByTestId('video-row');
-    expect(rows[0]).toHaveAttribute('data-rank', '1');
-    expect(rows[1]).toHaveAttribute('data-rank', '2');
-    expect(rows[2]).toHaveAttribute('data-rank', '3');
+    const rows = [
+      screen.getByTestId('row-v1'),
+      screen.getByTestId('row-v2'),
+      screen.getByTestId('row-v3'),
+    ];
+    expect(rows[0]).toHaveTextContent('1');
+    expect(rows[1]).toHaveTextContent('2');
+    expect(rows[2]).toHaveTextContent('3');
   });
 
   it('threads onDeepDive callback to VideoRow (prop-forwarding)', () => {
     const onDeepDive = jest.fn();
     renderList({ videos: [makeVideo('v1')], onDeepDive });
-    screen.getByTestId('video-row').click();
+    fireEvent.click(screen.getByRole('button', { name: /deep-dive/i }));
     expect(onDeepDive).toHaveBeenCalledWith('v1');
   });
 
   it('threads onArchive callback to VideoRow (prop-forwarding)', () => {
     const onArchive = jest.fn();
     renderList({ videos: [makeVideo('v1')], onArchive });
-    screen.getByTestId('video-row').click();
+    fireEvent.click(screen.getByRole('button', { name: /archive/i }));
     expect(onArchive).toHaveBeenCalledWith('v1', 'archive');
   });
 });
@@ -115,20 +123,19 @@ describe('VideoList — core rendering', () => {
 describe('VideoList — archive filtering (showArchive=false)', () => {
   it('hides archived rows by default', () => {
     const { container } = renderList({ videos: [makeVideo('a1', true)] });
-    expect(screen.queryByTestId('video-row')).toBeNull();
+    expect(screen.queryByTestId('row-a1')).toBeNull();
     expect(container.querySelector('table')).toBeNull();
   });
 
   it('shows non-archived rows when an archived row is also present', () => {
     renderList({ videos: [makeVideo('a1', true), makeVideo('v1', false)] });
-    const rows = screen.getAllByTestId('video-row');
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toHaveAttribute('data-video-id', 'v1');
+    expect(screen.queryByTestId('row-a1')).toBeNull();
+    expect(screen.getByTestId('row-v1')).toBeInTheDocument();
   });
 
   it('renders nothing when all videos are archived', () => {
     const { container } = renderList({ videos: [makeVideo('a1', true), makeVideo('a2', true)] });
-    expect(screen.queryByTestId('video-row')).toBeNull();
+    expect(screen.queryByTestId('row-a1')).toBeNull();
     expect(container.querySelector('table')).toBeNull();
   });
 });
@@ -137,23 +144,22 @@ describe('VideoList — playlistIndex rank', () => {
   it('passes playlistIndex as rank when video has playlistIndex set', () => {
     const video = { ...makeVideo('v1'), playlistIndex: 41 };
     renderList({ videos: [video] });
-    expect(screen.getByTestId('video-row')).toHaveAttribute('data-rank', '41');
+    // rank=41 is rendered as text in the first <td> of the mock row
+    expect(screen.getByTestId('row-v1')).toHaveTextContent('41');
   });
 
   it('falls back to 1-indexed loop position when playlistIndex is absent', () => {
     renderList({ videos: [makeVideo('v1'), makeVideo('v2')] });
-    const rows = screen.getAllByTestId('video-row');
-    expect(rows[0]).toHaveAttribute('data-rank', '1');
-    expect(rows[1]).toHaveAttribute('data-rank', '2');
+    expect(screen.getByTestId('row-v1')).toHaveTextContent('1');
+    expect(screen.getByTestId('row-v2')).toHaveTextContent('2');
   });
 
   it('playlistIndex values are stable regardless of display order', () => {
     const v1 = { ...makeVideo('v1'), playlistIndex: 5 };
     const v2 = { ...makeVideo('v2'), playlistIndex: 2 };
     renderList({ videos: [v1, v2] });
-    const rows = screen.getAllByTestId('video-row');
-    expect(rows[0]).toHaveAttribute('data-rank', '5');
-    expect(rows[1]).toHaveAttribute('data-rank', '2');
+    expect(screen.getByTestId('row-v1')).toHaveTextContent('5');
+    expect(screen.getByTestId('row-v2')).toHaveTextContent('2');
   });
 });
 
@@ -179,11 +185,11 @@ describe('VideoList — sort column headers', () => {
     );
   }
 
-  it('renders 13 sort buttons in the column header row when onSort is provided', () => {
+  it('renders 14 sort buttons in the column header row when onSort is provided', () => {
     renderWithSort();
     const headers = screen.getAllByRole('columnheader');
     const sortableHeaders = headers.filter((th) => th.querySelector('button') !== null);
-    expect(sortableHeaders).toHaveLength(13);
+    expect(sortableHeaders).toHaveLength(14);
   });
 
   it('clicking # column calls onSort("playlistIndex", "asc") when unsorted', () => {
@@ -302,7 +308,7 @@ describe('VideoList — sort column headers', () => {
 describe('VideoList — archive visibility (showArchive=true)', () => {
   it('shows archived rows in the DOM when showArchive=true', () => {
     renderList({ videos: [makeVideo('a1', true)], showArchive: true });
-    expect(screen.getByTestId('video-row')).toBeInTheDocument();
+    expect(screen.getByTestId('row-a1')).toBeInTheDocument();
   });
 
   it('toggles archived row visibility when showArchive changes', () => {
@@ -317,7 +323,7 @@ describe('VideoList — archive visibility (showArchive=true)', () => {
         onArchive={jest.fn()}
       />,
     );
-    expect(screen.queryByTestId('video-row')).toBeNull();
+    expect(screen.queryByTestId('row-a1')).toBeNull();
 
     rerender(
       <VideoList
@@ -329,7 +335,7 @@ describe('VideoList — archive visibility (showArchive=true)', () => {
         onArchive={jest.fn()}
       />,
     );
-    expect(screen.getByTestId('video-row')).toBeInTheDocument();
+    expect(screen.getByTestId('row-a1')).toBeInTheDocument();
 
     rerender(
       <VideoList
@@ -341,6 +347,65 @@ describe('VideoList — archive visibility (showArchive=true)', () => {
         onArchive={jest.fn()}
       />,
     );
-    expect(screen.queryByTestId('video-row')).toBeNull();
+    expect(screen.queryByTestId('row-a1')).toBeNull();
+  });
+});
+
+describe('My Score and Note column headers', () => {
+  it('renders a My Score column header', () => {
+    render(<VideoList videos={[makeVideo('v1')]} outputFolder="/tmp" baseOutputFolder="/tmp"
+      showArchive={true} onDeepDive={jest.fn()} onArchive={jest.fn()} />);
+    expect(screen.getByText('My Score')).toBeInTheDocument();
+  });
+
+  it('renders a Note column header', () => {
+    render(<VideoList videos={[makeVideo('v1')]} outputFolder="/tmp" baseOutputFolder="/tmp"
+      showArchive={true} onDeepDive={jest.fn()} onArchive={jest.fn()} />);
+    expect(screen.getByText('Note')).toBeInTheDocument();
+  });
+
+  it('Note column has no sort button', () => {
+    render(<VideoList videos={[makeVideo('v1')]} outputFolder="/tmp" baseOutputFolder="/tmp"
+      showArchive={true} onDeepDive={jest.fn()} onArchive={jest.fn()}
+      onSort={jest.fn()} />);
+    // My Score has a sort button; Note does not
+    expect(screen.queryByRole('button', { name: /Note/i })).not.toBeInTheDocument();
+  });
+
+  it('first click on My Score header calls onSort with desc order', () => {
+    const onSort = jest.fn();
+    render(<VideoList videos={[makeVideo('v1')]} outputFolder="/tmp" baseOutputFolder="/tmp"
+      showArchive={true} onDeepDive={jest.fn()} onArchive={jest.fn()} onSort={onSort} />);
+    fireEvent.click(screen.getByRole('button', { name: /my score/i }));
+    expect(onSort).toHaveBeenCalledWith('personalScore', 'desc');
+  });
+});
+
+describe('dimUnscored prop forwarding', () => {
+  it('passes dimUnscored=true to VideoRow when minPersonalScore>0 and video has no score', () => {
+    const video = { ...baseVideo, personalScore: undefined };
+    render(<VideoList videos={[video]} outputFolder="/tmp" baseOutputFolder="/tmp"
+      showArchive={true} minPersonalScore={3}
+      onDeepDive={jest.fn()} onArchive={jest.fn()} />);
+    expect(screen.getByTestId(`row-${video.id}`)).toHaveAttribute('data-dim', 'true');
+  });
+
+  it('passes dimUnscored=false when minPersonalScore=0', () => {
+    const video = { ...baseVideo, personalScore: undefined };
+    render(<VideoList videos={[video]} outputFolder="/tmp" baseOutputFolder="/tmp"
+      showArchive={true} minPersonalScore={0}
+      onDeepDive={jest.fn()} onArchive={jest.fn()} />);
+    expect(screen.getByTestId(`row-${video.id}`)).toHaveAttribute('data-dim', 'false');
+  });
+});
+
+describe('onAnnotationChange forwarding', () => {
+  it('threads onAnnotationChange to VideoRow', () => {
+    const onAnnotationChange = jest.fn();
+    render(<VideoList videos={[baseVideo]} outputFolder="/tmp" baseOutputFolder="/tmp"
+      showArchive={true} onDeepDive={jest.fn()} onArchive={jest.fn()}
+      onAnnotationChange={onAnnotationChange} />);
+    fireEvent.click(screen.getByRole('button', { name: /annotate/i }));
+    expect(onAnnotationChange).toHaveBeenCalledWith(baseVideo.id, { personalScore: 4 });
   });
 });

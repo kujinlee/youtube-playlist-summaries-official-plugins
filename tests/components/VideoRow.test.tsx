@@ -30,8 +30,17 @@ const BASE_OUTPUT_FOLDER = '/Users/test/vault';
 const OUTPUT_FOLDER = BASE_OUTPUT_FOLDER; // flat: playlist lives at vault root
 
 // VideoRow renders <tr> — jsdom requires a table/tbody wrapper for correct DOM structure
-function renderRow(overrides: Partial<Video> = {}, onDeepDive = jest.fn(), onArchive = jest.fn()) {
+function renderRow(
+  overrides: Partial<Video> = {},
+  options: {
+    dimUnscored?: boolean;
+    onAnnotationChange?: jest.Mock;
+    onDeepDive?: jest.Mock;
+    onArchive?: jest.Mock;
+  } = {},
+) {
   const video = { ...baseVideo, ...overrides };
+  const onAnnotationChange = options.onAnnotationChange ?? jest.fn();
   render(
     <table>
       <tbody>
@@ -40,17 +49,19 @@ function renderRow(overrides: Partial<Video> = {}, onDeepDive = jest.fn(), onArc
           rank={1}
           outputFolder={OUTPUT_FOLDER}
           baseOutputFolder={BASE_OUTPUT_FOLDER}
-          onDeepDive={onDeepDive}
-          onArchive={onArchive}
+          dimUnscored={options.dimUnscored ?? false}
+          onDeepDive={options.onDeepDive ?? jest.fn()}
+          onArchive={options.onArchive ?? jest.fn()}
+          onAnnotationChange={onAnnotationChange}
         />
       </tbody>
     </table>,
   );
-  return { onDeepDive, onArchive, video };
+  return { onAnnotationChange, video };
 }
 
 function openMenu(overrides: Partial<Video> = {}, onDeepDive = jest.fn(), onArchive = jest.fn()) {
-  const result = renderRow(overrides, onDeepDive, onArchive);
+  const result = renderRow(overrides, { onDeepDive, onArchive });
   fireEvent.click(screen.getByRole('button', { name: /menu/i }));
   return result;
 }
@@ -216,8 +227,10 @@ describe('VideoRow', () => {
                 rank={1}
                 outputFolder={specialFolder}
                 baseOutputFolder={specialFolder}
+                dimUnscored={false}
                 onDeepDive={jest.fn()}
                 onArchive={jest.fn()}
+                onAnnotationChange={jest.fn()}
               />
             </tbody>
           </table>,
@@ -239,8 +252,10 @@ describe('VideoRow', () => {
                 rank={1}
                 outputFolder={subFolder}
                 baseOutputFolder={baseFolder}
+                dimUnscored={false}
                 onDeepDive={jest.fn()}
                 onArchive={jest.fn()}
+                onAnnotationChange={jest.fn()}
               />
             </tbody>
           </table>,
@@ -398,6 +413,33 @@ describe('VideoRow', () => {
           screen.getByRole('button', { name: /^(archive|unarchive)$/i }),
         ).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('personal review columns', () => {
+    it('renders the My Score radiogroup', () => {
+      renderRow();
+      expect(screen.getByRole('radiogroup', { name: /my score/i })).toBeInTheDocument();
+    });
+
+    it('renders the Note cell with — when personalNote is undefined', () => {
+      renderRow({ personalNote: undefined });
+      // NoteCell renders a button with text "—"
+      expect(screen.getAllByRole('button').some((btn) => btn.textContent === '—')).toBe(true);
+    });
+
+    it('applies opacity-50 to data cells when dimUnscored is true', () => {
+      renderRow({ personalScore: undefined }, { dimUnscored: true });
+      const cells = screen.getAllByRole('cell');
+      // First data cell (rank) should have opacity-50
+      expect(cells[0]).toHaveClass('opacity-50');
+    });
+
+    it('applies opacity-40 when archived, taking precedence over dimUnscored', () => {
+      renderRow({ archived: true, personalScore: undefined }, { dimUnscored: true });
+      const cells = screen.getAllByRole('cell');
+      expect(cells[0]).toHaveClass('opacity-40');
+      expect(cells[0]).not.toHaveClass('opacity-50');
     });
   });
 });

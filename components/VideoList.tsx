@@ -8,14 +8,16 @@ interface VideoListProps {
   outputFolder: string;
   baseOutputFolder: string;
   showArchive: boolean;
+  minPersonalScore?: number;
   onDeepDive: (videoId: string) => void;
   onArchive: (videoId: string, action: 'archive' | 'unarchive') => void;
+  onAnnotationChange?: (videoId: string, patch: Partial<Pick<Video, 'personalScore' | 'personalNote'>>) => void;
   sortColumn?: SortColumn | null;
   sortOrder?: SortOrder;
   onSort?: (col: SortColumn, order: SortOrder) => void;
 }
 
-const COLUMNS: { key: SortColumn; label: string; fullName: string; align: 'left' | 'right' }[] = [
+const COLUMNS: { key: SortColumn | null; label: string; fullName: string; align: 'left' | 'right' }[] = [
   { key: 'playlistIndex', label: '#', fullName: 'Playlist position', align: 'left' },
   { key: 'name', label: 'Title', fullName: 'Title', align: 'left' },
   { key: 'language', label: 'Lang', fullName: 'Language', align: 'left' },
@@ -29,9 +31,11 @@ const COLUMNS: { key: SortColumn; label: string; fullName: string; align: 'left'
   { key: 'recency', label: 'RCN', fullName: 'Recency', align: 'right' },
   { key: 'completeness', label: 'CMP', fullName: 'Completeness', align: 'right' },
   { key: 'overall', label: 'OVR', fullName: 'Overall', align: 'right' },
+  { key: 'personalScore', label: 'My Score', fullName: 'My Score', align: 'right' },
+  { key: null,            label: 'Note',     fullName: 'Note',     align: 'left'  },
 ];
 
-const DATE_COLS: SortColumn[] = ['videoPublishedAt', 'addedToPlaylistAt'];
+const DESC_FIRST_COLS: SortColumn[] = ['videoPublishedAt', 'addedToPlaylistAt', 'personalScore'];
 
 const TH = 'px-3 py-2 text-xs font-medium uppercase';
 
@@ -40,8 +44,10 @@ export default function VideoList({
   outputFolder,
   baseOutputFolder,
   showArchive,
+  minPersonalScore = 0,
   onDeepDive,
   onArchive,
+  onAnnotationChange = () => {},
   sortColumn,
   sortOrder = 'asc',
   onSort,
@@ -50,12 +56,12 @@ export default function VideoList({
 
   if (visible.length === 0) return null;
 
-  function handleHeaderClick(col: SortColumn) {
-    if (!onSort) return;
+  function handleHeaderClick(col: SortColumn | null) {
+    if (!onSort || col === null) return;
     let nextOrder: SortOrder;
     if (col === sortColumn) {
       nextOrder = sortOrder === 'asc' ? 'desc' : 'asc';
-    } else if (DATE_COLS.includes(col)) {
+    } else if (DESC_FIRST_COLS.includes(col)) {
       nextOrder = 'desc';
     } else {
       nextOrder = 'asc';
@@ -68,10 +74,11 @@ export default function VideoList({
       <thead>
         <tr className="border-b border-zinc-800">
           {COLUMNS.map(({ key, label, fullName, align }) => {
-            const isActive = key === sortColumn;
-            const arrow = isActive ? (sortOrder === 'asc' ? ' ↑' : ' ↓') : '';
+            const isActive   = key !== null && key === sortColumn;
+            const arrow      = isActive ? (sortOrder === 'asc' ? ' ↑' : ' ↓') : '';
             const alignClass = align === 'right' ? 'text-right' : 'text-left';
-            if (onSort) {
+
+            if (onSort && key !== null) {
               const dirLabel = isActive
                 ? `, sorted ${sortOrder === 'asc' ? 'ascending' : 'descending'}`
                 : '';
@@ -95,8 +102,10 @@ export default function VideoList({
                 </th>
               );
             }
+            // Non-sortable column (key === null, or onSort not provided)
+            const keyOrLabel = key ?? label;
             return (
-              <th key={key} className={`${TH} text-zinc-400 ${alignClass}`}>
+              <th key={keyOrLabel} className={`${TH} text-zinc-400 ${alignClass}`}>
                 {label}
               </th>
             );
@@ -114,8 +123,10 @@ export default function VideoList({
             rank={video.playlistIndex ?? i + 1}
             outputFolder={outputFolder}
             baseOutputFolder={baseOutputFolder}
+            dimUnscored={minPersonalScore > 0 && video.personalScore === undefined}
             onDeepDive={onDeepDive}
             onArchive={onArchive}
+            onAnnotationChange={onAnnotationChange}
           />
         ))}
       </tbody>
