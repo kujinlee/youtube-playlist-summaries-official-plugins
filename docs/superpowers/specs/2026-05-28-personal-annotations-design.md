@@ -1,15 +1,15 @@
-# Personal Annotations Design
+# Personal Review Design
 
 **Date:** 2026-05-28
 **Status:** Approved (updated after Codex adversarial review)
 
 ## Problem
 
-The app displays AI-generated ratings and scores for each video, but has no way to capture the user's own judgment about a video's value. The user wants to mark videos with a personal usefulness score and leave brief notes, then filter the list to concentrate on high-value material and skip low-value material.
+The app displays AI-generated ratings and scores for each video, but has no way to capture the user's own judgment about a video's value. The user wants to mark videos with a personal score and leave brief notes, then filter the list to concentrate on high-value material and skip low-value material.
 
 ## Solution
 
-Add two optional personal annotation fields to each video — a 1–5 personal score and a free-text note — stored in `playlist-index.json` alongside existing fields. Expose them as a `My Score` star-rating column and a `Note` column in the video table, and add a `My score ≥` filter to the filter bar.
+Add a **personal review** to each video — consisting of an optional 1–5 personal score and an optional free-text note — stored in `playlist-index.json` alongside existing fields. Expose them as a `My Score` star-rating column and a `Note` column in the video table, and add a `My score ≥` filter to the filter bar.
 
 ## Data Model
 
@@ -48,7 +48,7 @@ The callback chain: `Page` → `VideoList` → `VideoRow` → `StarRating` / `No
 
 ## API Route
 
-**`POST /api/videos/[id]/annotation`**
+**`POST /api/videos/[id]/review`**
 
 | Field | Type | Required |
 |---|---|---|
@@ -115,7 +115,7 @@ interface StarRatingProps {
 Renders in the `Note` table column.
 
 - **No note:** displays `—`
-- **Has note:** displays first 40 characters followed by `…` if longer (truncation is by UTF-16 code unit — acceptable for short notes)
+- **Has note:** displays first 25 characters followed by `…` if longer (truncation is by UTF-16 code unit — acceptable for short notes)
 - **Click anywhere on cell:** opens an absolutely-positioned popover anchored to the cell, constrained within the viewport
 
 **Popover:**
@@ -163,13 +163,13 @@ Two new `<th>` column headers added:
 
 ### `FilterBar` changes (`components/FilterBar.tsx`)
 
-New dropdown added after the existing `Score` dropdown:
+The existing `Score` dropdown is renamed to **`AI score ≥`** (was `Score`). A new `My score ≥` dropdown is added immediately after it:
 
 ```
-My score ≥  [All ▾]
+AI score ≥  [All ▾]    My score ≥  [All ▾]
 ```
 
-Options: `All` (value `0`) / `1+` / `2+` / `3+` / `4+` / `5`
+`My score ≥` options: `All` (value `0`) / `1+` / `2+` / `3+` / `4+` / `5`
 
 ### `app/page.tsx` changes
 
@@ -214,8 +214,8 @@ case 'personalScore':
 
 | Component | Link text | Full URL |
 |---|---|---|
-| StarRating | (API call, not a link) | `POST /api/videos/{id}/annotation` body: `{ outputFolder, personalScore }` |
-| NoteCell | (API call, not a link) | `POST /api/videos/{id}/annotation` body: `{ outputFolder, personalNote }` |
+| StarRating | (API call, not a link) | `POST /api/videos/{id}/review` body: `{ outputFolder, personalScore }` |
+| NoteCell | (API call, not a link) | `POST /api/videos/{id}/review` body: `{ outputFolder, personalNote }` |
 
 ## Overlay Dismissal
 
@@ -266,12 +266,12 @@ First click on `My Score` header → descending (highest personal score first).
 | File | Change |
 |---|---|
 | `types/index.ts` | Add `personalScore`, `personalNote` to `VideoSchema`; add `minPersonalScore` to `FilterState`; add `'personalScore'` to `SortColumn` |
-| `app/api/videos/[id]/annotation/route.ts` | New — POST annotation handler |
+| `app/api/videos/[id]/review/route.ts` | New — POST review handler |
 | `components/StarRating.tsx` | New — accessible 5-star radio widget |
 | `components/NoteCell.tsx` | New — truncated preview + edit popover |
 | `components/VideoRow.tsx` | Add My Score + Note columns; unified dimming logic |
 | `components/VideoList.tsx` | Add My Score (sortable) + Note (unsortable) column headers |
-| `components/FilterBar.tsx` | Add My score ≥ dropdown |
+| `components/FilterBar.tsx` | Rename "Score" label to "AI score ≥"; add "My score ≥" dropdown |
 | `app/api/videos/route.ts` | Add `personalScore` sort case (nulls last, stable) |
 | `app/page.tsx` | Add `minPersonalScore` filter + `onAnnotationChange` + `dimUnscored` prop |
 
@@ -294,7 +294,7 @@ First click on `My Score` header → descending (highest personal score first).
 | Test | Covers |
 |---|---|
 | Shows `—` when note is undefined | Empty state |
-| Shows truncated text (40 chars + `…`) when note is long | Truncation |
+| Shows truncated text (25 chars + `…`) when note is long | Truncation |
 | Click opens popover with textarea pre-filled | Popover open |
 | Cancel closes popover without calling onChange | Cancel |
 | Escape closes popover without calling onChange | Escape dismissal |
@@ -314,7 +314,7 @@ First click on `My Score` header → descending (highest personal score first).
 | Cells use opacity-50 when unscored and dimUnscored=true | New |
 | Cells use opacity-40 when archived (archived takes precedence) | New |
 
-### `tests/api/annotation.test.ts` (new)
+### `tests/api/review.test.ts` (new)
 
 | Test | Covers |
 |---|---|
