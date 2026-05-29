@@ -63,6 +63,11 @@ describe('NoteCell', () => {
       openPopover(undefined);
       expect(screen.getByRole('textbox')).toHaveValue('');
     });
+
+    it('textarea receives focus when popover opens', () => {
+      openPopover('my note');
+      expect(screen.getByRole('textbox')).toHaveFocus();
+    });
   });
 
   describe('cancel / dismiss', () => {
@@ -141,6 +146,8 @@ describe('NoteCell', () => {
       openPopover('note');
       act(() => { fireEvent.click(screen.getByRole('button', { name: /save/i })); });
       fireEvent.keyDown(window, { key: 'Escape' });
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      fireEvent.click(screen.getByTestId('note-backdrop'));
       expect(screen.getByRole('dialog')).toBeInTheDocument();
     });
   });
