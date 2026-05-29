@@ -38,6 +38,7 @@ const COLUMNS: { key: SortColumn | null; label: string; fullName: string; align:
 const DESC_FIRST_COLS: SortColumn[] = ['videoPublishedAt', 'addedToPlaylistAt', 'personalScore'];
 
 const TH = 'px-3 py-2 text-xs font-medium uppercase';
+const noop = () => {};
 
 export default function VideoList({
   videos,
@@ -47,7 +48,7 @@ export default function VideoList({
   minPersonalScore = 0,
   onDeepDive,
   onArchive,
-  onAnnotationChange = () => {},
+  onAnnotationChange = noop,
   sortColumn,
   sortOrder = 'asc',
   onSort,

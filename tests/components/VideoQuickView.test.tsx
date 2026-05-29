@@ -71,9 +71,8 @@ describe('VideoQuickView', () => {
       />,
     );
     expect(screen.queryByText('Key Takeaways')).not.toBeNull();
-    // No badge elements from empty tags
-    expect(screen.queryAllByRole('generic').filter(
-      (el) => el.className.includes('bg-zinc-700'),
-    )).toHaveLength(0);
+    // Concepts section absent when tags are empty — assert no tag text rendered
+    expect(screen.queryByText('rag')).not.toBeInTheDocument();
+    expect(screen.queryByText('llm')).not.toBeInTheDocument();
   });
 });

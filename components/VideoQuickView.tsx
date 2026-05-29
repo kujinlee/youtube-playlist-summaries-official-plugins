@@ -23,6 +23,9 @@ export default function VideoQuickView({
   tags,
   outputFolder,
 }: VideoQuickViewProps) {
+  // Initial state reflects props at mount time. This component is always unmounted
+  // and remounted by VideoRow ({isExpanded && <VideoQuickView />}), so stale-prop
+  // drift is not a concern in this usage.
   const [state, setState] = useState<QuickViewState>(
     tldr
       ? { status: 'ready', tldr, takeaways: takeaways ?? [], tags: tags ?? [] }
@@ -73,8 +76,8 @@ export default function VideoQuickView({
         <div>
           <p className="text-xs font-medium text-zinc-400 uppercase mb-1">Key Takeaways</p>
           <ul className="space-y-0.5">
-            {state.takeaways.map((t, i) => (
-              <li key={i} className="flex gap-2 text-sm text-zinc-300">
+            {state.takeaways.map((t) => (
+              <li key={t} className="flex gap-2 text-sm text-zinc-300">
                 <span className="text-zinc-500" aria-hidden="true">•</span>
                 <span>{t}</span>
               </li>

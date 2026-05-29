@@ -70,7 +70,7 @@ export default function VideoRow({ video, rank, outputFolder, baseOutputFolder, 
         <td className="px-1 py-2 w-6">
           <button
             type="button"
-            aria-label="Expand"
+            aria-label={isExpanded ? 'Collapse' : 'Expand'}
             aria-expanded={isExpanded}
             onClick={() => setIsExpanded((prev) => !prev)}
             className="text-zinc-500 hover:text-zinc-200 text-xs leading-none"
