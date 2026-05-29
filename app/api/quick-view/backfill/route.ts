@@ -21,7 +21,9 @@ export async function GET(request: Request) {
   }
 
   const index = readIndex(outputFolder);
-  const eligible = index.videos.filter((v) => v.summaryMd && !v.tldr);
+  const eligible = index.videos.filter(
+    (v): v is typeof v & { summaryMd: string } => !!v.summaryMd && !v.tldr,
+  );
   const total = eligible.length;
 
   const encoder = new TextEncoder();
@@ -41,7 +43,7 @@ export async function GET(request: Request) {
         const current = i + 1;
 
         try {
-          const mdPath = path.join(outputFolder, video.summaryMd!);
+          const mdPath = path.join(outputFolder, video.summaryMd);
           const mdContent = await fs.promises.readFile(mdPath, 'utf-8');
 
           const { tldr, takeaways } = await extractQuickView(mdContent);

@@ -2,6 +2,8 @@ jest.mock('../../lib/index-store');
 jest.mock('../../lib/gemini');
 jest.mock('../../lib/pipeline');
 jest.mock('../../lib/pdf');
+// Suppress youtube module-init side effects (GoogleApis registration) that
+// would fail in the Jest JSDOM environment without a real network context.
 jest.mock('../../lib/youtube');
 
 // Mock fs.promises methods while keeping all other fs exports intact
@@ -79,6 +81,14 @@ describe('GET /api/quick-view/backfill', () => {
     expect(res.status).toBe(400);
   });
 
+  it('returns 400 when assertOutputFolder throws', async () => {
+    mockAssertOutputFolder.mockImplementationOnce(() => {
+      throw new Error('path traversal');
+    });
+    const res = await getBackfill(OUTPUT_FOLDER);
+    expect(res.status).toBe(400);
+  });
+
   it('emits start event with total count', async () => {
     const res = await getBackfill(OUTPUT_FOLDER);
     const events = await collectSSEEvents(res);
@@ -89,7 +99,7 @@ describe('GET /api/quick-view/backfill', () => {
     const res = await getBackfill(OUTPUT_FOLDER);
     const events = await collectSSEEvents(res);
     const step = events.find((e) => e.type === 'step');
-    expect(step).toMatchObject({ type: 'step', videoId: 'vid1111111', title: 'Test Video', current: 1, total: 1 });
+    expect(step).toMatchObject({ type: 'step', videoId: 'vid1111111', title: 'Test Video', step: 'done', current: 1, total: 1 });
   });
 
   it('emits done event at end with succeeded count', async () => {

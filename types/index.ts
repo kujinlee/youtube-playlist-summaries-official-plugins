@@ -79,7 +79,7 @@ export type PlaylistIndex = z.infer<typeof PlaylistIndexSchema>;
 export const ProgressEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('start'),
-    total: z.number().int().positive().optional(),
+    total: z.number().int().nonnegative().optional(),
     log: z.string().optional(),
   }),
   z.object({
@@ -93,7 +93,7 @@ export const ProgressEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('done'),
     current: z.number().int().positive().optional(),
-    total: z.number().int().positive().optional(),
+    total: z.number().int().nonnegative().optional(),
     succeeded: z.number().int().nonnegative().optional(),
     failed: z.number().int().nonnegative().optional(),
   }),
