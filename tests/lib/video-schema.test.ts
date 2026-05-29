@@ -53,3 +53,39 @@ describe('FILTER_DEFAULTS', () => {
     expect(FILTER_DEFAULTS.minPersonalScore).toBe(0);
   });
 });
+
+describe('VideoSchema quick-view fields', () => {
+  const baseVideo = {
+    id: 'abc123XYZ01',
+    title: 'Test',
+    youtubeUrl: 'https://www.youtube.com/watch?v=abc123XYZ01',
+    language: 'en',
+    durationSeconds: 0,
+    archived: false,
+    ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
+    overallScore: 3,
+    summaryMd: null,
+    summaryPdf: null,
+    deepDiveMd: null,
+    deepDivePdf: null,
+    processedAt: '2024-01-01T00:00:00.000Z',
+  };
+
+  it('accepts a video without tldr or takeaways', () => {
+    expect(() => VideoSchema.parse(baseVideo)).not.toThrow();
+  });
+
+  it('accepts a video with tldr and takeaways', () => {
+    const v = { ...baseVideo, tldr: 'This video teaches agents.', takeaways: ['Point one', 'Point two'] };
+    const parsed = VideoSchema.parse(v);
+    expect(parsed.tldr).toBe('This video teaches agents.');
+    expect(parsed.takeaways).toEqual(['Point one', 'Point two']);
+  });
+
+  it('strips unknown fields (strict schema does not apply to Video)', () => {
+    // Video uses strip mode — unknown fields removed, not rejected
+    const v = { ...baseVideo, tldr: 'ok', unknownField: 'ignored' };
+    const parsed = VideoSchema.parse(v);
+    expect('unknownField' in parsed).toBe(false);
+  });
+});

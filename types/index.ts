@@ -62,6 +62,8 @@ export const VideoSchema = z.object({
   addedToPlaylistAt: z.string().datetime().optional(),
   personalScore: z.number().int().min(1).max(5).optional(),
   personalNote: z.string().max(500).optional(),
+  tldr: z.string().optional(),
+  takeaways: z.array(z.string()).optional(),
 });
 export type Video = z.infer<typeof VideoSchema>;
 
@@ -92,6 +94,8 @@ export const ProgressEventSchema = z.discriminatedUnion('type', [
     type: z.literal('done'),
     current: z.number().int().positive().optional(),
     total: z.number().int().positive().optional(),
+    succeeded: z.number().int().nonnegative().optional(),
+    failed: z.number().int().nonnegative().optional(),
   }),
   z.object({
     type: z.literal('error'),
@@ -114,6 +118,8 @@ export interface GeminiSummaryResponse {
   videoType?: VideoType;
   audience?: Audience;
   tags?: string[];
+  tldr?: string;
+  takeaways?: string[];
 }
 
 // --- Filter state for client-side filtering ---
