@@ -7,7 +7,7 @@ import type { Video, PlaylistIndex } from '../../types';
 const mockReadIndex = jest.mocked(indexStore.readIndex);
 const mockAssertOutputFolder = jest.mocked(indexStore.assertOutputFolder);
 
-function makeVideo(id: string, overallScore: number, title = `Video ${id}`): Video {
+function makeVideo(id: string, overallScore: number, title = `Video ${id}`, personalScore?: number): Video {
   return {
     id,
     title,
@@ -17,6 +17,7 @@ function makeVideo(id: string, overallScore: number, title = `Video ${id}`): Vid
     archived: false,
     ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
     overallScore,
+    personalScore,
     summaryMd: `${id}.md`,
     summaryPdf: `${id}.pdf`,
     deepDiveMd: null,
@@ -180,6 +181,38 @@ describe('GET /api/videos', () => {
       const res = await get({ sortColumn: 'addedToPlaylistAt', sortOrder: 'desc' });
       const { videos } = await res.json();
       expect(videos.map((v: Video) => v.id)).toEqual(['vid1', 'vid2']);
+    });
+  });
+
+  describe('sort by personalScore', () => {
+    beforeEach(() => {
+      mockReadIndex.mockReturnValue(makeIndex([
+        makeVideo('v1', 3, 'Alpha', 5),
+        makeVideo('v2', 3, 'Beta',  2),
+        makeVideo('v3', 3, 'Gamma', undefined), // unscored
+      ]));
+    });
+
+    it('sorts personalScore descending: scored videos high→low, unscored last', async () => {
+      const res = await get({ sortColumn: 'personalScore', sortOrder: 'desc' });
+      const { videos } = await res.json();
+      expect(videos.map((v: Video) => v.id)).toEqual(['v1', 'v2', 'v3']);
+    });
+
+    it('sorts personalScore ascending: scored videos low→high, unscored last', async () => {
+      const res = await get({ sortColumn: 'personalScore', sortOrder: 'asc' });
+      const { videos } = await res.json();
+      expect(videos.map((v: Video) => v.id)).toEqual(['v2', 'v1', 'v3']);
+    });
+
+    it('two unscored videos maintain stable order (both return 0)', async () => {
+      mockReadIndex.mockReturnValue(makeIndex([
+        makeVideo('v1', 3, 'Alpha', undefined),
+        makeVideo('v2', 3, 'Beta',  undefined),
+      ]));
+      const res = await get({ sortColumn: 'personalScore', sortOrder: 'asc' });
+      const { videos } = await res.json();
+      expect(videos.map((v: Video) => v.id)).toEqual(['v1', 'v2']); // stable: unchanged
     });
   });
 });

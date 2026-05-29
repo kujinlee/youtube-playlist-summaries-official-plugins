@@ -35,6 +35,13 @@ function sortVideos(videos: Video[], column: SortColumn, order: SortOrder): Vide
       if (!bDate) return -1;
       const cmp = aDate.localeCompare(bDate);
       return order === 'asc' ? cmp : -cmp;
+    } else if (column === 'personalScore') {
+      // Unscored videos (undefined) always sort last, regardless of direction
+      if (a.personalScore === undefined && b.personalScore === undefined) return 0;
+      if (a.personalScore === undefined) return 1;
+      if (b.personalScore === undefined) return -1;
+      const cmp = a.personalScore - b.personalScore;
+      return order === 'asc' ? cmp : -cmp;
     } else {
       aVal = a.ratings[column as keyof typeof a.ratings];
       bVal = b.ratings[column as keyof typeof b.ratings];
