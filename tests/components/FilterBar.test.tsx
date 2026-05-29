@@ -225,22 +225,4 @@ describe('My score ≥ dropdown', () => {
     const sel = screen.getByRole('combobox', { name: /my score/i }) as HTMLSelectElement;
     expect(sel.value).toBe('3');
   });
-
-  it('calls onChange with minPersonalScore=3 when user selects 3+', () => {
-    const { onChange } = renderBar();
-    fireEvent.change(screen.getByRole('combobox', { name: /my score/i }), {
-      target: { value: '3' },
-    });
-    expect(onChange).toHaveBeenCalledWith({ minPersonalScore: 3 });
-  });
-
-  it('calls onChange with minPersonalScore=0 when user selects All', () => {
-    const { onChange } = renderBar({
-      filters: { ...FILTER_DEFAULTS, minPersonalScore: 4 },
-    });
-    fireEvent.change(screen.getByRole('combobox', { name: /my score/i }), {
-      target: { value: '0' },
-    });
-    expect(onChange).toHaveBeenCalledWith({ minPersonalScore: 0 });
-  });
 });

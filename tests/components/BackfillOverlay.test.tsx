@@ -71,4 +71,21 @@ describe('BackfillOverlay', () => {
     expect(screen.getByRole('alert')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /dismiss/i })).not.toBeDisabled();
   });
+
+  it('calls onClose when Escape is pressed after done', () => {
+    const onClose = jest.fn();
+    renderOverlay(onClose);
+    act(() => { FakeEventSource.instance!.emit({ type: 'start', total: 1 }); });
+    act(() => { FakeEventSource.instance!.emit({ type: 'done', total: 1, succeeded: 1, failed: 0 }); });
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not call onClose when Escape is pressed while running', () => {
+    const onClose = jest.fn();
+    renderOverlay(onClose);
+    act(() => { FakeEventSource.instance!.emit({ type: 'start', total: 2 }); });
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });

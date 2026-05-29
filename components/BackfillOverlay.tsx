@@ -19,18 +19,52 @@ type OverlayState =
   | { status: 'done'; succeeded: number; failed: number; logs: LogEntry[] }
   | { status: 'error'; logs: LogEntry[] };
 
+const FOCUSABLE = 'button:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 export default function BackfillOverlay({ outputFolder, onClose }: BackfillOverlayProps) {
   const [state, setState] = useState<OverlayState>({ status: 'running', current: 0, total: 0, logs: [] });
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const priorFocusRef = useRef<Element | null>(null);
 
+  // Move focus into dialog on mount; restore on unmount
   useEffect(() => {
     priorFocusRef.current = document.activeElement;
-    const firstFocusable = dialogRef.current?.querySelector<HTMLElement>('button, [tabindex]');
+    const firstFocusable = dialogRef.current?.querySelector<HTMLElement>(FOCUSABLE);
     firstFocusable?.focus();
     return () => { (priorFocusRef.current as HTMLElement | null)?.focus(); };
   }, []);
 
+  const isDismissable = state.status === 'done' || state.status === 'error';
+
+  // Escape key dismissal (when dismissable)
+  useEffect(() => {
+    if (!isDismissable) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [isDismissable, onClose]);
+
+  // Tab-key focus trap: keep Tab/Shift-Tab within the dialog
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE));
+      if (focusable.length === 0) { e.preventDefault(); return; }
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      if (e.shiftKey) {
+        if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+      } else {
+        if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    };
+    dialog.addEventListener('keydown', handler);
+    return () => dialog.removeEventListener('keydown', handler);
+  }, []);
+
+  // SSE connection: subscribe to backfill progress events
   useEffect(() => {
     const url = `/api/quick-view/backfill?outputFolder=${encodeURIComponent(outputFolder)}`;
     const es = new EventSource(url);
@@ -42,28 +76,32 @@ export default function BackfillOverlay({ outputFolder, onClose }: BackfillOverl
       try { data = JSON.parse(event.data) as ProgressEvent; } catch { return; }
 
       if (data.type === 'start') {
-        setState({ status: 'running', current: 0, total: (data as any).total ?? 0, logs: [] });
+        setState({ status: 'running', current: 0, total: data.total ?? 0, logs: [] });
       } else if (data.type === 'step') {
         setState((prev) => {
-          const logs = prev.status === 'running' || prev.status === 'done'
-            ? [...prev.logs, { title: data.title ?? '', status: 'done' as const }]
-            : prev.logs;
-          return { ...prev, current: data.current ?? 0, logs } as OverlayState;
+          if (prev.status !== 'running') return prev;
+          return {
+            status: 'running',
+            current: data.current ?? 0,
+            total: prev.total,
+            logs: [...prev.logs, { title: data.title ?? '', status: 'done' }],
+          };
         });
       } else if (data.type === 'error' && data.videoId) {
         setState((prev) => {
-          const logs = (prev.status === 'running' || prev.status === 'done')
-            ? [...prev.logs, { title: data.title ?? data.videoId ?? '', status: 'error' as const, error: data.log }]
-            : prev.logs;
-          return { ...prev, logs } as OverlayState;
+          if (prev.status !== 'running') return prev;
+          return {
+            ...prev,
+            logs: [...prev.logs, { title: data.title ?? data.videoId ?? '', status: 'error', error: data.log }],
+          };
         });
       } else if (data.type === 'done') {
         terminal = true;
         es.close();
         setState((prev) => ({
           status: 'done',
-          succeeded: (data as any).succeeded ?? 0,
-          failed: (data as any).failed ?? 0,
+          succeeded: data.succeeded ?? 0,
+          failed: data.failed ?? 0,
           logs: prev.logs,
         }));
       }
@@ -83,7 +121,6 @@ export default function BackfillOverlay({ outputFolder, onClose }: BackfillOverl
     ? Math.round((state.current / state.total) * 100)
     : state.status === 'done' ? 100 : 0;
 
-  const isDismissable = state.status === 'done' || state.status === 'error';
   const logs = state.logs;
 
   return (
