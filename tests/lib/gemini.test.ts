@@ -1,4 +1,4 @@
-import { generateDeepDive, generateSummary } from '../../lib/gemini';
+import { generateDeepDive, generateSummary, extractQuickView } from '../../lib/gemini';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 jest.mock('@google/generative-ai', () => ({
@@ -236,6 +236,66 @@ describe('generateSummary', () => {
     expect(prompt).toMatch(/tags/);
     expect(prompt).toMatch(/## 1\./);
     expect(prompt).toMatch(/Conclusion/);
+  });
+});
+
+describe('generateSummary — tldr and takeaways fields', () => {
+  it('returns tldr and takeaways when Gemini includes them', async () => {
+    mockGenerateContent.mockResolvedValueOnce({
+      response: {
+        text: () => JSON.stringify({
+          summary: 'body text',
+          ratings: { usefulness: 4, depth: 3, originality: 5, recency: 4, completeness: 3 },
+          tldr: 'This video teaches AI agents.',
+          takeaways: ['Agents use tools', 'Memory matters'],
+        }),
+      },
+    });
+    const result = await generateSummary('transcript', 'en');
+    expect(result.tldr).toBe('This video teaches AI agents.');
+    expect(result.takeaways).toEqual(['Agents use tools', 'Memory matters']);
+  });
+
+  it('returns undefined tldr and takeaways when Gemini omits them', async () => {
+    mockGenerateContent.mockResolvedValueOnce({
+      response: {
+        text: () => JSON.stringify({
+          summary: 'body text',
+          ratings: { usefulness: 4, depth: 3, originality: 5, recency: 4, completeness: 3 },
+        }),
+      },
+    });
+    const result = await generateSummary('transcript', 'en');
+    expect(result.tldr).toBeUndefined();
+    expect(result.takeaways).toBeUndefined();
+  });
+});
+
+describe('extractQuickView', () => {
+  it('returns tldr and takeaways from summary markdown', async () => {
+    mockGenerateContent.mockResolvedValueOnce({
+      response: {
+        text: () => JSON.stringify({
+          tldr: 'This video explains RAG pipelines.',
+          takeaways: ['RAG improves accuracy', 'Chunking matters', 'Embeddings are key'],
+        }),
+      },
+    });
+    const result = await extractQuickView('## 1. Introduction\nSome content.');
+    expect(result.tldr).toBe('This video explains RAG pipelines.');
+    expect(result.takeaways).toHaveLength(3);
+  });
+
+  it('throws with a clear message when Gemini returns invalid JSON', async () => {
+    mockGenerateContent.mockResolvedValueOnce({
+      response: { text: () => 'not-json' },
+    });
+    await expect(extractQuickView('content')).rejects.toThrow('Gemini quick-view extraction failed');
+  });
+
+  it('throws when GEMINI_API_KEY is not set', async () => {
+    delete process.env.GEMINI_API_KEY;
+    await expect(extractQuickView('content')).rejects.toThrow('GEMINI_API_KEY is not set');
   });
 });
 
