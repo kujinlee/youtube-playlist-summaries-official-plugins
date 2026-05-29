@@ -35,6 +35,10 @@ describe('VideoSchema personal review fields', () => {
     expect(() => VideoSchema.parse({ ...minValidVideo, personalScore: 6 })).toThrow();
   });
 
+  it('rejects a non-integer personalScore (e.g. 1.5)', () => {
+    expect(() => VideoSchema.parse({ ...minValidVideo, personalScore: 1.5 })).toThrow();
+  });
+
   it('accepts personalNote up to 500 chars', () => {
     expect(() => VideoSchema.parse({ ...minValidVideo, personalNote: 'a'.repeat(500) })).not.toThrow();
   });
