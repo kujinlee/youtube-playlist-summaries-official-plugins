@@ -83,14 +83,22 @@ describe('POST /api/videos/[id]/review', () => {
     expect((await res.json()).error).toBe('personalScore must be 1–5 or null');
   });
 
+  it('returns 400 for non-string personalNote', async () => {
+    const res = await postReview(VIDEO_ID, { outputFolder: OUTPUT_FOLDER, personalNote: 42 });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe('personalNote must be a string');
+  });
+
   it('returns 400 for personalScore: 6', async () => {
     const res = await postReview(VIDEO_ID, { outputFolder: OUTPUT_FOLDER, personalScore: 6 });
     expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe('personalScore must be 1–5 or null');
   });
 
   it('returns 400 for non-integer personalScore', async () => {
     const res = await postReview(VIDEO_ID, { outputFolder: OUTPUT_FOLDER, personalScore: 3.5 });
     expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe('personalScore must be 1–5 or null');
   });
 
   it('returns 400 for personalNote over 500 chars', async () => {
