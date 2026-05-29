@@ -175,11 +175,86 @@ Changes:
 
 ---
 
+## Bulk Backfill — Existing `.md` + `.pdf` Files
+
+A one-time, user-triggered migration for videos that were ingested before the Quick Reference feature existed.
+
+### Trigger: Contextual Banner
+
+When the video list contains at least one video that has `summaryMd` but no `tldr`, a dismissible banner appears in the `FilterBar`:
+
+```
+⚡ 47 videos missing Quick Reference.  [Generate all]  ✕
+```
+
+- Clicking **Generate all** opens a progress overlay and starts the SSE stream
+- Clicking **✕** hides the banner for the session (does not run backfill)
+- Banner disappears permanently once all eligible videos are processed
+
+### New API: Bulk Backfill Stream
+
+**File:** `app/api/quick-view/backfill/route.ts`
+
+`GET /api/quick-view/backfill?outputFolder=<path>`
+
+SSE stream. Processes all videos with `summaryMd` set but `tldr` absent, in index order.
+
+**Per-video steps:**
+1. Read `summaryMd` file from disk (skip with error event if file missing)
+2. Call `gemini.extractQuickView(content)` → `{ tldr, takeaways }`
+3. Insert `[!summary]` callout block into `.md` at the correct position (after metadata line, before `---`)
+4. Write updated `.md` back to disk
+5. Call `generatePdf(updatedContent, pdfPath)` to overwrite the existing PDF (skip if `summaryPdf` is null)
+6. Update index entry with `{ tldr, takeaways }`
+
+**SSE event shapes:**
+```typescript
+{ type: 'start';    total: number }
+{ type: 'progress'; videoId: string; title: string; current: number; total: number; status: 'done' | 'error'; error?: string }
+{ type: 'complete'; succeeded: number; failed: number }
+```
+
+**Error handling:** per-video errors are reported in the stream and skipped — the batch continues.
+
+**Rate limiting:** 200ms delay between Gemini calls to avoid quota exhaustion on large playlists.
+
+### Progress Overlay
+
+**Component:** `components/BackfillOverlay.tsx` (new)
+
+Non-blocking overlay (same visual style as `DeepDiveOverlay`) showing:
+```
+Generating Quick References…  (12 / 47)
+████████░░░░░░░░░░░░  25%
+
+✓ Introduction to Agents
+✓ RAG Deep Dive
+⚠ Claude Artifacts (PDF failed — .md updated)
+…
+
+                             [Dismiss]  ← enabled only when complete/error
+```
+
+- Progress bar + per-video status list (scrollable)
+- Dismiss button enabled only after `complete` event
+- Errors shown inline (⚠) — user can see which videos had issues
+- On `complete`: banner in FilterBar is hidden
+
+### Dismissal
+
+| Component | Mechanism | Expected result |
+|-----------|-----------|-----------------|
+| `BackfillOverlay` | Click **Dismiss** (enabled after `complete`) | Overlay closes; banner hidden |
+| `BackfillOverlay` | SSE connection drops mid-run | Overlay shows error state; Retry button appears |
+
+---
+
 ## URL Contracts
 
 | Component | Endpoint | Full URL |
 |-----------|----------|---------|
-| `VideoQuickView` (fetch path) | `GET /api/videos/[id]/quick-view` | `/api/videos/[id]/quick-view?outputFolder=<path>` |
+| `VideoQuickView` (per-video fetch) | `GET /api/videos/[id]/quick-view` | `/api/videos/[id]/quick-view?outputFolder=<path>` |
+| `BackfillOverlay` (bulk stream) | `GET /api/quick-view/backfill` | `/api/quick-view/backfill?outputFolder=<path>` |
 
 ---
 
@@ -189,6 +264,8 @@ Changes:
 |-----------|-----------|-----------------|
 | `VideoRow` expanded | Click chevron (`▼→▶`) | Row collapses, `VideoQuickView` unmounts |
 | `VideoRow` expanded | Click title cell | Row collapses, `VideoQuickView` unmounts |
+| `BackfillOverlay` | Click **Dismiss** (post-complete) | Overlay closes |
+| `BackfillOverlay` | Click **✕** on FilterBar banner | Banner hidden for session; no backfill runs |
 
 ---
 
@@ -198,10 +275,13 @@ Changes:
 |------|--------|
 | `types/index.ts` | Add `tldr?`, `takeaways?` to `Video` |
 | `lib/gemini.ts` | Add fields to `generateSummary` schema; add `extractQuickView()` |
-| `lib/pipeline.ts` | Embed Quick Reference callout in `.md` template |
-| `app/api/videos/[id]/quick-view/route.ts` | Create backfill endpoint |
+| `lib/pipeline.ts` | Embed Quick Reference callout in `.md` template; add `insertQuickViewCallout(content, tldr, takeaways, tags)` helper |
+| `app/api/videos/[id]/quick-view/route.ts` | Create per-video backfill endpoint (index-only) |
+| `app/api/quick-view/backfill/route.ts` | Create bulk backfill SSE endpoint |
 | `components/VideoQuickView.tsx` | Create quick-view card component |
 | `components/VideoRow.tsx` | Add chevron, expand state, render `VideoQuickView` |
+| `components/BackfillOverlay.tsx` | Create bulk backfill progress overlay |
+| `components/FilterBar.tsx` | Add contextual backfill banner |
 
 ---
 
@@ -209,21 +289,26 @@ Changes:
 
 ### Unit
 - `lib/gemini.ts` — `extractQuickView()`: mock Gemini call, assert `{ tldr: string, takeaways: string[] }` shape
-- `lib/pipeline.ts` — markdown builder: assert Quick Reference callout present when `tldr`/`takeaways` provided; absent when missing
+- `lib/pipeline.ts` — `insertQuickViewCallout()`: assert insertion at correct position; assert idempotent (no double-insert if already present)
+- `lib/pipeline.ts` — markdown builder: assert Quick Reference callout present in new summaries with `tldr`/`takeaways`
 
 ### Component
 - `VideoQuickView`: instant render, loading state, error+retry state
 - `VideoRow`: chevron renders; click toggles expand; click title toggles expand; pre-loaded data renders without fetch
+- `BackfillOverlay`: shows progress events; Dismiss disabled during run; enabled after `complete`; error state on SSE drop
+- `FilterBar`: banner visible when eligible videos exist; hidden after dismiss; hidden after complete
 
 ### E2E
 - Expand row with pre-loaded `tldr` → card appears immediately
 - Expand row without `tldr` → loading → card appears (mock API)
 - Collapse: expand → click chevron → card disappears
+- Backfill banner visible with unprocessed videos; click Generate all → overlay appears → progress events → complete → banner hidden
 
 ---
 
 ## Backward Compatibility
 
-- Existing `.md` files: **not modified** — only new summaries get the callout block
-- Backfill writes only to the index, not to existing `.md` files
-- Videos without a `summaryMd` file: quick-view endpoint returns 404; row shows error state
+- Existing `.md` files: only modified by the explicit bulk backfill action — never touched by the per-video quick-view endpoint
+- Per-video quick-view endpoint (`/api/videos/[id]/quick-view`): updates index only; does NOT touch `.md` or `.pdf` files
+- Videos without a `summaryMd` file: skipped silently in bulk backfill; per-video endpoint returns 404
+- PDF regeneration: skipped (no error) if `summaryPdf` is null for a video
