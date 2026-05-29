@@ -54,7 +54,13 @@ export default function VideoList({
 }: VideoListProps) {
   const visible = showArchive ? videos : videos.filter((v) => !v.archived);
 
-  if (visible.length === 0) return null;
+  if (visible.length === 0) {
+    return (
+      <p className="py-12 text-center text-zinc-500 text-sm">
+        No videos to show. Try adjusting the filters or enable &quot;Show Archive&quot; to see archived videos.
+      </p>
+    );
+  }
 
   function handleHeaderClick(col: SortColumn | null) {
     if (!onSort || col === null) return;

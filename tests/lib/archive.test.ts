@@ -14,8 +14,11 @@ function makeTempDir(): string {
 }
 
 const VIDEO_ID = 'test-video-01';
+const SLUG = 'the-test-video-title';
 
-function makeVideo(id: string, archived = false): Video {
+// Files use title slugs (not videoId) matching what the pipeline writes.
+// PDFs live in a pdfs/ subdirectory.
+function makeVideo(id: string, archived = false, withDeepDive = false): Video {
   return {
     id,
     title: 'Test Video',
@@ -25,12 +28,19 @@ function makeVideo(id: string, archived = false): Video {
     archived,
     ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
     overallScore: 3,
-    summaryMd: null,
-    summaryPdf: null,
-    deepDiveMd: null,
-    deepDivePdf: null,
+    summaryMd: `${SLUG}.md`,
+    summaryPdf: `pdfs/${SLUG}.pdf`,
+    deepDiveMd: withDeepDive ? `${SLUG}-deep-dive.md` : null,
+    deepDivePdf: withDeepDive ? `pdfs/${SLUG}-deep-dive.pdf` : null,
     processedAt: new Date().toISOString(),
   };
+}
+
+// Write a file and ensure parent directories exist
+function writeFile(outputFolder: string, relPath: string, content: string): void {
+  const full = path.join(outputFolder, relPath);
+  fs.mkdirSync(path.dirname(full), { recursive: true });
+  fs.writeFileSync(full, content);
 }
 
 describe('archiveVideo', () => {
@@ -44,37 +54,50 @@ describe('archiveVideo', () => {
     fs.rmSync(outputFolder, { recursive: true, force: true });
   });
 
-  it('moves all four file types to archived/ subfolder', async () => {
+  it('moves summaryMd and summaryPdf to archived/ preserving subdirectory structure', async () => {
     upsertVideo(outputFolder, makeVideo(VIDEO_ID));
-    fs.writeFileSync(path.join(outputFolder, `${VIDEO_ID}.md`), 'summary');
-    fs.writeFileSync(path.join(outputFolder, `${VIDEO_ID}.pdf`), 'pdf');
-    fs.writeFileSync(path.join(outputFolder, `${VIDEO_ID}-deep-dive.md`), 'deep');
-    fs.writeFileSync(path.join(outputFolder, `${VIDEO_ID}-deep-dive.pdf`), 'deep-pdf');
+    writeFile(outputFolder, `${SLUG}.md`, 'summary');
+    writeFile(outputFolder, `pdfs/${SLUG}.pdf`, 'pdf');
 
     await archiveVideo(outputFolder, VIDEO_ID);
 
     const archivedDir = path.join(outputFolder, 'archived');
-    expect(fs.existsSync(path.join(archivedDir, `${VIDEO_ID}.md`))).toBe(true);
-    expect(fs.existsSync(path.join(archivedDir, `${VIDEO_ID}.pdf`))).toBe(true);
-    expect(fs.existsSync(path.join(archivedDir, `${VIDEO_ID}-deep-dive.md`))).toBe(true);
-    expect(fs.existsSync(path.join(archivedDir, `${VIDEO_ID}-deep-dive.pdf`))).toBe(true);
-    expect(fs.existsSync(path.join(outputFolder, `${VIDEO_ID}.md`))).toBe(false);
-    expect(fs.existsSync(path.join(outputFolder, `${VIDEO_ID}.pdf`))).toBe(false);
+    expect(fs.existsSync(path.join(archivedDir, `${SLUG}.md`))).toBe(true);
+    expect(fs.existsSync(path.join(archivedDir, `pdfs/${SLUG}.pdf`))).toBe(true);
+    // originals removed
+    expect(fs.existsSync(path.join(outputFolder, `${SLUG}.md`))).toBe(false);
+    expect(fs.existsSync(path.join(outputFolder, `pdfs/${SLUG}.pdf`))).toBe(false);
+  });
+
+  it('moves all four file types including deep-dive files', async () => {
+    upsertVideo(outputFolder, makeVideo(VIDEO_ID, false, true));
+    writeFile(outputFolder, `${SLUG}.md`, 'summary');
+    writeFile(outputFolder, `pdfs/${SLUG}.pdf`, 'pdf');
+    writeFile(outputFolder, `${SLUG}-deep-dive.md`, 'deep');
+    writeFile(outputFolder, `pdfs/${SLUG}-deep-dive.pdf`, 'deep-pdf');
+
+    await archiveVideo(outputFolder, VIDEO_ID);
+
+    const archivedDir = path.join(outputFolder, 'archived');
+    expect(fs.existsSync(path.join(archivedDir, `${SLUG}.md`))).toBe(true);
+    expect(fs.existsSync(path.join(archivedDir, `pdfs/${SLUG}.pdf`))).toBe(true);
+    expect(fs.existsSync(path.join(archivedDir, `${SLUG}-deep-dive.md`))).toBe(true);
+    expect(fs.existsSync(path.join(archivedDir, `pdfs/${SLUG}-deep-dive.pdf`))).toBe(true);
   });
 
   it('does not throw when only some files are present', async () => {
     upsertVideo(outputFolder, makeVideo(VIDEO_ID));
-    fs.writeFileSync(path.join(outputFolder, `${VIDEO_ID}.md`), 'summary');
+    writeFile(outputFolder, `${SLUG}.md`, 'summary');
     // no pdf, no deep-dive files
 
     await expect(archiveVideo(outputFolder, VIDEO_ID)).resolves.toBeUndefined();
 
-    expect(fs.existsSync(path.join(outputFolder, 'archived', `${VIDEO_ID}.md`))).toBe(true);
+    expect(fs.existsSync(path.join(outputFolder, 'archived', `${SLUG}.md`))).toBe(true);
   });
 
   it('sets video.archived to true in the index', async () => {
     upsertVideo(outputFolder, makeVideo(VIDEO_ID));
-    fs.writeFileSync(path.join(outputFolder, `${VIDEO_ID}.md`), 'summary');
+    writeFile(outputFolder, `${SLUG}.md`, 'summary');
 
     await archiveVideo(outputFolder, VIDEO_ID);
 
@@ -84,11 +107,20 @@ describe('archiveVideo', () => {
 
   it('creates archived/ directory if it does not exist', async () => {
     upsertVideo(outputFolder, makeVideo(VIDEO_ID));
-    fs.writeFileSync(path.join(outputFolder, `${VIDEO_ID}.md`), 'summary');
+    writeFile(outputFolder, `${SLUG}.md`, 'summary');
 
     await archiveVideo(outputFolder, VIDEO_ID);
 
     expect(fs.existsSync(path.join(outputFolder, 'archived'))).toBe(true);
+  });
+
+  it('does not throw when videoId is not in the index', async () => {
+    // No upsertVideo — videoId unknown to index; getFilePairs returns []
+    writeFile(outputFolder, `${SLUG}.md`, 'summary');
+
+    await expect(archiveVideo(outputFolder, VIDEO_ID)).resolves.toBeUndefined();
+    // File stays in place since we had no index entry to find paths from
+    expect(fs.existsSync(path.join(outputFolder, `${SLUG}.md`))).toBe(true);
   });
 });
 
@@ -103,25 +135,25 @@ describe('unarchiveVideo', () => {
     fs.rmSync(outputFolder, { recursive: true, force: true });
   });
 
-  it('moves files from archived/ back to root', async () => {
+  it('moves files from archived/ back to original locations', async () => {
     upsertVideo(outputFolder, makeVideo(VIDEO_ID));
-    fs.writeFileSync(path.join(outputFolder, `${VIDEO_ID}.md`), 'summary');
-    fs.writeFileSync(path.join(outputFolder, `${VIDEO_ID}.pdf`), 'pdf');
+    writeFile(outputFolder, `${SLUG}.md`, 'summary');
+    writeFile(outputFolder, `pdfs/${SLUG}.pdf`, 'pdf');
     await archiveVideo(outputFolder, VIDEO_ID);
 
     await unarchiveVideo(outputFolder, VIDEO_ID);
 
-    expect(fs.existsSync(path.join(outputFolder, `${VIDEO_ID}.md`))).toBe(true);
-    expect(fs.existsSync(path.join(outputFolder, `${VIDEO_ID}.pdf`))).toBe(true);
-    expect(fs.existsSync(path.join(outputFolder, 'archived', `${VIDEO_ID}.md`))).toBe(false);
-    expect(fs.existsSync(path.join(outputFolder, 'archived', `${VIDEO_ID}.pdf`))).toBe(false);
+    expect(fs.existsSync(path.join(outputFolder, `${SLUG}.md`))).toBe(true);
+    expect(fs.existsSync(path.join(outputFolder, `pdfs/${SLUG}.pdf`))).toBe(true);
+    expect(fs.existsSync(path.join(outputFolder, 'archived', `${SLUG}.md`))).toBe(false);
+    expect(fs.existsSync(path.join(outputFolder, 'archived', `pdfs/${SLUG}.pdf`))).toBe(false);
   });
 
   it('sets video.archived to false in the index', async () => {
     upsertVideo(outputFolder, makeVideo(VIDEO_ID, true));
     const archivedDir = path.join(outputFolder, 'archived');
     fs.mkdirSync(archivedDir, { recursive: true });
-    fs.writeFileSync(path.join(archivedDir, `${VIDEO_ID}.md`), 'summary');
+    writeFile(outputFolder, `archived/${SLUG}.md`, 'summary');
 
     await unarchiveVideo(outputFolder, VIDEO_ID);
 
@@ -133,7 +165,7 @@ describe('unarchiveVideo', () => {
     upsertVideo(outputFolder, makeVideo(VIDEO_ID, true));
     const archivedDir = path.join(outputFolder, 'archived');
     fs.mkdirSync(archivedDir, { recursive: true });
-    fs.writeFileSync(path.join(archivedDir, `${VIDEO_ID}.md`), 'summary');
+    writeFile(outputFolder, `archived/${SLUG}.md`, 'summary');
     // no pdf, no deep-dive
 
     await expect(unarchiveVideo(outputFolder, VIDEO_ID)).resolves.toBeUndefined();
@@ -143,27 +175,8 @@ describe('unarchiveVideo', () => {
     // No upsertVideo — videoId unknown to index
     const archivedDir = path.join(outputFolder, 'archived');
     fs.mkdirSync(archivedDir, { recursive: true });
-    fs.writeFileSync(path.join(archivedDir, `${VIDEO_ID}.md`), 'summary');
+    writeFile(outputFolder, `archived/${SLUG}.md`, 'summary');
 
     await expect(unarchiveVideo(outputFolder, VIDEO_ID)).resolves.toBeUndefined();
-  });
-});
-
-describe('archiveVideo — no-op when video not in index', () => {
-  let outputFolder: string;
-
-  beforeEach(() => {
-    outputFolder = makeTempDir();
-  });
-
-  afterEach(() => {
-    fs.rmSync(outputFolder, { recursive: true, force: true });
-  });
-
-  it('does not throw when videoId is not in the index', async () => {
-    // No upsertVideo — videoId unknown to index
-    fs.writeFileSync(path.join(outputFolder, `${VIDEO_ID}.md`), 'summary');
-
-    await expect(archiveVideo(outputFolder, VIDEO_ID)).resolves.toBeUndefined();
   });
 });
