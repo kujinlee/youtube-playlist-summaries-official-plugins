@@ -104,15 +104,16 @@ describe('VideoRow', () => {
       // context that would make the absolutely-positioned VideoMenu unclickable.
       expect(screen.getByRole('row')).not.toHaveClass('opacity-40');
       const cells = screen.getAllByRole('cell');
-      // At least the rank cell (first) should carry opacity-40
-      expect(cells[0]).toHaveClass('opacity-40');
+      // cells[0] is the chevron cell (no dim), cells[1] is the rank cell (has opacity-40)
+      expect(cells[1]).toHaveClass('opacity-40');
     });
 
     it('does not apply opacity-40 when video is not archived', () => {
       renderRow({ archived: false });
       expect(screen.getByRole('row')).not.toHaveClass('opacity-40');
       const cells = screen.getAllByRole('cell');
-      expect(cells[0]).not.toHaveClass('opacity-40');
+      // cells[1] is the rank cell
+      expect(cells[1]).not.toHaveClass('opacity-40');
     });
 
     it('renders videoType badge when videoType is set', () => {
@@ -431,15 +432,64 @@ describe('VideoRow', () => {
     it('applies opacity-50 to data cells when dimUnscored is true', () => {
       renderRow({ personalScore: undefined }, { dimUnscored: true });
       const cells = screen.getAllByRole('cell');
-      // First data cell (rank) should have opacity-50
-      expect(cells[0]).toHaveClass('opacity-50');
+      // cells[0] is the chevron cell (no dim), cells[1] is the rank cell (has opacity-50)
+      expect(cells[1]).toHaveClass('opacity-50');
     });
 
     it('applies opacity-40 when archived, taking precedence over dimUnscored', () => {
       renderRow({ archived: true, personalScore: undefined }, { dimUnscored: true });
       const cells = screen.getAllByRole('cell');
-      expect(cells[0]).toHaveClass('opacity-40');
-      expect(cells[0]).not.toHaveClass('opacity-50');
+      // cells[1] is the rank cell
+      expect(cells[1]).toHaveClass('opacity-40');
+      expect(cells[1]).not.toHaveClass('opacity-50');
+    });
+  });
+
+  describe('VideoRow — expand/collapse', () => {
+    beforeEach(() => {
+      // Provide a default fetch mock so VideoQuickView does not throw when
+      // a test expands a row that has no tldr (VideoQuickView fetches on mount).
+      global.fetch = jest.fn().mockReturnValue(new Promise(() => {}));
+    });
+
+    afterEach(() => {
+      jest.clearAllMocks();
+    });
+
+    it('renders a collapse chevron button (▶) initially', () => {
+      renderRow();
+      expect(screen.getByRole('button', { name: /expand/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /expand/i }).textContent).toBe('▶');
+    });
+
+    it('clicking chevron expands the row — shows VideoQuickView area', () => {
+      renderRow({ tldr: 'This video teaches X.', takeaways: ['Point one'], tags: ['ai'] });
+      fireEvent.click(screen.getByRole('button', { name: /expand/i }));
+      expect(screen.getByText('This video teaches X.')).toBeInTheDocument();
+    });
+
+    it('clicking chevron again collapses the row', () => {
+      renderRow({ tldr: 'This video teaches X.', takeaways: [], tags: [] });
+      const chevron = screen.getByRole('button', { name: /expand/i });
+      fireEvent.click(chevron);
+      expect(screen.getByText('This video teaches X.')).toBeInTheDocument();
+      fireEvent.click(chevron);
+      expect(screen.queryByText('This video teaches X.')).not.toBeInTheDocument();
+    });
+
+    it('chevron label changes to ▼ when expanded', () => {
+      renderRow();
+      const chevron = screen.getByRole('button', { name: /expand/i });
+      fireEvent.click(chevron);
+      expect(chevron.textContent).toBe('▼');
+    });
+
+    it('does not fetch quick-view when tldr is already present and row is expanded', () => {
+      const fetchMock = jest.fn();
+      global.fetch = fetchMock;
+      renderRow({ tldr: 'This video teaches X.', takeaways: [], tags: [] });
+      fireEvent.click(screen.getByRole('button', { name: /expand/i }));
+      expect(fetchMock).not.toHaveBeenCalled();
     });
   });
 });

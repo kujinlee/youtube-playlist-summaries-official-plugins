@@ -79,6 +79,8 @@ export default function VideoList({
     <table className="w-full border-collapse" aria-label="Video list">
       <thead>
         <tr className="border-b border-zinc-800">
+          {/* Chevron column — no label, not sortable */}
+          <th className="w-6 px-1 py-2" aria-label="Expand" />
           {COLUMNS.map(({ key, label, fullName, align }) => {
             const isActive   = key !== null && key === sortColumn;
             const arrow      = isActive ? (sortOrder === 'asc' ? ' ↑' : ' ↓') : '';
