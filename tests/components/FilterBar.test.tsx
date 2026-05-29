@@ -50,9 +50,9 @@ describe('FilterBar — rendering', () => {
     });
   });
 
-  it('renders score dropdown with All, 3.5, 4.0, 4.5 thresholds', () => {
+  it('renders AI score ≥ dropdown with All, 3.5, 4.0, 4.5 thresholds', () => {
     renderBar();
-    const sel = screen.getByRole('combobox', { name: /score/i });
+    const sel = screen.getByRole('combobox', { name: /ai score/i });
     const values = Array.from((sel as HTMLSelectElement).options).map((o) => o.value);
     expect(values).toContain('0');
     expect(values).toContain('3.5');
@@ -75,7 +75,7 @@ describe('FilterBar — rendering', () => {
     expect(screen.getByRole('combobox', { name: /language/i })).toHaveValue('ko');
     expect(screen.getByRole('combobox', { name: /type/i })).toHaveValue('Tutorial');
     expect(screen.getByRole('combobox', { name: /audience/i })).toHaveValue('Advanced');
-    expect(screen.getByRole('combobox', { name: /score/i })).toHaveValue('4');
+    expect(screen.getByRole('combobox', { name: /ai score/i })).toHaveValue('4');
   });
 });
 
@@ -124,7 +124,7 @@ describe('FilterBar — onChange callbacks', () => {
 
   it('calls onChange with minScore=3.5 when user selects 3.5+', () => {
     const { onChange } = renderBar();
-    fireEvent.change(screen.getByRole('combobox', { name: /score/i }), {
+    fireEvent.change(screen.getByRole('combobox', { name: /ai score/i }), {
       target: { value: '3.5' },
     });
     expect(onChange).toHaveBeenCalledWith({ minScore: 3.5 });
@@ -132,7 +132,7 @@ describe('FilterBar — onChange callbacks', () => {
 
   it('calls onChange with minScore=4 when user selects 4.0+', () => {
     const { onChange } = renderBar();
-    fireEvent.change(screen.getByRole('combobox', { name: /score/i }), {
+    fireEvent.change(screen.getByRole('combobox', { name: /ai score/i }), {
       target: { value: '4' },
     });
     expect(onChange).toHaveBeenCalledWith({ minScore: 4 });
@@ -140,7 +140,7 @@ describe('FilterBar — onChange callbacks', () => {
 
   it('calls onChange with minScore=4.5 when user selects 4.5+', () => {
     const { onChange } = renderBar();
-    fireEvent.change(screen.getByRole('combobox', { name: /score/i }), {
+    fireEvent.change(screen.getByRole('combobox', { name: /ai score/i }), {
       target: { value: '4.5' },
     });
     expect(onChange).toHaveBeenCalledWith({ minScore: 4.5 });
@@ -150,9 +150,61 @@ describe('FilterBar — onChange callbacks', () => {
     const { onChange } = renderBar({
       filters: { ...FILTER_DEFAULTS, minScore: 4 },
     });
-    fireEvent.change(screen.getByRole('combobox', { name: /score/i }), {
+    fireEvent.change(screen.getByRole('combobox', { name: /ai score/i }), {
       target: { value: '0' },
     });
     expect(onChange).toHaveBeenCalledWith({ minScore: 0 });
+  });
+
+  it('calls onChange with minPersonalScore=3 when user selects 3+', () => {
+    const { onChange } = renderBar();
+    fireEvent.change(screen.getByRole('combobox', { name: /my score/i }), {
+      target: { value: '3' },
+    });
+    expect(onChange).toHaveBeenCalledWith({ minPersonalScore: 3 });
+  });
+
+  it('calls onChange with minPersonalScore=0 when user selects All', () => {
+    const { onChange } = renderBar({
+      filters: { ...FILTER_DEFAULTS, minPersonalScore: 4 },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: /my score/i }), {
+      target: { value: '0' },
+    });
+    expect(onChange).toHaveBeenCalledWith({ minPersonalScore: 0 });
+  });
+});
+
+describe('My score ≥ dropdown', () => {
+  it('renders a My score ≥ dropdown with All, 1+, 2+, 3+, 4+, 5 options', () => {
+    renderBar();
+    const sel = screen.getByRole('combobox', { name: /my score/i });
+    expect(sel).toBeInTheDocument();
+    const values = Array.from((sel as HTMLSelectElement).options).map((o) => o.value);
+    expect(values).toEqual(['0', '1', '2', '3', '4', '5']);
+  });
+
+  it('reflects minPersonalScore from filters', () => {
+    renderBar({ filters: { ...FILTER_DEFAULTS, minPersonalScore: 3 } });
+    const sel = screen.getByRole('combobox', { name: /my score/i }) as HTMLSelectElement;
+    expect(sel.value).toBe('3');
+  });
+
+  it('calls onChange with minPersonalScore=3 when user selects 3+', () => {
+    const { onChange } = renderBar();
+    fireEvent.change(screen.getByRole('combobox', { name: /my score/i }), {
+      target: { value: '3' },
+    });
+    expect(onChange).toHaveBeenCalledWith({ minPersonalScore: 3 });
+  });
+
+  it('calls onChange with minPersonalScore=0 when user selects All', () => {
+    const { onChange } = renderBar({
+      filters: { ...FILTER_DEFAULTS, minPersonalScore: 4 },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: /my score/i }), {
+      target: { value: '0' },
+    });
+    expect(onChange).toHaveBeenCalledWith({ minPersonalScore: 0 });
   });
 });

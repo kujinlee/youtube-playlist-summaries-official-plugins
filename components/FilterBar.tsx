@@ -61,7 +61,7 @@ export default function FilterBar({ filters, onChange }: FilterBarProps) {
       </select>
 
       <select
-        aria-label="Score"
+        aria-label="AI score ≥"
         value={String(filters.minScore)}
         onChange={(e) => onChange({ minScore: parseFloat(e.target.value) })}
         className={SELECT_CLASS}
@@ -70,6 +70,20 @@ export default function FilterBar({ filters, onChange }: FilterBarProps) {
         <option value="3.5">3.5+</option>
         <option value="4">4.0+</option>
         <option value="4.5">4.5+</option>
+      </select>
+
+      <select
+        aria-label="My score ≥"
+        value={String(filters.minPersonalScore)}
+        onChange={(e) => onChange({ minPersonalScore: parseInt(e.target.value, 10) })}
+        className={SELECT_CLASS}
+      >
+        <option value="0">All</option>
+        <option value="1">1+</option>
+        <option value="2">2+</option>
+        <option value="3">3+</option>
+        <option value="4">4+</option>
+        <option value="5">5</option>
       </select>
     </div>
   );
