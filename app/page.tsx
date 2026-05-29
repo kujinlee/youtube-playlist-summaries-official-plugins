@@ -214,6 +214,15 @@ export default function Page() {
     setFilters((prev) => ({ ...prev, ...patch }));
   }, []);
 
+  const handleAnnotationChange = useCallback(
+    (videoId: string, patch: Partial<Pick<Video, 'personalScore' | 'personalNote'>>) => {
+      setVideos((prev) =>
+        prev.map((v) => (v.id === videoId ? { ...v, ...patch } : v)),
+      );
+    },
+    [],
+  );
+
   const handleDeepDive = useCallback(
     async (videoId: string) => {
       const title = videos.find((v) => v.id === videoId)?.title ?? '';
@@ -272,7 +281,12 @@ export default function Page() {
     .filter((v) => filters.language === 'all' || v.language === filters.language)
     .filter((v) => filters.videoType === 'all' || v.videoType === filters.videoType)
     .filter((v) => filters.audience === 'all' || v.audience === filters.audience)
-    .filter((v) => v.overallScore >= filters.minScore);
+    .filter((v) => v.overallScore >= filters.minScore)
+    .filter((v) => {
+      if (filters.minPersonalScore === 0) return true;
+      if (v.personalScore === undefined) return true; // unscored: shown dimmed, not hidden
+      return v.personalScore >= filters.minPersonalScore;
+    });
 
   // Stats computed from filtered list
   const totalVideos = filteredVideos.length;
@@ -371,6 +385,8 @@ export default function Page() {
           sortColumn={sortColumn}
           sortOrder={sortOrder}
           onSort={handleSort}
+          minPersonalScore={filters.minPersonalScore}
+          onAnnotationChange={handleAnnotationChange}
         />
       </div>
 

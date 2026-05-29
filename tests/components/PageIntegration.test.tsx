@@ -564,6 +564,50 @@ describe('Page — cancel (behavior 6d)', () => {
   });
 });
 
+describe('Page — minPersonalScore filtering (behavior 13)', () => {
+  it('hides a video whose personalScore is below minPersonalScore', async () => {
+    await renderPage([makeVideo('v1', { title: 'Low Scorer', personalScore: 2 })]);
+    await waitFor(() => screen.getByText('Low Scorer'));
+
+    const select = screen.getByRole('combobox', { name: /my score/i });
+    await act(async () => {
+      fireEvent.change(select, { target: { value: '3' } });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Low Scorer')).toBeNull();
+    });
+  });
+
+  it('shows an unscored video when minPersonalScore > 0 (shown dimmed, not hidden)', async () => {
+    await renderPage([makeVideo('v2', { title: 'No Score', personalScore: undefined })]);
+    await waitFor(() => screen.getByText('No Score'));
+
+    const select = screen.getByRole('combobox', { name: /my score/i });
+    await act(async () => {
+      fireEvent.change(select, { target: { value: '3' } });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('No Score')).toBeInTheDocument();
+    });
+  });
+
+  it('shows a video whose personalScore meets the threshold', async () => {
+    await renderPage([makeVideo('v3', { title: 'High Scorer', personalScore: 4 })]);
+    await waitFor(() => screen.getByText('High Scorer'));
+
+    const select = screen.getByRole('combobox', { name: /my score/i });
+    await act(async () => {
+      fireEvent.change(select, { target: { value: '3' } });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('High Scorer')).toBeInTheDocument();
+    });
+  });
+});
+
 describe('Page — sort persistence (behavior 12)', () => {
   it('uses current sortColumn/sortOrder when refetching after archive', async () => {
     const { fetchMock } = await renderPage([makeVideo('v1')], {
