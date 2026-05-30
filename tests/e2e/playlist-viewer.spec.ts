@@ -507,3 +507,339 @@ test.describe('playlist viewer', () => {
     expect(streamOpened).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Quick-view feature — VideoQuickView expand/collapse + backfill
+// ---------------------------------------------------------------------------
+
+test.describe('quick-view — row expand / collapse', () => {
+  // Helper: stub the per-video quick-view endpoint
+  async function stubQuickView(
+    page: import('@playwright/test').Page,
+    videoId: string,
+    body: object,
+    status = 200,
+  ) {
+    await page.route(`**/api/videos/${videoId}/quick-view**`, (route) =>
+      route.fulfill({
+        status,
+        contentType: 'application/json',
+        body: JSON.stringify(body),
+      }),
+    );
+  }
+
+  // Scenario #11: pre-loaded tldr → card appears immediately, no fetch
+  test('expand with pre-loaded tldr shows card immediately without fetch', async ({ page }) => {
+    const video = makeVideo({
+      id: 'vid-ql',
+      title: 'Quick View Video',
+      summaryMd: 'summary.md',
+      tldr: 'This video teaches RAG pipelines.',
+      takeaways: ['Chunk documents first', 'Embed then retrieve'],
+      tags: ['rag', 'llm'],
+    });
+
+    let fetchCalled = false;
+    await stubSettings(page);
+    await stubVideos(page, [video]);
+    await page.route('**/api/videos/vid-ql/quick-view**', () => { fetchCalled = true; });
+
+    await page.goto('/');
+    await expect(page.getByText('Quick View Video')).toBeVisible();
+
+    await page.getByRole('button', { name: /expand/i }).click();
+
+    // Card content appears immediately
+    await expect(page.getByText('This video teaches RAG pipelines.')).toBeVisible();
+    await expect(page.getByText('Chunk documents first')).toBeVisible();
+    // Use exact:true — Playwright text match is case-insensitive substring by default,
+    // so 'rag' would also match the tldr paragraph that contains 'RAG'.
+    await expect(page.getByText('rag', { exact: true })).toBeVisible();
+
+    // No loading spinner, no fetch
+    expect(fetchCalled).toBe(false);
+    await expect(page.getByRole('status')).not.toBeVisible();
+  });
+
+  // Scenario #12: no tldr → loading → card after fetch
+  test('expand without tldr shows loading then card after successful fetch', async ({ page }) => {
+    const video = makeVideo({
+      id: 'vid-ql2',
+      title: 'Unfilled Video',
+      summaryMd: 'summary.md',
+      // no tldr/takeaways
+    });
+
+    await stubSettings(page);
+    await stubVideos(page, [video]);
+    await stubQuickView(page, 'vid-ql2', {
+      tldr: 'This video explains embeddings.',
+      takeaways: ['Embeddings capture meaning'],
+      tags: ['nlp'],
+    });
+
+    await page.goto('/');
+    await expect(page.getByText('Unfilled Video')).toBeVisible();
+
+    await page.getByRole('button', { name: /expand/i }).click();
+
+    // Card appears after fetch resolves
+    await expect(page.getByText('This video explains embeddings.')).toBeVisible();
+    await expect(page.getByText('Embeddings capture meaning')).toBeVisible();
+    await expect(page.getByText('nlp')).toBeVisible();
+  });
+
+  // Scenario #13: no tldr → fetch fails → error state
+  test('expand without tldr shows error alert when fetch fails', async ({ page }) => {
+    const video = makeVideo({
+      id: 'vid-ql3',
+      title: 'No Summary Video',
+      summaryMd: null,
+      // no tldr
+    });
+
+    await stubSettings(page);
+    await stubVideos(page, [video]);
+    await stubQuickView(page, 'vid-ql3', { error: 'not found' }, 404);
+
+    await page.goto('/');
+    await expect(page.getByText('No Summary Video')).toBeVisible();
+
+    await page.getByRole('button', { name: /expand/i }).click();
+
+    // Next.js always renders a hidden role="alert" route-announcer div; filter by text.
+    const alert = page.getByRole('alert').filter({ hasText: /not yet generated/i });
+    await expect(alert).toBeVisible();
+  });
+
+  // Scenario #14: collapse via chevron click
+  test('clicking chevron again collapses the expanded card', async ({ page }) => {
+    const video = makeVideo({
+      id: 'vid-ql4',
+      tldr: 'This video demonstrates agents.',
+      takeaways: ['Agents plan before acting'],
+      tags: ['agents'],
+    });
+
+    await stubSettings(page);
+    await stubVideos(page, [video]);
+
+    await page.goto('/');
+    await expect(page.getByText('Test Video')).toBeVisible();
+
+    const chevron = page.getByRole('button', { name: /expand/i });
+    await chevron.click();
+    await expect(page.getByText('This video demonstrates agents.')).toBeVisible();
+
+    // Click chevron again to collapse
+    await page.getByRole('button', { name: /collapse/i }).click();
+    await expect(page.getByText('This video demonstrates agents.')).not.toBeVisible();
+  });
+
+  // Scenario #15: collapse via title cell click
+  test('clicking title cell collapses the expanded card', async ({ page }) => {
+    const video = makeVideo({
+      id: 'vid-ql5',
+      title: 'Title Toggle Video',
+      tldr: 'This video covers LangChain.',
+      takeaways: ['LangChain chains prompts'],
+      tags: ['langchain'],
+    });
+
+    await stubSettings(page);
+    await stubVideos(page, [video]);
+
+    await page.goto('/');
+    await expect(page.getByText('Title Toggle Video')).toBeVisible();
+
+    // Expand via chevron
+    await page.getByRole('button', { name: /expand/i }).click();
+    await expect(page.getByText('This video covers LangChain.')).toBeVisible();
+
+    // Collapse via title cell click
+    await page.getByText('Title Toggle Video').click();
+    await expect(page.getByText('This video covers LangChain.')).not.toBeVisible();
+  });
+});
+
+test.describe('quick-view — backfill banner', () => {
+  // Helper: stub the backfill SSE stream
+  async function stubBackfillStream(
+    page: import('@playwright/test').Page,
+    events: object[],
+  ) {
+    await page.route('**/api/quick-view/backfill**', (route) =>
+      route.fulfill({
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
+        body: sseBody(...events),
+      }),
+    );
+  }
+
+  // Scenario #16: banner visible when eligible videos exist
+  test('backfill banner visible when videos have summaryMd but no tldr', async ({ page }) => {
+    const video = makeVideo({ id: 'vid-bf1', summaryMd: 'summary.md' /* no tldr */ });
+
+    await stubSettings(page);
+    await stubVideos(page, [video]);
+
+    await page.goto('/');
+    await expect(page.getByText('Test Video')).toBeVisible();
+
+    await expect(page.getByText(/missing quick reference/i)).toBeVisible();
+    await expect(page.getByRole('button', { name: /generate all/i })).toBeVisible();
+  });
+
+  // Scenario #17: banner not visible when all videos have tldr
+  test('backfill banner absent when all videos have tldr', async ({ page }) => {
+    const video = makeVideo({
+      id: 'vid-bf2',
+      tldr: 'This video explains X.',
+      takeaways: ['Point one'],
+      tags: ['ai'],
+    });
+
+    await stubSettings(page);
+    await stubVideos(page, [video]);
+
+    await page.goto('/');
+    await expect(page.getByText('Test Video')).toBeVisible();
+
+    await expect(page.getByText(/missing quick reference/i)).not.toBeVisible();
+  });
+
+  // Scenario #18: dismiss banner (✕) hides it without calling backfill endpoint
+  test('dismissing banner (✕) hides it and does not start backfill', async ({ page }) => {
+    const video = makeVideo({ id: 'vid-bf3', summaryMd: 'summary.md' });
+
+    let backfillCalled = false;
+    await stubSettings(page);
+    await stubVideos(page, [video]);
+    await page.route('**/api/quick-view/backfill**', () => { backfillCalled = true; });
+
+    await page.goto('/');
+    await expect(page.getByText(/missing quick reference/i)).toBeVisible();
+
+    await page.getByRole('button', { name: /dismiss backfill/i }).click();
+
+    await expect(page.getByText(/missing quick reference/i)).not.toBeVisible();
+    expect(backfillCalled).toBe(false);
+  });
+
+  // Scenario #19: Generate all → overlay opens → SSE progress events shown
+  test('Generate all opens overlay and shows SSE progress', async ({ page }) => {
+    const video = makeVideo({ id: 'vid-bf4', title: 'RAG Video', summaryMd: 'summary.md' });
+
+    await stubSettings(page);
+    await stubVideos(page, [video]);
+    await stubBackfillStream(page, [
+      { type: 'start', total: 1 },
+      { type: 'step', videoId: 'vid-bf4', title: 'RAG Video', step: 'done', current: 1, total: 1 },
+      { type: 'done', total: 1, succeeded: 1, failed: 0 },
+    ]);
+
+    await page.goto('/');
+    await expect(page.getByText(/missing quick reference/i)).toBeVisible();
+
+    await page.getByRole('button', { name: /generate all/i }).click();
+
+    // Overlay dialog appears
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page.getByRole('progressbar')).toBeVisible();
+
+    // Video title appears in the log
+    await expect(page.getByRole('dialog')).toContainText('RAG Video');
+  });
+
+  // Scenario #20: Dismiss enabled after done; click closes overlay and refetches videos
+  test('Dismiss enabled after done event; closes overlay and refetches videos', async ({ page }) => {
+    const video = makeVideo({ id: 'vid-bf5', summaryMd: 'summary.md' });
+    const updatedVideo = makeVideo({ id: 'vid-bf5', tldr: 'This video teaches X.', takeaways: [], tags: [] });
+
+    await stubSettings(page);
+    let refetchCount = 0;
+    await page.route('**/api/videos**', (route) => {
+      if (route.request().method() !== 'GET' || route.request().url().includes('/api/videos/')) {
+        route.continue(); return;
+      }
+      refetchCount++;
+      const videos = refetchCount > 1 ? [updatedVideo] : [video];
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ videos }) });
+    });
+    await stubBackfillStream(page, [
+      { type: 'start', total: 1 },
+      { type: 'done', total: 1, succeeded: 1, failed: 0 },
+    ]);
+
+    await page.goto('/');
+    await page.getByRole('button', { name: /generate all/i }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+
+    // Dismiss becomes enabled after done
+    const dismissBtn = page.getByRole('dialog').getByRole('button', { name: /dismiss/i });
+    await expect(dismissBtn).not.toBeDisabled();
+
+    const callsBefore = refetchCount;
+    await dismissBtn.click();
+
+    // Overlay closes
+    await expect(page.getByRole('dialog')).not.toBeVisible();
+    // Video list refetched
+    expect(refetchCount).toBeGreaterThan(callsBefore);
+  });
+
+  // Scenario #21: Escape key dismisses overlay after done
+  // Note: "Escape while running does nothing" is covered by BackfillOverlay.test.tsx
+  // (component layer). Playwright SSE stubs deliver body atomically so the stream
+  // EOF triggers onerror immediately, making a stable "running" state untestable at E2E.
+  test('Escape key dismisses overlay after done event', async ({ page }) => {
+    const video = makeVideo({ id: 'vid-bf6', summaryMd: 'summary.md' });
+
+    await stubSettings(page);
+    await stubVideos(page, [video]);
+    await page.route('**/api/quick-view/backfill**', (route) =>
+      route.fulfill({
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
+        body: sseBody(
+          { type: 'start', total: 1 },
+          { type: 'done', total: 1, succeeded: 1, failed: 0 },
+        ),
+      }),
+    );
+
+    await page.goto('/');
+    await page.getByRole('button', { name: /generate all/i }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+
+    // Wait for done state (Dismiss enabled)
+    await expect(
+      page.getByRole('dialog').getByRole('button', { name: /dismiss/i }),
+    ).not.toBeDisabled();
+
+    // Escape closes the overlay
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).not.toBeVisible();
+  });
+
+  // Scenario #22: SSE drop → error state shown, Dismiss enabled
+  test('SSE connection drop shows error state and enables Dismiss', async ({ page }) => {
+    const video = makeVideo({ id: 'vid-bf7', summaryMd: 'summary.md' });
+
+    await stubSettings(page);
+    await stubVideos(page, [video]);
+
+    // Abort the stream to simulate a connection drop
+    await page.route('**/api/quick-view/backfill**', (route) => route.abort());
+
+    await page.goto('/');
+    await page.getByRole('button', { name: /generate all/i }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+
+    // Error alert visible inside the dialog (scoped to avoid Next.js route-announcer)
+    await expect(page.getByRole('alert').filter({ hasText: /connection lost/i })).toBeVisible();
+    await expect(page.getByRole('dialog').getByRole('button', { name: /dismiss/i })).not.toBeDisabled();
+  });
+});
