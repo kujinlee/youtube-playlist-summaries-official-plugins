@@ -8,6 +8,7 @@ interface VideoMenuProps {
   baseOutputFolder: string;
   onDeepDive: (videoId: string) => void;
   onArchive: (videoId: string, action: 'archive' | 'unarchive') => void;
+  onEditCorrections: () => void;
   onClose: () => void;
 }
 
@@ -28,7 +29,7 @@ function obsidianHref(baseOutputFolder: string, outputFolder: string, file: stri
 const itemClass = 'block w-full px-4 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-700';
 const disabledClass = 'block w-full px-4 py-2 text-left text-sm text-zinc-500 cursor-not-allowed';
 
-export default function VideoMenu({ video, outputFolder, baseOutputFolder, onDeepDive, onArchive, onClose }: VideoMenuProps) {
+export default function VideoMenu({ video, outputFolder, baseOutputFolder, onDeepDive, onArchive, onEditCorrections, onClose }: VideoMenuProps) {
   const hasDeepDive = !!video.deepDiveMd;
   const hasSummaryPdf = !!video.summaryPdf;
   const hasDeepDivePdf = !!video.deepDivePdf;
@@ -107,6 +108,17 @@ export default function VideoMenu({ video, outputFolder, baseOutputFolder, onDee
           </a>
         )}
       </li>
+      {video.summaryMd && (
+        <li role="none">
+          <button
+            type="button"
+            onClick={() => { onEditCorrections(); onClose(); }}
+            className={itemClass}
+          >
+            Edit corrections
+          </button>
+        </li>
+      )}
       <li role="none">
         <button
           type="button"

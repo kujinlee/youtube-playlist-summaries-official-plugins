@@ -1,4 +1,4 @@
-import { generateDeepDive, generateSummary, extractQuickView } from '../../lib/gemini';
+import { generateDeepDive, generateSummary, extractQuickView, fixSummary } from '../../lib/gemini';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 jest.mock('@google/generative-ai', () => ({
@@ -296,6 +296,50 @@ describe('extractQuickView', () => {
   it('throws when GEMINI_API_KEY is not set', async () => {
     delete process.env.GEMINI_API_KEY;
     await expect(extractQuickView('content')).rejects.toThrow('GEMINI_API_KEY is not set');
+  });
+});
+
+describe('fixSummary', () => {
+  const MARKDOWN = '# Title\n\n## 1. Introduction\nThis is a video about Clawcode.';
+  const CORRECTIONS = "Fix 'Clawcode' → 'Claude Code'";
+
+  it('returns corrected markdown text from Gemini', async () => {
+    const corrected = '# Title\n\n## 1. Introduction\nThis is a video about Claude Code.';
+    mockGenerateContent.mockResolvedValueOnce({
+      response: { text: () => corrected },
+    });
+    const result = await fixSummary(MARKDOWN, CORRECTIONS);
+    expect(result).toBe(corrected);
+  });
+
+  it('includes correction instructions in the prompt sent to Gemini', async () => {
+    mockGenerateContent.mockResolvedValueOnce({
+      response: { text: () => 'corrected content' },
+    });
+    await fixSummary(MARKDOWN, CORRECTIONS);
+    const [prompt] = mockGenerateContent.mock.calls[0] as [string];
+    expect(prompt).toContain(CORRECTIONS);
+    expect(prompt).toContain(MARKDOWN);
+  });
+
+  it('throws with a clear message when Gemini returns empty content', async () => {
+    mockGenerateContent.mockResolvedValueOnce({
+      response: { text: () => '' },
+    });
+    await expect(fixSummary(MARKDOWN, CORRECTIONS)).rejects.toThrow('Gemini summary fix failed');
+  });
+
+  it('wraps Gemini API errors with a clear message', async () => {
+    const apiError = new Error('network error');
+    mockGenerateContent.mockRejectedValueOnce(apiError);
+    const err = await fixSummary(MARKDOWN, CORRECTIONS).catch((e) => e);
+    expect(err.message).toMatch(/Gemini summary fix failed/);
+    expect(err.cause).toBe(apiError);
+  });
+
+  it('throws when GEMINI_API_KEY is not set', async () => {
+    delete process.env.GEMINI_API_KEY;
+    await expect(fixSummary(MARKDOWN, CORRECTIONS)).rejects.toThrow('GEMINI_API_KEY is not set');
   });
 });
 

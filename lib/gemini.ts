@@ -116,6 +116,43 @@ ${summaryMarkdown}
   }
 }
 
+/**
+ * Apply user-supplied correction instructions to an existing markdown document.
+ * Only the text is changed — headings, frontmatter, callout blocks, and
+ * section structure must be preserved. The caller is responsible for
+ * stripping any existing Quick Reference callout before calling this
+ * function, and re-inserting it afterwards.
+ */
+export async function fixSummary(
+  mdContent: string,
+  corrections: string,
+): Promise<string> {
+  const client = new GoogleGenerativeAI(getApiKey());
+  const model = client.getGenerativeModel({ model: SUMMARY_MODEL });
+
+  const prompt = `You are editing a video summary document. Apply the correction instructions below to the document and return the complete corrected document. Rules:
+- Only fix the text as instructed — do NOT add, remove, or restructure any sections
+- Preserve all markdown formatting exactly: headings, bold text, horizontal rules, frontmatter
+- Return ONLY the complete corrected document with no preamble or explanation
+
+Corrections to apply:
+${corrections}
+
+<document>
+${mdContent}
+</document>`;
+
+  try {
+    const result = await model.generateContent(prompt, { timeout: REQUEST_TIMEOUT_MS });
+    const corrected = result.response.text().trim();
+    if (!corrected) throw new Error('Gemini returned empty content');
+    return corrected;
+  } catch (err) {
+    const cause = err instanceof Error ? err.message : String(err);
+    throw new Error(`Gemini summary fix failed: ${cause}`, { cause: err });
+  }
+}
+
 export async function generateDeepDiveFromTranscript(
   transcript: string,
   language: 'en' | 'ko',

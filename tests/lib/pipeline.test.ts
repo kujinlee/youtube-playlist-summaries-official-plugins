@@ -9,7 +9,7 @@ jest.mock('../../lib/gemini');
 jest.mock('../../lib/pdf');
 jest.mock('../../lib/index-store');
 
-import { runIngestion, slugify, formatDuration, parseFrontmatterField, reconstructVideo, recoverOrphanedVideos, migrateToSlugFilenames, insertQuickViewCallout } from '../../lib/pipeline';
+import { runIngestion, slugify, formatDuration, parseFrontmatterField, reconstructVideo, recoverOrphanedVideos, migrateToSlugFilenames, insertQuickViewCallout, stripQuickViewCallout } from '../../lib/pipeline';
 import * as youtube from '../../lib/youtube';
 import * as gemini from '../../lib/gemini';
 import * as pdf from '../../lib/pdf';
@@ -897,5 +897,44 @@ describe('insertQuickViewCallout', () => {
     const noRule = '# Title\n\nsome content';
     const result = insertQuickViewCallout(noRule, 'tldr', ['pt'], ['t']);
     expect(result).toBe(noRule);
+  });
+});
+
+describe('stripQuickViewCallout', () => {
+  // Build a realistic md with callout already inserted
+  const baseWithCallout = insertQuickViewCallout(
+    '# Title\n\n**URL:** https://example.com\n\n---\n\n## 1. Section\nContent here.',
+    'This video teaches X.',
+    ['Point one', 'Point two'],
+    ['tag1', 'tag2'],
+  );
+
+  it('removes the callout block from content that has one', () => {
+    const stripped = stripQuickViewCallout(baseWithCallout);
+    expect(stripped).not.toContain('> [!summary] Quick Reference');
+    expect(stripped).not.toContain('TL;DR');
+    expect(stripped).not.toContain('Key Takeaways');
+  });
+
+  it('preserves content before and after the callout', () => {
+    const stripped = stripQuickViewCallout(baseWithCallout);
+    expect(stripped).toContain('# Title');
+    expect(stripped).toContain('**URL:** https://example.com');
+    expect(stripped).toContain('## 1. Section');
+    expect(stripped).toContain('Content here.');
+  });
+
+  it('returns content unchanged when no callout is present', () => {
+    const noCallout = '# Title\n\n**URL:** https://example.com\n\n---\n\n## 1. Section\nContent.';
+    expect(stripQuickViewCallout(noCallout)).toBe(noCallout);
+  });
+
+  it('strip + insert is a clean round-trip — callout appears exactly once', () => {
+    const stripped = stripQuickViewCallout(baseWithCallout);
+    const reinserted = insertQuickViewCallout(stripped, 'Updated TL;DR.', ['New point'], ['newtag']);
+    const matches = (reinserted.match(/> \[!summary\] Quick Reference/g) ?? []).length;
+    expect(matches).toBe(1);
+    expect(reinserted).toContain('Updated TL;DR.');
+    expect(reinserted).not.toContain('This video teaches X.');
   });
 });

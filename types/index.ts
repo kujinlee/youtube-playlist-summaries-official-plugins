@@ -64,6 +64,7 @@ export const VideoSchema = z.object({
   personalNote: z.string().max(500).optional(),
   tldr: z.string().optional(),
   takeaways: z.array(z.string()).optional(),
+  corrections: z.string().optional(),
 });
 export type Video = z.infer<typeof VideoSchema>;
 

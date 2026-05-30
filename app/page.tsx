@@ -221,7 +221,7 @@ export default function Page() {
   }, []);
 
   const handleAnnotationChange = useCallback(
-    (videoId: string, patch: Partial<Pick<Video, 'personalScore' | 'personalNote'>>) => {
+    (videoId: string, patch: Partial<Pick<Video, 'personalScore' | 'personalNote' | 'corrections' | 'tldr' | 'takeaways'>>) => {
       setVideos((prev) =>
         prev.map((v) => (v.id === videoId ? { ...v, ...patch } : v)),
       );

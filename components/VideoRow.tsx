@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import type { Video, VideoType, Audience } from '@/types';
 import Badge from './Badge';
+import CorrectionsPanel from './CorrectionsPanel';
 import VideoMenu from './VideoMenu';
 import StarRating from './StarRating';
 import NoteCell from './NoteCell';
@@ -16,7 +17,7 @@ interface VideoRowProps {
   dimUnscored: boolean;
   onDeepDive: (videoId: string) => void;
   onArchive: (videoId: string, action: 'archive' | 'unarchive') => void;
-  onAnnotationChange: (videoId: string, patch: Partial<Pick<Video, 'personalScore' | 'personalNote'>>) => void;
+  onAnnotationChange: (videoId: string, patch: Partial<Pick<Video, 'personalScore' | 'personalNote' | 'corrections' | 'tldr' | 'takeaways'>>) => void;
 }
 
 const LANG_COLOR: Record<string, string> = {
@@ -45,6 +46,7 @@ const TOTAL_COLUMNS = 16;
 export default function VideoRow({ video, rank, outputFolder, baseOutputFolder, dimUnscored, onDeepDive, onArchive, onAnnotationChange }: VideoRowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [showCorrections, setShowCorrections] = useState(false);
   const { ratings, overallScore } = video;
 
   // opacity-40 must NOT be on the <tr> — it creates a CSS stacking context that
@@ -106,6 +108,7 @@ export default function VideoRow({ video, rank, outputFolder, baseOutputFolder, 
                   baseOutputFolder={baseOutputFolder}
                   onDeepDive={onDeepDive}
                   onArchive={onArchive}
+                  onEditCorrections={() => setShowCorrections(true)}
                   onClose={() => setMenuOpen(false)}
                 />
               </div>
@@ -173,6 +176,15 @@ export default function VideoRow({ video, rank, outputFolder, baseOutputFolder, 
             />
           </td>
         </tr>
+      )}
+      {showCorrections && (
+        <CorrectionsPanel
+          videoId={video.id}
+          outputFolder={outputFolder}
+          initialCorrections={video.corrections}
+          onClose={() => setShowCorrections(false)}
+          onSuccess={(patch) => onAnnotationChange(video.id, patch)}
+        />
       )}
     </>
   );
