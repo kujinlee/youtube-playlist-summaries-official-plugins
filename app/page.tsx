@@ -194,6 +194,10 @@ export default function Page() {
   // currentPlaylistUrl is loaded from the folder's playlist-index.json, which
   // then auto-fills the URL field via the currentPlaylistUrl prop.
   const handleFolderChange = useCallback((folder: string) => {
+    // Must update outputFolder state so BackfillOverlay, sort, archive, and
+    // deep-dive all use the new folder — previously only fetchVideos was called,
+    // leaving outputFolder stale at the old playlist path.
+    setOutputFolder(folder);
     const { col, order } = sortRef.current;
     fetchVideos(folder, col, order);
   }, [fetchVideos]);
