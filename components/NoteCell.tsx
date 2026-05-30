@@ -96,7 +96,7 @@ export default function NoteCell({ videoId, outputFolder, value, onChange }: Not
           <div
             role="dialog"
             aria-label="Edit note"
-            className="absolute z-30 left-0 top-full mt-1 w-72 rounded border border-zinc-700 bg-zinc-900 p-3 shadow-lg"
+            className="absolute z-30 right-0 top-full mt-1 w-72 rounded border border-zinc-700 bg-zinc-900 p-3 shadow-lg"
           >
             <textarea
               ref={textareaRef}
