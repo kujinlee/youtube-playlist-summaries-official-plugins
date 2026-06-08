@@ -82,9 +82,3 @@ export function detectLanguage(transcript: string): 'en' | 'ko' {
   const korean = (transcript.match(/[가-힣ᄀ-ᇿ㄰-㆏]/g) ?? []).length;
   return korean / Math.max(transcript.length, 1) > 0.1 ? 'ko' : 'en';
 }
-
-export async function fetchPlaylistTitle(playlistId: string, apiKey: string): Promise<string> {
-  const yt = google.youtube({ version: 'v3', auth: apiKey });
-  const res = await yt.playlists.list({ part: ['snippet'], id: [playlistId] });
-  return res.data.items?.[0]?.snippet?.title ?? playlistId;
-}

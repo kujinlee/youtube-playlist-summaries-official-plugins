@@ -1,4 +1,4 @@
-import { detectLanguage, fetchPlaylistTitle, fetchPlaylistVideos, fetchTranscript } from '../../lib/youtube';
+import { detectLanguage, fetchPlaylistVideos, fetchTranscript } from '../../lib/youtube';
 import { google } from 'googleapis';
 import { YoutubeTranscript } from 'youtube-transcript';
 
@@ -12,14 +12,12 @@ jest.mock('youtube-transcript', () => ({
 
 const mockPlaylistItemsList = jest.fn();
 const mockVideosList = jest.fn();
-const mockPlaylistsList = jest.fn();
 
 beforeEach(() => {
   jest.clearAllMocks();
   (google.youtube as jest.Mock).mockReturnValue({
     playlistItems: { list: mockPlaylistItemsList },
     videos: { list: mockVideosList },
-    playlists: { list: mockPlaylistsList },
   });
 });
 
@@ -310,28 +308,5 @@ describe('detectLanguage', () => {
   it('returns en for mixed text below Korean threshold', () => {
     // One Korean word in a long English sentence — well below 10% ratio
     expect(detectLanguage('This is a long English sentence with one Korean word 안녕 at the end')).toBe('en');
-  });
-});
-
-describe('fetchPlaylistTitle', () => {
-  it('returns the playlist title from snippet', async () => {
-    mockPlaylistsList.mockResolvedValue({
-      data: { items: [{ snippet: { title: 'My Playlist Title' } }] },
-    });
-    const result = await fetchPlaylistTitle('PLtest123', 'fake-key');
-    expect(result).toBe('My Playlist Title');
-    expect(mockPlaylistsList).toHaveBeenCalledWith({ part: ['snippet'], id: ['PLtest123'] });
-  });
-
-  it('falls back to playlistId when items array is empty', async () => {
-    mockPlaylistsList.mockResolvedValue({ data: { items: [] } });
-    const result = await fetchPlaylistTitle('PLtest123', 'fake-key');
-    expect(result).toBe('PLtest123');
-  });
-
-  it('falls back to playlistId when snippet.title is absent', async () => {
-    mockPlaylistsList.mockResolvedValue({ data: { items: [{ snippet: {} }] } });
-    const result = await fetchPlaylistTitle('PLtest123', 'fake-key');
-    expect(result).toBe('PLtest123');
   });
 });
