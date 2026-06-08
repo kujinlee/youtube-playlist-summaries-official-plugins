@@ -306,7 +306,6 @@ export default function Page() {
     <main className="min-h-screen bg-zinc-950">
       <Header
         defaultOutputFolder={outputFolder}
-        baseOutputFolder={baseOutputFolder}
         currentPlaylistUrl={currentPlaylistUrl}
         onIngest={handleIngest}
         onSync={handleSync}

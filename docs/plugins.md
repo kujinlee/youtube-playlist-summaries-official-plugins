@@ -80,6 +80,23 @@ Both must complete before marking a task done.
 | Claude code review | `superpowers:requesting-code-review` | superpowers |
 | Adversarial review | `codex:rescue` | codex |
 
+**Codex model — resolve the current frontier dynamically, never hard-code a version.**
+OpenAI rotates frontier model names (gpt-5.3 → gpt-5.4 → gpt-5.5 → …) and removes old ones
+from the ChatGPT-account (OAuth) auth path. The codex CLI leaves `--model` unset by default and
+falls back to a slug baked into the binary, which can be a removed model → HTTP 400. So the
+adversarial review must select whatever OpenAI currently ships as frontier:
+
+```bash
+# Prints the current frontier slug from the live ~/.codex/models_cache.json (lowest priority).
+python3 scripts/codex-frontier-model.py            # e.g. gpt-5.5 today
+python3 scripts/codex-frontier-model.py --write-config   # also syncs ~/.codex/config.toml
+```
+
+Run `--write-config` to keep `~/.codex/config.toml`'s `model` in sync (it writes a managed,
+auto-derived block — do not hand-edit the slug). When dispatching the Codex review you may also
+pass it explicitly: `codex … -m "$(python3 scripts/codex-frontier-model.py)"`. Either way the
+model is derived from OpenAI's live model list, so it tracks new frontier releases automatically.
+
 **Fallback** (codex not installed): Claude review only; note the gap in the review doc and flag for manual adversarial check before merging.
 
 ### Domain Terminology Stress-Test (Phase 1)

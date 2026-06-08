@@ -168,10 +168,18 @@ describe('Header — Sync button', () => {
   });
 });
 
-describe('Header — playlist folder auto-suggestion', () => {
+describe('Header — no folder auto-suggestion', () => {
+  // The folder auto-suggest was removed: entering a playlist URL must never
+  // overwrite the output folder (it previously clobbered the settings folder
+  // with `<base>/<slug(title)>`, causing ingests to write to the wrong place).
   const BASE = '/home/user/data';
   const PLAYLIST_URL = 'https://www.youtube.com/playlist?list=PLtest123';
 
+  // Regression-bait, intentional: fake timers + a fetch mock that WOULD overwrite
+  // the folder. If anyone reintroduces the debounced auto-suggest effect,
+  // runAllTimers() fires it, fetch resolves, the folder flips to `${BASE}/my-playlist`,
+  // and both tests below fail. Removing this scaffolding would make the tests pass
+  // even with the bug reintroduced.
   beforeEach(() => {
     jest.useFakeTimers();
     global.fetch = jest.fn().mockResolvedValue({
@@ -185,54 +193,46 @@ describe('Header — playlist folder auto-suggestion', () => {
     jest.restoreAllMocks();
   });
 
-  it('auto-fills output folder with slugified title after URL change and debounce', async () => {
-    render(<Header defaultOutputFolder={BASE} baseOutputFolder={BASE} onIngest={jest.fn()} />);
+  it('does NOT overwrite the output folder when a playlist URL is entered', async () => {
+    render(<Header defaultOutputFolder={BASE} onIngest={jest.fn()} />);
 
     fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
       target: { value: PLAYLIST_URL },
     });
 
     await act(async () => { jest.runAllTimers(); });
-    await screen.findByDisplayValue(`${BASE}/my-playlist`);
+    expect(screen.getByDisplayValue(BASE)).toBeInTheDocument();
   });
 
-  it('does not change the output folder for a URL without ?list=', async () => {
-    render(<Header defaultOutputFolder={BASE} baseOutputFolder={BASE} onIngest={jest.fn()} />);
+  it('does NOT fetch /api/playlist-info when a playlist URL is entered', async () => {
+    render(<Header defaultOutputFolder={BASE} onIngest={jest.fn()} />);
 
     fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
-      target: { value: 'https://example.com/not-a-playlist' },
+      target: { value: PLAYLIST_URL },
     });
 
     await act(async () => { jest.runAllTimers(); });
-    expect(screen.getByDisplayValue(BASE)).toBeInTheDocument();
     expect(global.fetch).not.toHaveBeenCalled();
   });
+});
 
-  it('uses playlistId slug when title equals playlistId (no API key fallback)', async () => {
-    (global.fetch as jest.Mock).mockResolvedValue({
-      ok: true,
-      json: async () => ({ playlistId: 'PLtest123', title: 'PLtest123' }),
-    });
-    render(<Header defaultOutputFolder={BASE} baseOutputFolder={BASE} onIngest={jest.fn()} />);
-
-    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
-      target: { value: PLAYLIST_URL },
-    });
-
-    await act(async () => { jest.runAllTimers(); });
-    await screen.findByDisplayValue(`${BASE}/pltest123`);
+describe('Header — settings sync vs. manual folder edit', () => {
+  it('applies a late defaultOutputFolder while the folder field is still pristine', () => {
+    // Mirrors the real mount: folder starts empty, settings resolve afterward.
+    const { rerender } = render(<Header defaultOutputFolder="" onIngest={jest.fn()} />);
+    rerender(<Header defaultOutputFolder="/settings/value" onIngest={jest.fn()} />);
+    expect(screen.getByDisplayValue('/settings/value')).toBeInTheDocument();
   });
 
-  it('leaves folder unchanged when /api/playlist-info returns an error', async () => {
-    (global.fetch as jest.Mock).mockResolvedValue({ ok: false });
-    render(<Header defaultOutputFolder={BASE} baseOutputFolder={BASE} onIngest={jest.fn()} />);
-
-    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
-      target: { value: PLAYLIST_URL },
+  it('does NOT overwrite a manually-typed folder when settings resolve afterward', () => {
+    const { rerender } = render(<Header defaultOutputFolder="" onIngest={jest.fn()} />);
+    // User types a folder before /api/settings resolves
+    fireEvent.change(screen.getByPlaceholderText(/output folder/i), {
+      target: { value: '/user/typed' },
     });
-
-    await act(async () => { jest.runAllTimers(); });
-    expect(screen.getByDisplayValue(BASE)).toBeInTheDocument();
+    // settings arrive late and change defaultOutputFolder
+    rerender(<Header defaultOutputFolder="/settings/value" onIngest={jest.fn()} />);
+    expect(screen.getByDisplayValue('/user/typed')).toBeInTheDocument();
   });
 });
 

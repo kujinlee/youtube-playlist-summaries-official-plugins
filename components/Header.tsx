@@ -1,11 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { slugify } from '../lib/slugify';
 
 interface HeaderProps {
   defaultOutputFolder: string;
-  baseOutputFolder?: string;
   currentPlaylistUrl?: string;
   onIngest: (playlistUrl: string, outputFolder: string) => void;
   onSync?: (folder: string, playlistUrl: string) => void;
@@ -15,7 +13,6 @@ interface HeaderProps {
 
 export default function Header({
   defaultOutputFolder,
-  baseOutputFolder,
   currentPlaylistUrl,
   onIngest,
   onSync,
@@ -28,9 +25,12 @@ export default function Header({
   // Using useEffect ensures the SSR and client initial renders are identical,
   // avoiding hydration mismatches when navigator is unavailable on the server.
   const [isMac, setIsMac] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // true once the user types into the URL field; resets to false on Browse success or folder change
+  // true once the user types into the URL field; resets only on Browse success
+  // (intentionally NOT on manual folder edit — see handleFolderChange)
   const urlEditedByUser = useRef(false);
+  // true once the user edits the folder field (typing or Browse); blocks a late
+  // settings-driven defaultOutputFolder sync from overwriting the user's choice
+  const folderEditedByUser = useRef(false);
 
   // Detect macOS after hydration — runs only on the client, so SSR and initial
   // client render both see isMac=false (no Browse button), then it flips to true
@@ -40,9 +40,13 @@ export default function Header({
     setIsMac(typeof navigator !== 'undefined' && navigator.platform.includes('Mac'));
   }, []);
 
-  // Keep folder in sync when settings load after mount
+  // Keep folder in sync when settings load after mount — but never clobber a
+  // folder the user has already chosen (typed or via Browse). Without this guard,
+  // a folder typed before /api/settings resolves would be silently overwritten.
   useEffect(() => {
-    setOutputFolder(defaultOutputFolder);
+    if (!folderEditedByUser.current) {
+      setOutputFolder(defaultOutputFolder);
+    }
   }, [defaultOutputFolder]);
 
   // Auto-fill URL from folder metadata — only if user hasn't typed their own value
@@ -52,37 +56,6 @@ export default function Header({
     }
   }, [currentPlaylistUrl]);
 
-  // Auto-suggest output folder slug when playlist URL changes
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-
-    let playlistId: string | null = null;
-    try {
-      playlistId = new URL(playlistUrl).searchParams.get('list');
-    } catch {
-      return;
-    }
-    if (!playlistId) return;
-
-    const base = baseOutputFolder || defaultOutputFolder;
-    const url = playlistUrl;
-
-    debounceRef.current = setTimeout(async () => {
-      try {
-        const res = await fetch(`/api/playlist-info?url=${encodeURIComponent(url)}`);
-        if (!res.ok) return;
-        const data = (await res.json()) as { title: string };
-        setOutputFolder(`${base}/${slugify(data.title)}`);
-      } catch {
-        // leave folder unchanged on network error
-      }
-    }, 350);
-
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [playlistUrl, baseOutputFolder, defaultOutputFolder]);
-
   const handleBrowse = useCallback(async () => {
     try {
       const res = await fetch('/api/pick-folder');
@@ -90,7 +63,8 @@ export default function Header({
       const data = (await res.json()) as { folderPath?: string; cancelled?: boolean };
       if (data.folderPath) {
         setOutputFolder(data.folderPath);
-        urlEditedByUser.current = false; // browsing a new folder resets the guard
+        folderEditedByUser.current = true; // explicit folder choice — protect from late settings sync
+        urlEditedByUser.current = false; // browsing a new folder resets the URL guard
         onFolderChange?.(data.folderPath); // notify page.tsx to re-fetch metadata
       }
     } catch {
@@ -100,6 +74,7 @@ export default function Header({
 
   const handleFolderChange = useCallback((value: string) => {
     setOutputFolder(value);
+    folderEditedByUser.current = true; // user owns the folder now — block late settings sync
     // Do NOT reset urlEditedByUser here: if the user has typed their own URL
     // and then adjusts the folder path, their URL should remain intact.
     // The guard resets only on Browse success (explicit fresh-folder navigation).
