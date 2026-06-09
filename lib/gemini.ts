@@ -2,6 +2,8 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { RatingsSchema, VideoTypeSchema, AudienceSchema } from '../types';
 import type { GeminiSummaryResponse } from '../types';
 import { z } from 'zod';
+import { MagazineModelSchema } from './html-doc/types';
+import type { MagazineModel } from './html-doc/types';
 
 const SUMMARY_MODEL = process.env.GEMINI_SUMMARY_MODEL ?? 'gemini-2.5-flash';
 const DEEPDIVE_MODEL = process.env.GEMINI_DEEPDIVE_MODEL ?? 'gemini-2.5-pro';
@@ -209,5 +211,47 @@ export async function generateDeepDive(
   } catch (err) {
     const cause = err instanceof Error ? err.message : String(err);
     throw new Error(`Gemini deep-dive failed: ${cause}`, { cause: err });
+  }
+}
+
+export async function generateMagazineModel(
+  sections: Array<{ title: string; prose: string }>,
+  language: 'en' | 'ko',
+): Promise<MagazineModel> {
+  const client = new GoogleGenerativeAI(getApiKey());
+  const model = client.getGenerativeModel({
+    model: SUMMARY_MODEL,
+    generationConfig: { responseMimeType: 'application/json' },
+  });
+  const lang = language === 'ko' ? 'Korean (한국어)' : 'English';
+
+  const numbered = sections
+    .map((s, i) => `Section ${i + 1} — "${s.title}":\n${s.prose}`)
+    .join('\n\n');
+
+  const prompt = `You convert dense prose video-summary sections into a scannable "skim" structure, in ${lang}.
+For EACH input section, in the SAME ORDER, produce:
+- "lead": one sentence (≤25 words) capturing that section's core point
+- "bullets": 3–7 objects { "label": 1–3 word tag, "text": one concise point }
+
+Rules:
+- Output exactly ${sections.length} sections, in input order.
+- Be faithful: introduce NO facts not present in the input prose.
+- Respond in ${lang}. Return ONLY a JSON object: { "sections": [ { "lead": ..., "bullets": [ { "label": ..., "text": ... } ] } ] }
+
+<sections>
+${numbered}
+</sections>`;
+
+  try {
+    const result = await model.generateContent(prompt, { timeout: REQUEST_TIMEOUT_MS });
+    const parsed = MagazineModelSchema.parse(JSON.parse(result.response.text()));
+    if (parsed.sections.length !== sections.length) {
+      throw new Error(`section count mismatch: got ${parsed.sections.length}, expected ${sections.length}`);
+    }
+    return parsed;
+  } catch (err) {
+    const cause = err instanceof Error ? err.message : String(err);
+    throw new Error(`Gemini magazine transform failed: ${cause}`, { cause: err });
   }
 }
