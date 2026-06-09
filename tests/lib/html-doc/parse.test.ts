@@ -79,6 +79,29 @@ describe('parseSummaryMarkdown', () => {
     expect(() => parseSummaryMarkdown(`# T\n\nno sections here\n`)).toThrow(/no sections/i);
   });
 
+  it('strips multi-dash (-----) dividers from prose while still splitting sections', () => {
+    const md = `# T
+
+**Channel:** C | **Duration:** 1:00 | **URL:** http://x
+
+## 1. First
+First section prose.
+-----
+## 2. Second
+Second section prose.
+-----
+## Conclusion
+Wrap up.
+`;
+    const p = parseSummaryMarkdown(md);
+    expect(p.sections).toHaveLength(3);
+    expect(p.sections[0].prose).toContain('First section prose.');
+    expect(p.sections[0].prose).not.toContain('-----');
+    expect(p.sections[0].prose).not.toMatch(/-{3,}/);
+    expect(p.sections[1]).toMatchObject({ numeral: '2', title: 'Second' });
+    expect(p.sections[1].prose).not.toMatch(/-{3,}/);
+  });
+
   it('parses Korean content (title, takeaways, section)', () => {
     const ko = `---
 video_id: "vid123"

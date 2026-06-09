@@ -19,7 +19,7 @@ function parseSections(body: string): ParsedSection[] {
     const title = ord ? ord[2].trim() : headingLine;
     const prose = rest
       .split('\n')
-      .filter((line) => line.trim() !== '---')   // drop divider lines
+      .filter((line) => !/^-{3,}\s*$/.test(line))   // drop divider lines (3+ dashes, optional trailing ws)
       .join('\n')
       .trim();
     sections.push({ numeral, title, prose });
