@@ -1973,8 +1973,8 @@ git commit -m "test(html-doc): E2E generate→view, regenerate, error, KO"
 1. Transform lives in `lib/gemini.ts` (`generateMagazineModel`), not a separate `lib/html-doc/transform.ts` — respects the project's Gemini mocking boundary. (Codex M6 suggests a thin wrapper to preserve the spec's module boundary — **open decision**.)
 2. On `done`, the status bar surfaces a clickable **View link** in addition to `window.open` — avoids browser popup-blocking of a programmatic open after async work.
 
-**Open Mediums for user decision:**
-- **M1 (inline markdown):** parsed callout text and transformed leads/bullets render as **escaped plain text** — inline `**bold**`/links are not interpreted. Recommended: accept for the pilot (the prompt asks for plain text; source nuance stays in the `.md`).
-- **M6 (transform module boundary):** keep the transform in `lib/gemini.ts` (current plan, simplest, matches mocking boundary) vs. add a thin `lib/html-doc/transform.ts` wrapper. Recommended: keep in `lib/gemini.ts`.
+**Medium decisions (user-confirmed 2026-06-09):**
+- **M1 (inline markdown): ACCEPTED** — callout text and transformed leads/bullets render as escaped plain text; inline `**bold**`/links are not interpreted (source nuance stays in the `.md`).
+- **M6 (transform module boundary): keep in `lib/gemini.ts`** — no separate `transform.ts` wrapper; respects the Gemini mocking boundary.
 
 Post-Codex revision: all 3 Blocking + 6 High + M2–M5 resolved inline (see Codex Review Resolutions table).
