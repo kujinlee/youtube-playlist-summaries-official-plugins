@@ -133,4 +133,57 @@ lang: KO
     expect(p.sections[0]).toMatchObject({ numeral: '1', title: '첫 번째 섹션' });
     expect(p.sections[0].prose).toContain('첫 번째 섹션 본문.');
   });
+
+  it('keeps a channel that contains " | " (does not truncate at the first pipe)', () => {
+    const md = `# T
+
+**Channel:** Studio A | Host B | **Duration:** 12:34 | **URL:** https://youtu.be/x
+
+## 1. Sec
+body
+`;
+    const p = parseSummaryMarkdown(md);
+    expect(p.channel).toBe('Studio A | Host B');
+    expect(p.duration).toBe('12:34');
+  });
+
+  it('parses takeaways when the input uses CRLF line endings', () => {
+    const crlf = SAMPLE.replace(/\n/g, '\r\n');
+    const p = parseSummaryMarkdown(crlf);
+    expect(p.takeaways.length).toBeGreaterThanOrEqual(1);
+    expect(p.takeaways).toEqual([
+      'LLMs begin with filtered internet text.',
+      'Pre-training predicts the next token.',
+    ]);
+    expect(p.tldr).toBe('This video details how LLMs are built.');
+  });
+
+  it('does not split on ## inside a fenced code block, and preserves fenced content verbatim', () => {
+    const md = `# T
+
+**Channel:** C | **Duration:** 1:00 | **URL:** http://x
+
+## 1. Real Section
+Intro prose.
+
+\`\`\`md
+## Not A Heading
+-----
+fenced dashes kept
+\`\`\`
+
+After the fence.
+## 2. Second Real Section
+second body
+`;
+    const p = parseSummaryMarkdown(md);
+    expect(p.sections).toHaveLength(2);
+    expect(p.sections[0]).toMatchObject({ numeral: '1', title: 'Real Section' });
+    expect(p.sections[1]).toMatchObject({ numeral: '2', title: 'Second Real Section' });
+    // The fenced "## Not A Heading" survives in prose and did not create a third section.
+    expect(p.sections[0].prose).toContain('## Not A Heading');
+    expect(p.sections[0].prose).toContain('-----'); // dash divider inside fence preserved
+    expect(p.sections[0].prose).toContain('fenced dashes kept');
+    expect(p.sections[0].prose).toContain('After the fence.');
+  });
 });
