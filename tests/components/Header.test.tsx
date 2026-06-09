@@ -3,423 +3,328 @@ import React from 'react';
 import { act, render, screen, fireEvent } from '@testing-library/react';
 import Header from '@/components/Header';
 
-describe('Header', () => {
-  const defaultFolder = '/default/output';
+// --- helpers -------------------------------------------------------------
+const ROOT = '/d';
+const URL_VAL = 'https://www.youtube.com/playlist?list=PLtest123';
+const TARGET = '/d/agentic-ai/raw';
 
-  it('renders playlist URL input, output folder input, and submit button', () => {
-    render(<Header defaultOutputFolder={defaultFolder} onIngest={jest.fn()} />);
-    expect(screen.getByPlaceholderText(/playlist url/i)).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/output folder/i)).toBeInTheDocument();
-    expect(screen.getByDisplayValue(defaultFolder)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /fetch & summarize/i })).toBeInTheDocument();
+const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+const bad = (status: number, body: unknown = {}) => ({ ok: false, status, json: async () => body });
+
+// Route fetch by URL prefix. Unmatched URLs reject (so a stray /api/playlist-info call fails loudly).
+function routeFetch(routes: Record<string, (url: string) => unknown>) {
+  global.fetch = jest.fn((input: RequestInfo | URL) => {
+    const url = String(input);
+    for (const prefix of Object.keys(routes)) {
+      if (url.startsWith(prefix)) return Promise.resolve(routes[prefix](url));
+    }
+    return Promise.reject(new Error(`unrouted fetch: ${url}`));
+  }) as jest.Mock;
+}
+
+// Advance past the 350ms debounce AND flush the fetch promise chain.
+async function settle() {
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(400);
+  });
+}
+
+function renderHeader(props: Partial<React.ComponentProps<typeof Header>> = {}) {
+  return render(
+    <Header
+      defaultBaseOutputFolder={ROOT}
+      defaultOutputFolder={TARGET}
+      onIngest={jest.fn()}
+      {...props}
+    />,
+  );
+}
+
+const rootField = () => screen.getByPlaceholderText(/root output folder/i) as HTMLInputElement;
+const urlField = () => screen.getByPlaceholderText(/playlist url/i) as HTMLInputElement;
+const fetchBtn = () => screen.getByRole('button', { name: /fetch & summarize/i });
+const hint = () => screen.getByTestId('derived-target');
+
+beforeEach(() => {
+  jest.useFakeTimers();
+  routeFetch({ '/api/resolve-folder': () => ok({ root: ROOT, outputFolder: TARGET }) });
+});
+afterEach(() => {
+  jest.runOnlyPendingTimers();
+  jest.useRealTimers();
+  jest.restoreAllMocks();
+});
+
+// --- B1, B2: render ------------------------------------------------------
+describe('Header — render', () => {
+  it('B1: shows the root field (=defaultBaseOutputFolder), URL field, Fetch, and a target hint', () => {
+    renderHeader();
+    expect(rootField().value).toBe(ROOT);
+    expect(urlField()).toBeInTheDocument();
+    expect(fetchBtn()).toBeInTheDocument();
+    expect(hint()).toBeInTheDocument();
   });
 
-  it('button is disabled when URL input is empty', () => {
-    render(<Header defaultOutputFolder={defaultFolder} onIngest={jest.fn()} />);
-    expect(screen.getByRole('button', { name: /fetch & summarize/i })).toBeDisabled();
+  it('B2: the folder field is labelled as the ROOT', () => {
+    renderHeader();
+    expect(rootField()).toBeInTheDocument(); // placeholder matches /root output folder/i
   });
 
-  it('button is disabled when URL input is only whitespace', () => {
-    render(<Header defaultOutputFolder={defaultFolder} onIngest={jest.fn()} />);
-    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), { target: { value: '   ' } });
-    expect(screen.getByRole('button', { name: /fetch & summarize/i })).toBeDisabled();
+  it('B1: Fetch is disabled before any URL/target', () => {
+    renderHeader();
+    expect(fetchBtn()).toBeDisabled();
+  });
+});
+
+// --- B3, B7, B13, B15, B16: URL → debounced resolve ----------------------
+describe('Header — debounced resolve', () => {
+  it('B3: typing a URL fires one debounced resolve with url+root and shows the target', async () => {
+    renderHeader();
+    fireEvent.change(urlField(), { target: { value: URL_VAL } });
+    await settle();
+    const calls = (global.fetch as jest.Mock).mock.calls.map((c) => String(c[0]));
+    const resolveCalls = calls.filter((u) => u.startsWith('/api/resolve-folder'));
+    expect(resolveCalls).toHaveLength(1);
+    expect(resolveCalls[0]).toContain(`url=${encodeURIComponent(URL_VAL)}`);
+    expect(resolveCalls[0]).toContain(`root=${encodeURIComponent(ROOT)}`);
+    expect(hint()).toHaveTextContent(TARGET);
   });
 
-  it('button is enabled when URL input has content', () => {
-    render(<Header defaultOutputFolder={defaultFolder} onIngest={jest.fn()} />);
-    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
-      target: { value: 'https://youtube.com/playlist?list=abc' },
-    });
-    expect(screen.getByRole('button', { name: /fetch & summarize/i })).toBeEnabled();
+  it('B7: rapid typing only resolves the latest value once', async () => {
+    renderHeader();
+    fireEvent.change(urlField(), { target: { value: 'h' } });
+    fireEvent.change(urlField(), { target: { value: 'ht' } });
+    fireEvent.change(urlField(), { target: { value: URL_VAL } });
+    await settle();
+    const resolveCalls = (global.fetch as jest.Mock).mock.calls
+      .map((c) => String(c[0]))
+      .filter((u) => u.startsWith('/api/resolve-folder'));
+    expect(resolveCalls).toHaveLength(1);
+    expect(resolveCalls[0]).toContain(encodeURIComponent(URL_VAL));
   });
 
-  it('calls onIngest with correct url and folder on submit', () => {
+  it('B13: Fetch (with a fresh target) calls onIngest with the resolved TARGET, not the root', async () => {
     const onIngest = jest.fn();
-    render(<Header defaultOutputFolder={defaultFolder} onIngest={onIngest} />);
-    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
-      target: { value: 'https://youtube.com/playlist?list=abc' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: /fetch & summarize/i }));
-    expect(onIngest).toHaveBeenCalledWith('https://youtube.com/playlist?list=abc', defaultFolder);
+    renderHeader({ onIngest });
+    fireEvent.change(urlField(), { target: { value: URL_VAL } });
+    await settle();
+    expect(fetchBtn()).toBeEnabled();
+    fireEvent.click(fetchBtn());
+    expect(onIngest).toHaveBeenCalledWith(URL_VAL, TARGET);
   });
 
-  it('trims leading/trailing whitespace from URL before calling onIngest', () => {
-    const onIngest = jest.fn();
-    render(<Header defaultOutputFolder={defaultFolder} onIngest={onIngest} />);
-    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
-      target: { value: '  https://youtube.com/playlist?list=abc  ' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: /fetch & summarize/i }));
-    expect(onIngest).toHaveBeenCalledWith('https://youtube.com/playlist?list=abc', defaultFolder);
+  it('B15/B16: typing a URL never writes a derived target into the root field, and never calls /api/playlist-info', async () => {
+    renderHeader();
+    fireEvent.change(urlField(), { target: { value: URL_VAL } });
+    await settle();
+    // root field stays the normalized root — never the <root>/<slug>/raw target
+    expect(rootField().value).toBe(ROOT);
+    expect(rootField().value).not.toContain('agentic-ai');
+    const calls = (global.fetch as jest.Mock).mock.calls.map((c) => String(c[0]));
+    expect(calls.some((u) => u.includes('/api/playlist-info'))).toBe(false);
   });
 
-  it('calls onIngest with updated output folder when user changes it', () => {
-    const onIngest = jest.fn();
-    render(<Header defaultOutputFolder={defaultFolder} onIngest={onIngest} />);
-    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
-      target: { value: 'https://youtube.com/playlist?list=abc' },
-    });
-    fireEvent.change(screen.getByDisplayValue(defaultFolder), {
-      target: { value: '/custom/path' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: /fetch & summarize/i }));
-    expect(onIngest).toHaveBeenCalledWith('https://youtube.com/playlist?list=abc', '/custom/path');
+  it('B4: a resolve that normalizes the root self-corrects the field (no <slug> leak)', async () => {
+    // field starts at a subfolder; server returns the normalized root
+    routeFetch({ '/api/resolve-folder': () => ok({ root: ROOT, outputFolder: TARGET }) });
+    renderHeader({ defaultBaseOutputFolder: '/d/agentic-ai/raw' });
+    expect(rootField().value).toBe('/d/agentic-ai/raw');
+    fireEvent.change(urlField(), { target: { value: URL_VAL } });
+    await settle();
+    await settle(); // one extra resolve cycle after the self-correct, then stable
+    expect(rootField().value).toBe(ROOT);
+  });
+});
+
+// --- B5, B6, B18, B19: failure + invalidation ----------------------------
+describe('Header — resolve failures and invalidation', () => {
+  it('B5: an invalid-URL 400 clears the target and leaves the root unchanged', async () => {
+    routeFetch({ '/api/resolve-folder': () => bad(400, { error: 'no list id' }) });
+    renderHeader();
+    fireEvent.change(urlField(), { target: { value: 'https://youtube.com/watch?v=x' } });
+    await settle();
+    expect(rootField().value).toBe(ROOT);
+    expect(fetchBtn()).toBeDisabled();
+    expect(hint()).not.toHaveTextContent(TARGET);
   });
 
-  it('does not call onIngest when button is disabled', () => {
+  it('B6: a network error clears the target and does not crash', async () => {
+    routeFetch({ '/api/resolve-folder': () => { throw new Error('network'); } });
+    renderHeader();
+    fireEvent.change(urlField(), { target: { value: URL_VAL } });
+    await settle();
+    expect(fetchBtn()).toBeDisabled();
+  });
+
+  it('B18: with no fresh target, clicking Fetch never calls onIngest', async () => {
+    routeFetch({ '/api/resolve-folder': () => bad(500, {}) });
     const onIngest = jest.fn();
-    render(<Header defaultOutputFolder={defaultFolder} onIngest={onIngest} />);
-    fireEvent.click(screen.getByRole('button', { name: /fetch & summarize/i }));
+    renderHeader({ onIngest });
+    fireEvent.change(urlField(), { target: { value: URL_VAL } });
+    await settle();
+    fireEvent.click(fetchBtn());
     expect(onIngest).not.toHaveBeenCalled();
   });
 
-  it('output folder defaults to defaultOutputFolder prop', () => {
-    render(<Header defaultOutputFolder="/my/vault" onIngest={jest.fn()} />);
-    expect(screen.getByDisplayValue('/my/vault')).toBeInTheDocument();
+  it('B19: clearing the URL after a target clears the hint', async () => {
+    renderHeader();
+    fireEvent.change(urlField(), { target: { value: URL_VAL } });
+    await settle();
+    expect(hint()).toHaveTextContent(TARGET);
+    fireEvent.change(urlField(), { target: { value: '' } });
+    await settle();
+    expect(hint()).not.toHaveTextContent(TARGET);
+    expect(fetchBtn()).toBeDisabled();
   });
 });
 
-describe('Header — Sync button', () => {
-  it('does not render Sync button when onSync is not provided', () => {
-    render(<Header defaultOutputFolder="/folder" onIngest={jest.fn()} />);
-    expect(screen.queryByRole('button', { name: /sync/i })).toBeNull();
+// --- B17: disabled gating ------------------------------------------------
+describe('Header — button gating', () => {
+  it('B17: Fetch is disabled while resolving (before the debounce settles)', async () => {
+    renderHeader();
+    fireEvent.change(urlField(), { target: { value: URL_VAL } });
+    // not yet settled → resolving
+    expect(fetchBtn()).toBeDisabled();
+    await settle();
+    expect(fetchBtn()).toBeEnabled();
   });
 
-  it('renders Sync button when onSync is provided', () => {
-    render(<Header defaultOutputFolder="/folder" onIngest={jest.fn()} onSync={jest.fn()} />);
-    expect(screen.getByRole('button', { name: /sync/i })).toBeInTheDocument();
-  });
-
-  it('Sync button is disabled when playlist URL field is empty', () => {
-    render(<Header defaultOutputFolder="/folder" onIngest={jest.fn()} onSync={jest.fn()} />);
-    expect(screen.getByRole('button', { name: /sync/i })).toBeDisabled();
-  });
-
-  it('Sync button is enabled when playlist URL field has content', () => {
-    render(<Header defaultOutputFolder="/folder" onIngest={jest.fn()} onSync={jest.fn()} />);
-    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
-      target: { value: 'https://youtube.com/playlist?list=PLtest' },
-    });
-    expect(screen.getByRole('button', { name: /sync/i })).toBeEnabled();
-  });
-
-  it('Sync button is disabled when global disabled=true even with URL present', () => {
-    render(
-      <Header
-        defaultOutputFolder="/folder"
-        onIngest={jest.fn()}
-        onSync={jest.fn()}
-        disabled={true}
-      />,
+  it('B17: Fetch is disabled when disabled=true even with a fresh target', async () => {
+    const { rerender } = renderHeader();
+    fireEvent.change(urlField(), { target: { value: URL_VAL } });
+    await settle();
+    rerender(
+      <Header defaultBaseOutputFolder={ROOT} defaultOutputFolder={TARGET} onIngest={jest.fn()} disabled />,
     );
-    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
-      target: { value: 'https://youtube.com/playlist?list=PLtest' },
-    });
-    expect(screen.getByRole('button', { name: /sync/i })).toBeDisabled();
-  });
-
-  it('calls onSync with folder AND playlistUrl when Sync button is clicked', () => {
-    const onSync = jest.fn();
-    render(
-      <Header defaultOutputFolder="/folder" onIngest={jest.fn()} onSync={onSync} />,
-    );
-    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
-      target: { value: 'https://youtube.com/playlist?list=PLtest' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: /sync/i }));
-    expect(onSync).toHaveBeenCalledWith('/folder', 'https://youtube.com/playlist?list=PLtest');
-  });
-
-  it('calls onSync with updated folder when user has changed the folder input', () => {
-    const onSync = jest.fn();
-    render(<Header defaultOutputFolder="/original" onIngest={jest.fn()} onSync={onSync} />);
-    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
-      target: { value: 'https://youtube.com/playlist?list=PLtest' },
-    });
-    fireEvent.change(screen.getByDisplayValue('/original'), { target: { value: '/new-folder' } });
-    fireEvent.click(screen.getByRole('button', { name: /sync/i }));
-    expect(onSync).toHaveBeenCalledWith('/new-folder', 'https://youtube.com/playlist?list=PLtest');
-  });
-
-  it('Sync button click does not trigger form submission (onIngest not called)', () => {
-    const onIngest = jest.fn();
-    const onSync = jest.fn();
-    render(
-      <Header defaultOutputFolder="/folder" onIngest={onIngest} onSync={onSync} />,
-    );
-    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
-      target: { value: 'https://youtube.com/playlist?list=PLtest' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: /sync/i }));
-    expect(onIngest).not.toHaveBeenCalled();
-    expect(onSync).toHaveBeenCalledTimes(1);
-  });
-
-  it('Sync button has green styling when enabled', () => {
-    render(
-      <Header defaultOutputFolder="/folder" onIngest={jest.fn()} onSync={jest.fn()} />,
-    );
-    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
-      target: { value: 'https://youtube.com/playlist?list=PLtest' },
-    });
-    const syncBtn = screen.getByRole('button', { name: /sync/i });
-    // Check for green Tailwind class presence (enabled state)
-    expect(syncBtn.className).toMatch(/green/);
+    expect(fetchBtn()).toBeDisabled();
   });
 });
 
-describe('Header — no folder auto-suggestion', () => {
-  // The folder auto-suggest was removed: entering a playlist URL must never
-  // overwrite the output folder (it previously clobbered the settings folder
-  // with `<base>/<slug(title)>`, causing ingests to write to the wrong place).
-  const BASE = '/home/user/data';
-  const PLAYLIST_URL = 'https://www.youtube.com/playlist?list=PLtest123';
-
-  // Regression-bait, intentional: fake timers + a fetch mock that WOULD overwrite
-  // the folder. If anyone reintroduces the debounced auto-suggest effect,
-  // runAllTimers() fires it, fetch resolves, the folder flips to `${BASE}/my-playlist`,
-  // and both tests below fail. Removing this scaffolding would make the tests pass
-  // even with the bug reintroduced.
-  beforeEach(() => {
-    jest.useFakeTimers();
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ playlistId: 'PLtest123', title: 'My Playlist' }),
-    }) as jest.Mock;
-  });
-
-  afterEach(() => {
-    jest.useRealTimers();
-    jest.restoreAllMocks();
-  });
-
-  it('does NOT overwrite the output folder when a playlist URL is entered', async () => {
-    render(<Header defaultOutputFolder={BASE} onIngest={jest.fn()} />);
-
-    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
-      target: { value: PLAYLIST_URL },
-    });
-
-    await act(async () => { jest.runAllTimers(); });
-    expect(screen.getByDisplayValue(BASE)).toBeInTheDocument();
-  });
-
-  it('does NOT fetch /api/playlist-info when a playlist URL is entered', async () => {
-    render(<Header defaultOutputFolder={BASE} onIngest={jest.fn()} />);
-
-    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
-      target: { value: PLAYLIST_URL },
-    });
-
-    await act(async () => { jest.runAllTimers(); });
-    expect(global.fetch).not.toHaveBeenCalled();
-  });
-});
-
-describe('Header — settings sync vs. manual folder edit', () => {
-  it('applies a late defaultOutputFolder while the folder field is still pristine', () => {
-    // Mirrors the real mount: folder starts empty, settings resolve afterward.
-    const { rerender } = render(<Header defaultOutputFolder="" onIngest={jest.fn()} />);
-    rerender(<Header defaultOutputFolder="/settings/value" onIngest={jest.fn()} />);
-    expect(screen.getByDisplayValue('/settings/value')).toBeInTheDocument();
-  });
-
-  it('does NOT overwrite a manually-typed folder when settings resolve afterward', () => {
-    const { rerender } = render(<Header defaultOutputFolder="" onIngest={jest.fn()} />);
-    // User types a folder before /api/settings resolves
-    fireEvent.change(screen.getByPlaceholderText(/output folder/i), {
-      target: { value: '/user/typed' },
-    });
-    // settings arrive late and change defaultOutputFolder
-    rerender(<Header defaultOutputFolder="/settings/value" onIngest={jest.fn()} />);
-    expect(screen.getByDisplayValue('/user/typed')).toBeInTheDocument();
-  });
-});
-
-describe('Header — Browse button', () => {
-  const originalPlatform = navigator.platform;
-
-  beforeEach(() => {
-    jest.useFakeTimers();
-  });
-
-  afterEach(() => {
-    Object.defineProperty(navigator, 'platform', { value: originalPlatform, configurable: true });
-    jest.useRealTimers();
-    jest.restoreAllMocks();
-  });
-
+// --- B9, B9b, B10, B10b: Browse ------------------------------------------
+describe('Header — Browse', () => {
   function setMac() {
     Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true });
   }
-  function setNonMac() {
-    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+  const browseBtn = () => screen.getByRole('button', { name: /browse/i });
+
+  async function clickBrowse() {
+    await act(async () => {
+      fireEvent.click(browseBtn());
+      await jest.advanceTimersByTimeAsync(0);
+    });
   }
 
-  it('renders Browse button on macOS', () => {
+  it('B9: Browse into a playlist folder snaps the root up, persists, and views the folder', async () => {
     setMac();
-    render(<Header defaultOutputFolder="/folder" onIngest={jest.fn()} />);
-    expect(screen.getByRole('button', { name: /browse/i })).toBeInTheDocument();
-  });
-
-  it('does not render Browse button on non-macOS', () => {
-    setNonMac();
-    render(<Header defaultOutputFolder="/folder" onIngest={jest.fn()} />);
-    expect(screen.queryByRole('button', { name: /browse/i })).toBeNull();
-  });
-
-  it('calls GET /api/pick-folder when Browse is clicked and updates folder on success', async () => {
-    setMac();
-    global.fetch = (jest.fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ folderPath: '/Users/kujin/picked' }) })
-    ) as jest.Mock;
-
-    render(<Header defaultOutputFolder="/original" onIngest={jest.fn()} />);
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /browse/i }));
+    routeFetch({
+      '/api/pick-folder': () => ok({ folderPath: '/d/cs146s/raw' }),
+      '/api/normalize-folder': () => ok({ root: ROOT }),
+      '/api/resolve-folder': () => ok({ root: ROOT, outputFolder: TARGET }),
     });
-
-    expect(global.fetch).toHaveBeenCalledWith('/api/pick-folder');
-    expect(screen.getByDisplayValue('/Users/kujin/picked')).toBeInTheDocument();
+    const onRootChange = jest.fn();
+    const onFolderChange = jest.fn();
+    renderHeader({ onRootChange, onFolderChange });
+    await clickBrowse();
+    expect(rootField().value).toBe(ROOT);
+    expect(onRootChange).toHaveBeenCalledWith(ROOT);
+    expect(onFolderChange).toHaveBeenCalledWith('/d/cs146s/raw');
   });
 
-  it('leaves folder unchanged when Browse is cancelled', async () => {
+  it('B9b: Browse to the root itself views the root', async () => {
     setMac();
-    global.fetch = (jest.fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ cancelled: true }) })
-    ) as jest.Mock;
-
-    render(<Header defaultOutputFolder="/original" onIngest={jest.fn()} />);
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /browse/i }));
+    routeFetch({
+      '/api/pick-folder': () => ok({ folderPath: ROOT }),
+      '/api/normalize-folder': () => ok({ root: ROOT }),
     });
-
-    expect(screen.getByDisplayValue('/original')).toBeInTheDocument();
+    const onFolderChange = jest.fn();
+    renderHeader({ onFolderChange });
+    await clickBrowse();
+    expect(rootField().value).toBe(ROOT);
+    expect(onFolderChange).toHaveBeenCalledWith(ROOT);
   });
 
-  it('leaves folder unchanged when fetch throws a network error', async () => {
+  it('B10: a cancelled Browse leaves the root unchanged and does not normalize', async () => {
     setMac();
-    global.fetch = (jest.fn().mockRejectedValueOnce(new Error('Network error'))) as jest.Mock;
-
-    render(<Header defaultOutputFolder="/original" onIngest={jest.fn()} />);
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /browse/i }));
+    routeFetch({
+      '/api/pick-folder': () => ok({ cancelled: true }),
+      '/api/normalize-folder': () => ok({ root: '/SHOULD_NOT_BE_USED' }),
     });
-
-    expect(screen.getByDisplayValue('/original')).toBeInTheDocument();
+    const onRootChange = jest.fn();
+    renderHeader({ onRootChange });
+    await clickBrowse();
+    expect(rootField().value).toBe(ROOT);
+    expect(onRootChange).not.toHaveBeenCalled();
   });
 
-  it('leaves folder unchanged when server returns a non-ok response', async () => {
+  it('B10b: Browse pick succeeds but normalize fails → root unchanged, no onRootChange', async () => {
     setMac();
-    global.fetch = (jest.fn().mockResolvedValueOnce({ ok: false })) as jest.Mock;
-
-    render(<Header defaultOutputFolder="/original" onIngest={jest.fn()} />);
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /browse/i }));
+    routeFetch({
+      '/api/pick-folder': () => ok({ folderPath: '/d/cs146s/raw' }),
+      '/api/normalize-folder': () => bad(500, {}),
     });
-
-    expect(screen.getByDisplayValue('/original')).toBeInTheDocument();
+    const onRootChange = jest.fn();
+    renderHeader({ onRootChange });
+    await clickBrowse();
+    expect(rootField().value).toBe(ROOT);
+    expect(onRootChange).not.toHaveBeenCalled();
   });
 });
 
-describe('Header — URL auto-fill from currentPlaylistUrl prop', () => {
-  it('auto-fills URL field when currentPlaylistUrl prop is set and user has not typed', () => {
+// --- B11, B12: settings-sync + URL auto-fill guards ----------------------
+describe('Header — sync guards', () => {
+  it('B11: a late defaultBaseOutputFolder applies while the root field is pristine', () => {
     const { rerender } = render(
-      <Header defaultOutputFolder="/folder" onIngest={jest.fn()} currentPlaylistUrl="" />,
+      <Header defaultBaseOutputFolder="" defaultOutputFolder="" onIngest={jest.fn()} />,
     );
+    rerender(<Header defaultBaseOutputFolder="/late/root" defaultOutputFolder="" onIngest={jest.fn()} />);
+    expect(rootField().value).toBe('/late/root');
+  });
+
+  it('B11: a late defaultBaseOutputFolder does NOT overwrite a user-edited root', () => {
+    const { rerender } = render(
+      <Header defaultBaseOutputFolder="" defaultOutputFolder="" onIngest={jest.fn()} />,
+    );
+    fireEvent.change(rootField(), { target: { value: '/user/root' } });
+    rerender(<Header defaultBaseOutputFolder="/late/root" defaultOutputFolder="" onIngest={jest.fn()} />);
+    expect(rootField().value).toBe('/user/root');
+  });
+
+  it('B12: URL auto-fills from currentPlaylistUrl when the user has not typed', () => {
+    const { rerender } = renderHeader({ currentPlaylistUrl: '' });
     rerender(
       <Header
-        defaultOutputFolder="/folder"
+        defaultBaseOutputFolder={ROOT}
+        defaultOutputFolder={TARGET}
         onIngest={jest.fn()}
         currentPlaylistUrl="https://youtube.com/playlist?list=PLauto"
       />,
     );
-    expect(
-      (screen.getByPlaceholderText(/playlist url/i) as HTMLInputElement).value,
-    ).toBe('https://youtube.com/playlist?list=PLauto');
+    expect(urlField().value).toBe('https://youtube.com/playlist?list=PLauto');
+  });
+});
+
+// --- B14: Sync -----------------------------------------------------------
+describe('Header — Sync', () => {
+  const syncBtn = () => screen.getByRole('button', { name: /sync/i });
+
+  it('does not render Sync when onSync is absent', () => {
+    renderHeader();
+    expect(screen.queryByRole('button', { name: /sync/i })).toBeNull();
   });
 
-  it('does NOT auto-fill URL when user has manually typed in the URL field', () => {
-    const { rerender } = render(
-      <Header defaultOutputFolder="/folder" onIngest={jest.fn()} currentPlaylistUrl="" />,
-    );
-    // User types their own URL first
-    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
-      target: { value: 'https://youtube.com/playlist?list=PLmanual' },
-    });
-    // metadata arrives
-    rerender(
-      <Header
-        defaultOutputFolder="/folder"
-        onIngest={jest.fn()}
-        currentPlaylistUrl="https://youtube.com/playlist?list=PLauto"
-      />,
-    );
-    // manual entry must not be overwritten
-    expect(
-      (screen.getByPlaceholderText(/playlist url/i) as HTMLInputElement).value,
-    ).toBe('https://youtube.com/playlist?list=PLmanual');
+  it('B14: Sync (with a fresh target) calls onSync with the resolved target and url', async () => {
+    const onSync = jest.fn();
+    renderHeader({ onSync });
+    fireEvent.change(urlField(), { target: { value: URL_VAL } });
+    await settle();
+    expect(syncBtn()).toBeEnabled();
+    fireEvent.click(syncBtn());
+    expect(onSync).toHaveBeenCalledWith(TARGET, URL_VAL);
   });
 
-  it('does NOT auto-fill URL after user types URL then manually edits folder (guard stays active)', () => {
-    const { rerender } = render(
-      <Header defaultOutputFolder="/folder" onIngest={jest.fn()} currentPlaylistUrl="" />,
-    );
-    // User types their own URL (sets urlEditedByUser = true)
-    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
-      target: { value: 'https://youtube.com/playlist?list=PLmanual' },
-    });
-    // User manually edits the folder path (guard must NOT reset)
-    fireEvent.change(screen.getByDisplayValue('/folder'), {
-      target: { value: '/folder-renamed' },
-    });
-    // Metadata arrives from the server
-    rerender(
-      <Header
-        defaultOutputFolder="/folder"
-        onIngest={jest.fn()}
-        currentPlaylistUrl="https://youtube.com/playlist?list=PLauto"
-      />,
-    );
-    // User's manually typed URL must not be overwritten
-    expect(
-      (screen.getByPlaceholderText(/playlist url/i) as HTMLInputElement).value,
-    ).toBe('https://youtube.com/playlist?list=PLmanual');
-  });
-
-  it('resumes auto-fill after Browse success (urlEditedByUser reset)', async () => {
-    const savedPlatform = navigator.platform;
-    Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true });
-    global.fetch = (jest.fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ folderPath: '/new-folder' }) })
-    ) as jest.Mock;
-
-    const { rerender } = render(
-      <Header defaultOutputFolder="/folder" onIngest={jest.fn()} currentPlaylistUrl="" />,
-    );
-
-    // User types their own URL (sets urlEditedByUser = true)
-    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), {
-      target: { value: 'https://youtube.com/playlist?list=PLmanual' },
-    });
-
-    // User browses to a new folder (resets urlEditedByUser = false)
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /browse/i }));
-    });
-
-    // Now auto-fill should work again
-    rerender(
-      <Header
-        defaultOutputFolder="/folder"
-        onIngest={jest.fn()}
-        currentPlaylistUrl="https://youtube.com/playlist?list=PLnew"
-      />,
-    );
-    expect(
-      (screen.getByPlaceholderText(/playlist url/i) as HTMLInputElement).value,
-    ).toBe('https://youtube.com/playlist?list=PLnew');
-
-    Object.defineProperty(navigator, 'platform', { value: savedPlatform, configurable: true });
+  it('B14/B18: Sync is disabled without a fresh target', () => {
+    const onSync = jest.fn();
+    renderHeader({ onSync });
+    expect(syncBtn()).toBeDisabled();
   });
 });

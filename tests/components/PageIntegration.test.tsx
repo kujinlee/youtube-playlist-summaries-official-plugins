@@ -96,6 +96,10 @@ async function renderPage(videos: Video[] = [], extraHandlers: Record<string, un
   const fetchMock = mockFetch({
     'GET /api/settings': DEFAULT_SETTINGS,
     'GET /api/videos': { videos },
+    // The Header now derives the write target from (url, root) via this endpoint.
+    // Default: target === OUTPUT_FOLDER so existing outputFolder assertions hold.
+    'GET /api/resolve-folder': { root: OUTPUT_FOLDER, outputFolder: OUTPUT_FOLDER },
+    'POST /api/settings': { ok: true },
     ...extraHandlers,
   });
   global.fetch = fetchMock;
@@ -109,6 +113,18 @@ async function renderPage(videos: Video[] = [], extraHandlers: Record<string, un
 
 function getIngestES() {
   return esInstances.find((es) => es.url.includes('/api/ingest/stream'))!;
+}
+
+const fetchButton = () => screen.getByRole('button', { name: /fetch|summarize/i });
+
+// Type a playlist URL, wait for the debounced resolve to enable Fetch (the button
+// only enables once a fresh target is resolved), then click it.
+async function typeUrlAndFetch(url: string) {
+  fireEvent.change(screen.getByPlaceholderText(/playlist url/i), { target: { value: url } });
+  await waitFor(() => expect(fetchButton()).toBeEnabled());
+  await act(async () => {
+    fireEvent.click(fetchButton());
+  });
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -161,11 +177,7 @@ describe('Page — ingest (behaviors 3–6)', () => {
       expect(folderInput.value).toBe(OUTPUT_FOLDER);
     });
 
-    const urlInput = screen.getByPlaceholderText(/playlist url/i);
-    fireEvent.change(urlInput, { target: { value: PLAYLIST_URL } });
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /fetch|summarize/i }));
-    });
+    await typeUrlAndFetch(PLAYLIST_URL);
     return { fetchMock };
   }
 
@@ -309,9 +321,11 @@ describe('Page — ingest (behaviors 3–6)', () => {
   });
 
   it('shows error and closes stream on ingest POST failure (I2)', async () => {
+    // POST /api/ingest has no handler → mockFetch returns ok:false → ingest fails.
     const fetchMock = mockFetch({
       'GET /api/settings': DEFAULT_SETTINGS,
       'GET /api/videos': { videos: [] },
+      'GET /api/resolve-folder': { root: OUTPUT_FOLDER, outputFolder: OUTPUT_FOLDER },
     });
     global.fetch = fetchMock;
     await act(async () => {
@@ -322,11 +336,7 @@ describe('Page — ingest (behaviors 3–6)', () => {
       expect(folderInput.value).toBe(OUTPUT_FOLDER);
     });
 
-    const urlInput = screen.getByPlaceholderText(/playlist url/i);
-    fireEvent.change(urlInput, { target: { value: PLAYLIST_URL } });
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /fetch|summarize/i }));
-    });
+    await typeUrlAndFetch(PLAYLIST_URL);
 
     await waitFor(() => {
       expect(screen.getByRole('alert')).toBeInTheDocument();
@@ -334,40 +344,41 @@ describe('Page — ingest (behaviors 3–6)', () => {
     });
   });
 
-  it('adopts user-entered folder as page outputFolder on submit (C2)', async () => {
+  it('threads the server-resolved target into the ingest outputFolder and adopts it (C2/P3)', async () => {
+    const TARGET = '/vault/output/agentic-ai/raw';
     const { fetchMock } = await renderPage([], {
       'POST /api/ingest': { jobId: 'ingest-job-1' },
-      'POST /api/videos/v1/archive': { ok: true },
+      // Resolver derives a target distinct from the root field.
+      'GET /api/resolve-folder': { root: OUTPUT_FOLDER, outputFolder: TARGET },
     });
     await waitFor(() => {
       const folderInput = screen.getByPlaceholderText(/output folder/i) as HTMLInputElement;
       expect(folderInput.value).toBe(OUTPUT_FOLDER);
     });
 
-    // Change the folder in the Header input
-    const folderInput = screen.getByPlaceholderText(/output folder/i);
-    fireEvent.change(folderInput, { target: { value: '/custom/folder' } });
+    await typeUrlAndFetch(PLAYLIST_URL);
 
-    const urlInput = screen.getByPlaceholderText(/playlist url/i);
-    fireEvent.change(urlInput, { target: { value: PLAYLIST_URL } });
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /fetch|summarize/i }));
-    });
-
+    // onIngest receives the resolved TARGET, not the root field value.
     await waitFor(() => {
       const ingestCall = (fetchMock.mock.calls as [string, RequestInit][]).find(
         ([url]) => url === '/api/ingest',
       )!;
       const body = JSON.parse(ingestCall[1].body as string);
-      expect(body.outputFolder).toBe('/custom/folder');
+      expect(body.outputFolder).toBe(TARGET);
     });
 
-    // After done, subsequent archive should use the updated folder
+    // The page adopts the target as its viewing folder → the post-done list refresh
+    // queries /api/videos for the target.
     const ingestES = getIngestES();
     act(() => {
       ingestES.emit({ type: 'done' });
     });
-    await waitFor(() => screen.queryByLabelText('Ingestion progress') === null || true);
+    await waitFor(() => {
+      const videoCalls = (fetchMock.mock.calls as [string][]).filter((c) =>
+        c[0].startsWith('/api/videos'),
+      );
+      expect(videoCalls.some((c) => c[0].includes(encodeURIComponent(TARGET)))).toBe(true);
+    });
   });
 });
 
@@ -506,11 +517,7 @@ describe('Page — cancel (behavior 6d)', () => {
       const folderInput = screen.getByPlaceholderText(/output folder/i) as HTMLInputElement;
       expect(folderInput.value).toBe(OUTPUT_FOLDER);
     });
-    const urlInput = screen.getByPlaceholderText(/playlist url/i);
-    fireEvent.change(urlInput, { target: { value: PLAYLIST_URL } });
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /fetch|summarize/i }));
-    });
+    await typeUrlAndFetch(PLAYLIST_URL);
     return { fetchMock };
   }
 

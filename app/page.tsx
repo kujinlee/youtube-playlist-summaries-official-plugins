@@ -38,10 +38,37 @@ export default function Page() {
   const mountedRef = useRef(true);
   // Always-current sort values for use inside async callbacks
   const sortRef = useRef<{ col: SortColumn | null; order: SortOrder }>({ col: null, order: 'asc' });
+  // Always-current folder values, so settings-persist callbacks send the live pair
+  // (never a stale {root, outputFolder}).
+  const outputFolderRef = useRef('');
+  const baseOutputFolderRef = useRef('');
 
   useEffect(() => {
     sortRef.current = { col: sortColumn, order: sortOrder };
   }, [sortColumn, sortOrder]);
+
+  useEffect(() => {
+    outputFolderRef.current = outputFolder;
+  }, [outputFolder]);
+
+  useEffect(() => {
+    baseOutputFolderRef.current = baseOutputFolder;
+  }, [baseOutputFolder]);
+
+  // Persist the CURRENT {baseOutputFolder, outputFolder} pair. The route requires a
+  // non-empty outputFolder, so skip when there's nothing viewed yet. Best-effort.
+  const persistSettings = useCallback(async (base: string, output: string) => {
+    if (!output) return;
+    try {
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ baseOutputFolder: base, outputFolder: output }),
+      });
+    } catch {
+      // best-effort — settings will re-sync on next change
+    }
+  }, []);
 
   // Track mounted state
   useEffect(() => {
@@ -67,7 +94,10 @@ export default function Page() {
         if (res.ok && mountedRef.current && seq === fetchSeqRef.current) {
           const data = await res.json();
           setVideos(data.videos ?? []);
-          if (data.playlistUrl) setCurrentPlaylistUrl(data.playlistUrl);
+          // Clear the URL when the viewed folder has no index (e.g. the root itself),
+          // so a stale playlist URL doesn't linger in the field. The Header's
+          // urlEditedByUser guard still protects a URL the user typed themselves.
+          setCurrentPlaylistUrl(data.playlistUrl ?? '');
         }
       } catch {
         // leave existing video list unchanged on network error
@@ -102,6 +132,9 @@ export default function Page() {
       ingestESRef.current = null;
       ingestJobIdRef.current = null;
       setOutputFolder(folder);
+      // Persist the resolved target as the active viewing folder, paired with the
+      // current root, so a reload reopens this playlist.
+      persistSettings(baseOutputFolderRef.current, folder);
       setIngest({ status: 'running', step: '', progress: 0, error: '' });
 
       let jobId: string;
@@ -174,7 +207,7 @@ export default function Page() {
         fetchVideos(folder, col, order);
       };
     },
-    [fetchVideos],
+    [fetchVideos, persistSettings],
   );
 
   const handleSort = useCallback(
@@ -189,6 +222,13 @@ export default function Page() {
   const handleSync = useCallback((folder: string, url: string) => {
     if (url) handleIngest(url, folder);
   }, [handleIngest]);
+
+  // The Header reports a settled root (Browse / server self-correction). Update the
+  // Obsidian anchor and persist the {root, current viewing folder} pair.
+  const handleRootChange = useCallback((rootFolder: string) => {
+    setBaseOutputFolder(rootFolder);
+    persistSettings(rootFolder, outputFolderRef.current);
+  }, [persistSettings]);
 
   // Called by Header when Browse picks a new folder — re-fetches videos so
   // currentPlaylistUrl is loaded from the folder's playlist-index.json, which
@@ -305,11 +345,13 @@ export default function Page() {
   return (
     <main className="min-h-screen bg-zinc-950">
       <Header
+        defaultBaseOutputFolder={baseOutputFolder}
         defaultOutputFolder={outputFolder}
         currentPlaylistUrl={currentPlaylistUrl}
         onIngest={handleIngest}
         onSync={handleSync}
         onFolderChange={handleFolderChange}
+        onRootChange={handleRootChange}
         disabled={ingest.status === 'running'}
       />
 
