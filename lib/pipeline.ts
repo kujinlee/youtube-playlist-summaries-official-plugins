@@ -346,7 +346,11 @@ export async function runIngestion(
     if (!stillInPlaylist && !video.removedFromPlaylist) {
       upsertVideo(outputFolder, { ...video, archived: true, removedFromPlaylist: true });
     } else if (stillInPlaylist && video.removedFromPlaylist) {
-      upsertVideo(outputFolder, { ...video, removedFromPlaylist: false });
+      // Returned to the playlist → clear the removal flag AND un-archive. The video
+      // was auto-archived ON REMOVAL (removedFromPlaylist=true), so restoring it to
+      // the playlist should restore its visibility. A video the user MANUALLY archived
+      // has removedFromPlaylist=false and never enters this branch, so it's untouched.
+      upsertVideo(outputFolder, { ...video, archived: false, removedFromPlaylist: false });
     }
   }
 

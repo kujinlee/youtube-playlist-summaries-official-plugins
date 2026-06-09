@@ -324,17 +324,19 @@ describe('runIngestion', () => {
     );
   });
 
-  it('clears removedFromPlaylist flag when a video returns to the playlist', async () => {
+  it('un-archives AND clears the flag when an auto-archived video returns to the playlist', async () => {
     const vid1 = makeIndexedVideo('vid1');
+    // Auto-archived earlier (archived + removedFromPlaylist), now back in the playlist.
     const vid2 = makeIndexedVideo('vid2', { archived: true, removedFromPlaylist: true });
     mockReadIndex.mockReturnValue({ playlistUrl: PLAYLIST_URL, outputFolder, videos: [vid1, vid2] });
     mockFetchPlaylistVideos.mockResolvedValue([makeVideoMeta('vid1'), makeVideoMeta('vid2')]); // vid2 is back
 
     await runIngestion(PLAYLIST_URL, outputFolder, () => {});
 
+    // Returning to the playlist must restore visibility, not just clear the flag.
     expect(mockUpsertVideo).toHaveBeenCalledWith(
       outputFolder,
-      expect.objectContaining({ id: 'vid2', removedFromPlaylist: false }),
+      expect.objectContaining({ id: 'vid2', archived: false, removedFromPlaylist: false }),
     );
   });
 
