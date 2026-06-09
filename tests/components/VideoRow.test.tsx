@@ -242,33 +242,98 @@ describe('VideoRow', () => {
         expect(link.getAttribute('href')).toContain(encodeURIComponent('my vault & notes'));
       });
 
-      it('uses baseOutputFolder for vault and prefixes file with subfolder when outputFolder is a subdirectory', () => {
-        const baseFolder = '/Users/test/vault';
-        const subFolder = '/Users/test/vault/my-playlist';
-        render(
-          <table>
-            <tbody>
-              <VideoRow
-                video={baseVideo}
-                rank={1}
-                outputFolder={subFolder}
-                baseOutputFolder={baseFolder}
-                dimUnscored={false}
-                onDeepDive={jest.fn()}
-                onArchive={jest.fn()}
-                onAnnotationChange={jest.fn()}
-              />
-            </tbody>
-          </table>,
-        );
-        fireEvent.click(screen.getByRole('button', { name: /menu/i }));
-        const link = screen.getByRole('link', { name: /open in obsidian/i });
-        // vault= basename of baseOutputFolder ('vault'), not the subfolder
-        // file= subfolder/slug ('my-playlist/summary')
-        expect(link).toHaveAttribute(
-          'href',
-          `obsidian://open?vault=${encodeURIComponent('vault')}&file=${encodeURIComponent('my-playlist/summary')}`,
-        );
+      // The Obsidian vault is the playlist-level folder: the FIRST path segment of
+      // outputFolder below baseOutputFolder (the data root). Subfolders like raw/
+      // are part of the note path, not the vault — matching how each playlist folder
+      // (agentic-ai-claude-code, cs146s-…) is registered as its own Obsidian vault.
+      describe('vault = first folder below baseOutputFolder', () => {
+        function renderMenu(
+          baseOutputFolder: string,
+          outputFolder: string,
+          overrides: Partial<Video> = {},
+        ) {
+          render(
+            <table>
+              <tbody>
+                <VideoRow
+                  video={{ ...baseVideo, ...overrides }}
+                  rank={1}
+                  outputFolder={outputFolder}
+                  baseOutputFolder={baseOutputFolder}
+                  dimUnscored={false}
+                  onDeepDive={jest.fn()}
+                  onArchive={jest.fn()}
+                  onAnnotationChange={jest.fn()}
+                />
+              </tbody>
+            </table>,
+          );
+          fireEvent.click(screen.getByRole('button', { name: /menu/i }));
+        }
+        const summaryHref = () =>
+          screen.getByRole('link', { name: /open in obsidian/i }).getAttribute('href');
+
+        it('nested playlist+subfolder: vault is the playlist folder, file keeps the subfolder', () => {
+          renderMenu('/Users/test/data', '/Users/test/data/agentic-ai-claude-code/raw');
+          expect(summaryHref()).toBe(
+            `obsidian://open?vault=${encodeURIComponent('agentic-ai-claude-code')}&file=${encodeURIComponent('raw/summary')}`,
+          );
+        });
+
+        it('flat playlist: the playlist folder itself is the vault, no file prefix', () => {
+          renderMenu('/Users/test/data', '/Users/test/data/cs146s-the-modern-software-development');
+          expect(summaryHref()).toBe(
+            `obsidian://open?vault=${encodeURIComponent('cs146s-the-modern-software-development')}&file=${encodeURIComponent('summary')}`,
+          );
+        });
+
+        it('single subfolder under base: that subfolder is the vault', () => {
+          renderMenu('/Users/test/vault', '/Users/test/vault/my-playlist');
+          expect(summaryHref()).toBe(
+            `obsidian://open?vault=${encodeURIComponent('my-playlist')}&file=${encodeURIComponent('summary')}`,
+          );
+        });
+
+        it('output equals base: falls back to the base basename', () => {
+          renderMenu('/Users/test/vault', '/Users/test/vault');
+          expect(summaryHref()).toBe(
+            `obsidian://open?vault=${encodeURIComponent('vault')}&file=${encodeURIComponent('summary')}`,
+          );
+        });
+
+        it('output not under base: falls back to the output basename', () => {
+          renderMenu('/Users/other', '/Users/test/playlist');
+          expect(summaryHref()).toBe(
+            `obsidian://open?vault=${encodeURIComponent('playlist')}&file=${encodeURIComponent('summary')}`,
+          );
+        });
+
+        it('look-alike sibling prefix is NOT treated as under base (data vs data-2)', () => {
+          // base '/Users/test/data' must not prefix-match '/Users/test/data-2/...'
+          renderMenu('/Users/test/data', '/Users/test/data-2/raw');
+          expect(summaryHref()).toBe(
+            `obsidian://open?vault=${encodeURIComponent('raw')}&file=${encodeURIComponent('summary')}`,
+          );
+        });
+
+        it('normalises trailing slashes on both folders', () => {
+          renderMenu('/Users/test/data/', '/Users/test/data/agentic-ai-claude-code/raw/');
+          expect(summaryHref()).toBe(
+            `obsidian://open?vault=${encodeURIComponent('agentic-ai-claude-code')}&file=${encodeURIComponent('raw/summary')}`,
+          );
+        });
+
+        it('deep-dive note keeps the subfolder prefix under the playlist vault', () => {
+          renderMenu('/Users/test/data', '/Users/test/data/agentic-ai-claude-code/raw', {
+            deepDiveMd: 'abc123-deep-dive.md',
+          });
+          const ddHref = screen
+            .getByRole('link', { name: /open deep dive in obsidian/i })
+            .getAttribute('href');
+          expect(ddHref).toBe(
+            `obsidian://open?vault=${encodeURIComponent('agentic-ai-claude-code')}&file=${encodeURIComponent('raw/abc123-deep-dive')}`,
+          );
+        });
       });
     });
 

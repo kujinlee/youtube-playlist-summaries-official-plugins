@@ -13,16 +13,21 @@ interface VideoMenuProps {
 }
 
 function obsidianHref(baseOutputFolder: string, outputFolder: string, file: string): string {
-  // Vault = the registered Obsidian vault root (baseOutputFolder's last segment).
-  // File  = subfolder-relative path so Obsidian can locate the note inside the vault.
-  const base = baseOutputFolder || outputFolder;
-  const vault = base.split('/').filter(Boolean).at(-1) ?? base;
-  const normalizedBase = base.replace(/\/$/, '');
-  const normalizedOutput = outputFolder.replace(/\/$/, '');
-  const subFolder = normalizedOutput.startsWith(`${normalizedBase}/`)
-    ? normalizedOutput.slice(normalizedBase.length + 1)
-    : '';
-  const fullFile = subFolder ? `${subFolder}/${file}` : file;
+  // Vault = the playlist-level folder: the FIRST path segment of outputFolder below
+  // baseOutputFolder (the data root). The note path is the remaining segments below it.
+  // Each playlist folder under the data root is registered as its own Obsidian vault
+  // (e.g. agentic-ai-claude-code, cs146s-the-modern-software-development); subfolders
+  // like raw/ or wiki/ belong to the note path, not the vault name. When outputFolder
+  // has no segment below the base (it IS the base, or sits outside it), fall back to the
+  // output folder's own basename. Assumes POSIX paths and a non-empty outputFolder — the
+  // row menu only renders once a folder is loaded, so both props are non-empty in practice.
+  const base = (baseOutputFolder || outputFolder).replace(/\/+$/, '');
+  const out = outputFolder.replace(/\/+$/, '');
+  const rel = out !== base && out.startsWith(`${base}/`) ? out.slice(base.length + 1) : '';
+  const segments = rel ? rel.split('/').filter(Boolean) : [];
+  const vault = segments[0] ?? (out.split('/').filter(Boolean).at(-1) ?? out);
+  const innerPath = segments.slice(1).join('/');
+  const fullFile = innerPath ? `${innerPath}/${file}` : file;
   return `obsidian://open?vault=${encodeURIComponent(vault)}&file=${encodeURIComponent(fullFile)}`;
 }
 
