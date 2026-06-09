@@ -113,6 +113,14 @@ describe('Header — debounced resolve', () => {
     expect(onIngest).toHaveBeenCalledWith(URL_VAL, TARGET);
   });
 
+  it('notifies onResolvedTarget with the resolved target so the list can follow the URL', async () => {
+    const onResolvedTarget = jest.fn();
+    renderHeader({ onResolvedTarget });
+    fireEvent.change(urlField(), { target: { value: URL_VAL } });
+    await settle();
+    expect(onResolvedTarget).toHaveBeenCalledWith(TARGET);
+  });
+
   it('B15/B16: typing a URL never writes a derived target into the root field, and never calls /api/playlist-info', async () => {
     renderHeader();
     fireEvent.change(urlField(), { target: { value: URL_VAL } });

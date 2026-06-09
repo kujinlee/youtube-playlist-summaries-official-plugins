@@ -648,6 +648,30 @@ describe('Page — sort persistence (behavior 12)', () => {
   });
 });
 
+describe('Page — list follows playlist URL', () => {
+  it('switches the displayed list to the resolved target when the URL changes', async () => {
+    const NEW_TARGET = '/vault/output/other-playlist/raw';
+    const { fetchMock } = await renderPage([], {
+      'GET /api/resolve-folder': { root: OUTPUT_FOLDER, outputFolder: NEW_TARGET },
+    });
+    await waitFor(() => {
+      expect((screen.getByPlaceholderText(/output folder/i) as HTMLInputElement).value).toBe(OUTPUT_FOLDER);
+    });
+
+    fireEvent.change(screen.getByPlaceholderText(/playlist url/i), { target: { value: PLAYLIST_URL } });
+
+    // After the debounced resolve, the page re-fetches videos for the RESOLVED target
+    // (the list follows the URL), not just the original settings folder.
+    await waitFor(
+      () => {
+        const videoCalls = (fetchMock.mock.calls as [string][]).filter((c) => c[0].startsWith('/api/videos'));
+        expect(videoCalls.some((c) => c[0].includes(encodeURIComponent(NEW_TARGET)))).toBe(true);
+      },
+      { timeout: 2000 },
+    );
+  });
+});
+
 describe('Page — browse persistence (P2)', () => {
   const originalPlatform = navigator.platform;
   afterEach(() => {
