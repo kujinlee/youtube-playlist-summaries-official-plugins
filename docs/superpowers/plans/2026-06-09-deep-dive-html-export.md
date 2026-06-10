@@ -618,13 +618,14 @@ git commit -m "feat(deep-dive-html): serve route deep-dive branch + Unicode path
 
 **Files:**
 - Modify: `lib/deep-dive.ts`
-- Test: `tests/lib/deep-dive.test.ts` (extend if present; else create a focused test)
+- Test: `tests/lib/deep-dive-html-stale.test.ts` (NEW, separate file)
 
 - [ ] **Step 1: Write the failing test**
 
-Add to the deep-dive test (the suite already mocks `./gemini`, `./youtube`, `./pdf` — follow its
-existing mock setup). If no such test file exists, create `tests/lib/deep-dive-html-stale.test.ts`
-mirroring the mock pattern from `tests/lib/gemini.test.ts` + a temp dir under `$HOME`:
+> **Do NOT add this to the existing `tests/lib/deep-dive.test.ts`** — that suite mocks `lib/index-store`,
+> so a real-filesystem assertion grafted into it would false-green. Create a **separate** real-fs test
+> file `tests/lib/deep-dive-html-stale.test.ts` (it mocks only `./gemini`, `./pdf`, `./youtube`, and
+> uses a real temp dir + real `index-store`):
 
 ```ts
 import fs from 'fs';

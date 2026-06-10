@@ -128,7 +128,9 @@ harmless. No index mutation, so no lock is needed.
   `<meta name="video-id" content="…">`, `<html lang="…">` from frontmatter.
 - **CSS:** monospace `<pre>`/`<code>` (so ` ```ascii ` diagrams don't collapse); colored headings
   targeting the levels that actually occur (`h1`–`h4` — the deep-dive body uses `###`/`####`, review
-  fix M-3); Korean serif fallback (`'Nanum Myeongjo','Apple SD Gothic Neo'`); readable max-width column.
+  fix M-3); a **sans-serif body stack with Korean coverage** (`'Apple SD Gothic Neo','Malgun Gothic'`)
+  — sans (not the summary's magazine serif) suits a long-form technical article with code/diagrams;
+  readable max-width column. (Deviates intentionally from the summary feature's serif; review fix L-2.)
 - **Path guard (B-1 fix):** the serve-route path-traversal regex is widened to Unicode
   `/^htmls\/[\p{L}\p{N}._-]+\.html$/u` so Korean-slug filenames pass; the resolved-path containment
   check (`path.resolve` + prefix) remains the real traversal backstop.
