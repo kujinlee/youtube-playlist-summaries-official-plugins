@@ -63,6 +63,10 @@ export async function runDeepDive(
   const mdFilename = `${base}-deep-dive.md`;
   const pdfFilename = `pdfs/${base}-deep-dive.pdf`;
 
+  // Invalidate any cached deep-dive HTML so the next view regenerates from the new markdown.
+  try { fs.unlinkSync(path.join(outputFolder, 'htmls', `${base}-deep-dive.html`)); }
+  catch { /* no cached html — fine */ }
+
   // Strip any leading H1 Gemini may have generated — we add our own standardized header
   const body = deepDiveRaw.replace(/^#\s+[^\n]*\n+/, '');
 

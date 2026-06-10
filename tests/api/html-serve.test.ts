@@ -33,11 +33,11 @@ it('400s without outputFolder', async () => {
   expect(res.status).toBe(400);
 });
 
-it('400s when type is missing or not summary', async () => {
+it('400s when type is missing or unsupported', async () => {
   writeIndex(video({ summaryHtml: 'htmls/a.html' }));
   const base = `http://localhost/api/html/${VIDEO_ID}?outputFolder=${encodeURIComponent(dir)}`;
-  expect((await GET(new Request(base), ctx)).status).toBe(400);                       // missing type
-  expect((await GET(new Request(`${base}&type=deep-dive`), ctx)).status).toBe(400);   // unsupported type
+  expect((await GET(new Request(base), ctx)).status).toBe(400);                 // missing type
+  expect((await GET(new Request(`${base}&type=bogus`), ctx)).status).toBe(400); // unsupported type
 });
 
 it('404s on a path-traversal summaryHtml value (Codex BLOCKING)', async () => {
@@ -67,4 +67,14 @@ it('serves the cached HTML with text/html', async () => {
   expect(res.status).toBe(200);
   expect(res.headers.get('Content-Type')).toMatch(/text\/html/);
   expect(await res.text()).toContain('<title>ok</title>');
+});
+
+it('serves a summary HTML whose filename has a Korean slug (B-1)', async () => {
+  const koFile = 'htmls/모든-곳에-구글이-있었다.html';
+  fs.mkdirSync(path.join(dir, 'htmls'), { recursive: true });
+  fs.writeFileSync(path.join(dir, koFile), '<!DOCTYPE html><title>ko</title>');
+  writeIndex(video({ summaryHtml: koFile }));
+  const res = await GET(new Request(
+    `http://localhost/api/html/${VIDEO_ID}?outputFolder=${encodeURIComponent(dir)}&type=summary`), ctx);
+  expect(res.status).toBe(200); // was 404 before the Unicode-regex fix
 });

@@ -45,6 +45,7 @@ export default function VideoMenu({ video, outputFolder, baseOutputFolder, onDee
   const hasSummary = !!video.summaryMd;
   const hasSummaryHtml = !!video.summaryHtml;
   const htmlViewHref = `/api/html/${encodeURIComponent(video.id)}?outputFolder=${encodeURIComponent(outputFolder)}&type=summary`;
+  const deepDiveHtmlHref = `/api/html/${encodeURIComponent(video.id)}?outputFolder=${encodeURIComponent(outputFolder)}&type=deep-dive`;
 
   return (
     <ul
@@ -135,6 +136,17 @@ export default function VideoMenu({ video, outputFolder, baseOutputFolder, onDee
           >
             View Deep Dive PDF
           </a>
+        )}
+      </li>
+      <li role="none">
+        {hasDeepDive ? (
+          <a href={deepDiveHtmlHref} onClick={onClose} target="_blank" rel="noopener noreferrer" className={itemClass}>
+            View Deep Dive HTML
+          </a>
+        ) : (
+          <span aria-disabled="true" className={disabledClass}>
+            View Deep Dive HTML
+          </span>
         )}
       </li>
       {video.summaryMd && (

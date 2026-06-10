@@ -41,3 +41,19 @@ it('disables HTML actions when there is no summaryMd', () => {
   const item = screen.getByText(/generate html doc/i);
   expect(item).toHaveAttribute('aria-disabled', 'true');
 });
+
+it('shows an enabled "View Deep Dive HTML" link when deepDiveMd is set', () => {
+  renderMenu(video({ deepDiveMd: 'a-deep-dive.md' }));
+  const link = screen.getByRole('link', { name: /view deep dive html/i });
+  const href = link.getAttribute('href')!;
+  const u = new URL(href, 'http://localhost');
+  expect(u.pathname).toBe('/api/html/v');
+  expect(u.searchParams.get('outputFolder')).toBe('/home/u/p');
+  expect(u.searchParams.get('type')).toBe('deep-dive');
+});
+
+it('disables "View Deep Dive HTML" when there is no deepDiveMd', () => {
+  renderMenu(video({ deepDiveMd: null }));
+  expect(screen.queryByRole('link', { name: /view deep dive html/i })).not.toBeInTheDocument();
+  expect(screen.getByText(/view deep dive html/i)).toHaveAttribute('aria-disabled', 'true');
+});
