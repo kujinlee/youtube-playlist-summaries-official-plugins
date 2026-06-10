@@ -19,7 +19,7 @@
 | `lib/ask-gemini.ts` (create) | Pure builders: language-aware prompt + encoded Gemini URL. No side effects. |
 | `tests/lib/ask-gemini.test.ts` (create) | Unit tests for both builders (EN/KO/default, encoding). |
 | `components/AskGeminiMenuItem.tsx` (create) | The button + click handler (clipboard + `window.open`) + transient confirmation state machine + auto-close timer. |
-| `tests/components/AskGeminiMenuItem.test.tsx` (create) | Component tests: success, KO prompt, clipboard-reject fallback, popup-blocked, timer cleanup. |
+| `tests/components/AskGeminiMenuItem.test.tsx` (create) | Component tests: success, KO prompt, clipboard-reject fallback, clipboard-unavailable fallback, timer cleanup. |
 | `components/VideoMenu.tsx` (modify) | Render `<AskGeminiMenuItem>` as a menu item under "Watch on YouTube". |
 | `tests/components/VideoMenu.test.tsx` (modify) | Assert the item renders enabled within the menu. |
 
@@ -176,76 +176,101 @@ const KO = '아래 영상을 먼저 검토해 주세요. 이 영상에 대해 �
 const EXPECTED_URL =
   'https://gemini.google.com/app?prompt=' + encodeURIComponent(EN) + '&autosubmit=false';
 
-function mockClipboard(writeText: jest.Mock) {
-  Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+// Pass a mock to install navigator.clipboard.writeText; pass null to simulate the
+// clipboard API being unavailable (navigator.clipboard === undefined).
+function setClipboard(writeText: jest.Mock | null) {
+  Object.defineProperty(navigator, 'clipboard', {
+    value: writeText ? { writeText } : undefined,
+    configurable: true,
+  });
 }
 
-function clickItem() {
-  fireEvent.click(screen.getByRole('button', { name: /ask gemini about this video/i }));
+const askButton = () => screen.getByRole('button', { name: /ask gemini about this video/i });
+
+// Flush the clipboard promise chain + fake timers the way the rest of the suite does
+// (see Header.test.tsx). advanceTimersByTimeAsync pumps microtasks between timers, so the
+// .then/.catch settle reliably regardless of resolve-vs-reject tick depth.
+async function flush(ms = 0) {
+  await act(async () => { await jest.advanceTimersByTimeAsync(ms); });
 }
 
 beforeEach(() => { jest.useFakeTimers(); });
-afterEach(() => { jest.useRealTimers(); jest.restoreAllMocks(); });
+afterEach(() => {
+  jest.useRealTimers();
+  jest.restoreAllMocks();
+  setClipboard(null); // restore_all_mocks does not undo defineProperty — reset explicitly
+});
 
 it('copies the prompt, opens Gemini, shows success, and auto-closes', async () => {
   const writeText = jest.fn().mockResolvedValue(undefined);
-  mockClipboard(writeText);
+  setClipboard(writeText);
   const open = jest.spyOn(window, 'open').mockReturnValue({} as Window);
   const onClose = jest.fn();
   render(<AskGeminiMenuItem video={video({ language: 'en' })} onClose={onClose} />);
 
-  clickItem();
+  await act(async () => { fireEvent.click(askButton()); await jest.advanceTimersByTimeAsync(0); });
 
   expect(writeText).toHaveBeenCalledWith(EN);
   expect(open).toHaveBeenCalledWith(EXPECTED_URL, '_blank', 'noopener,noreferrer');
-
-  await act(async () => { await Promise.resolve(); });
   expect(screen.getByRole('status')).toHaveTextContent(/prompt copied/i);
   expect(onClose).not.toHaveBeenCalled();
 
-  act(() => { jest.advanceTimersByTime(2500); });
+  await flush(2500);
   expect(onClose).toHaveBeenCalledTimes(1);
 });
 
 it('uses the Korean prompt for ko videos', async () => {
   const writeText = jest.fn().mockResolvedValue(undefined);
-  mockClipboard(writeText);
+  setClipboard(writeText);
   jest.spyOn(window, 'open').mockReturnValue({} as Window);
   render(<AskGeminiMenuItem video={video({ language: 'ko' })} onClose={jest.fn()} />);
 
-  clickItem();
+  await act(async () => { fireEvent.click(askButton()); await jest.advanceTimersByTimeAsync(0); });
   expect(writeText).toHaveBeenCalledWith(KO);
 });
 
-it('shows the prompt to copy manually when the clipboard write rejects', async () => {
+it('falls back to a copyable prompt and still opens Gemini when the clipboard write rejects', async () => {
   const writeText = jest.fn().mockRejectedValue(new Error('denied'));
-  mockClipboard(writeText);
-  jest.spyOn(window, 'open').mockReturnValue({} as Window);
+  setClipboard(writeText);
+  const open = jest.spyOn(window, 'open').mockReturnValue({} as Window);
   const onClose = jest.fn();
   render(<AskGeminiMenuItem video={video()} onClose={onClose} />);
 
-  clickItem();
-  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  await act(async () => { fireEvent.click(askButton()); await jest.advanceTimersByTimeAsync(0); });
 
-  expect(screen.getByText(/copy this prompt and paste/i)).toBeInTheDocument();
+  expect(open).toHaveBeenCalledWith(EXPECTED_URL, '_blank', 'noopener,noreferrer'); // Gemini still opened
+  expect(screen.getByRole('alert')).toHaveTextContent(/copy this prompt and paste/i);
   expect(screen.getByDisplayValue(EN)).toBeInTheDocument();
 
-  act(() => { jest.advanceTimersByTime(5000); });
+  await flush(5000);
+  expect(onClose).not.toHaveBeenCalled(); // fallback does not auto-close
+});
+
+it('falls back and still opens Gemini when the clipboard API is unavailable', async () => {
+  setClipboard(null); // navigator.clipboard === undefined
+  const open = jest.spyOn(window, 'open').mockReturnValue({} as Window);
+  const onClose = jest.fn();
+  render(<AskGeminiMenuItem video={video()} onClose={onClose} />);
+
+  await act(async () => { fireEvent.click(askButton()); await jest.advanceTimersByTimeAsync(0); });
+
+  expect(open).toHaveBeenCalledWith(EXPECTED_URL, '_blank', 'noopener,noreferrer');
+  expect(screen.getByRole('alert')).toHaveTextContent(/copy this prompt and paste/i);
+  expect(screen.getByDisplayValue(EN)).toBeInTheDocument();
   expect(onClose).not.toHaveBeenCalled();
 });
 
 it('clears the auto-close timer on unmount', async () => {
   const writeText = jest.fn().mockResolvedValue(undefined);
-  mockClipboard(writeText);
+  setClipboard(writeText);
   jest.spyOn(window, 'open').mockReturnValue({} as Window);
   const onClose = jest.fn();
   const { unmount } = render(<AskGeminiMenuItem video={video()} onClose={onClose} />);
 
-  clickItem();
-  await act(async () => { await Promise.resolve(); });
+  await act(async () => { fireEvent.click(askButton()); await jest.advanceTimersByTimeAsync(0); });
   unmount();
 
-  act(() => { jest.advanceTimersByTime(5000); });
+  await flush(5000);
   expect(onClose).not.toHaveBeenCalled();
 });
 ```
@@ -312,15 +337,16 @@ export default function AskGeminiMenuItem({ video, onClose }: AskGeminiMenuItemP
 
       {confirmation.kind === 'success' && (
         <div role="status" className="px-4 py-2 text-xs text-emerald-400">
-          ✓ Prompt copied — paste (⌘V) into Gemini
+          ✓ Prompt copied — paste (⌘V / Ctrl+V) into Gemini
         </div>
       )}
 
       {confirmation.kind === 'fallback' && (
-        <div role="status" className="px-4 py-2 text-xs text-amber-400">
+        <div role="alert" className="px-4 py-2 text-xs text-amber-400">
           Could not copy automatically. Copy this prompt and paste into Gemini:
           <textarea
             readOnly
+            tabIndex={-1}
             value={confirmation.prompt}
             rows={3}
             className="mt-1 w-full rounded bg-zinc-900 p-1 text-zinc-200"
@@ -335,7 +361,7 @@ export default function AskGeminiMenuItem({ video, onClose }: AskGeminiMenuItemP
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npx jest AskGeminiMenuItem`
-Expected: PASS — 4 tests.
+Expected: PASS — 5 tests (success, KO, reject-fallback, unavailable-fallback, unmount-cleanup).
 
 - [ ] **Step 5: Commit**
 
@@ -425,8 +451,11 @@ After all three tasks:
 - Exact EN/KO prompt strings → Task 1 tests + impl. ✅
 - URL Contract (both params asserted) → Task 1 `buildGeminiUrl` tests + Task 2 `EXPECTED_URL` assertion. ✅
 - `window.open` return value ignored (noopener returns null even on success) → Task 2 impl comment + no test depends on the return value. ✅
-- Two outcomes (success auto-close, fallback stays open) → Task 2 tests #1/#3. ✅
-- Timer cleanup on unmount → Task 2 test #4. ✅
+- Two outcomes (success auto-close, fallback stays open) → Task 2 success + reject-fallback tests. ✅
+- Clipboard-unavailable branch (spec-mandated) → Task 2 unavailable-fallback test. ✅
+- "Gemini still opened when clipboard fails" invariant → `open` asserted in both fallback tests. ✅
+- Success = `role="status"`, fallback = `role="alert"` (codebase convention) → Task 2 impl + tests. ✅
+- Timer cleanup on unmount → Task 2 unmount-cleanup test. ✅
 - Always-enabled menu item → Task 3 test. ✅
 - Behaviors #1–#5 (builders) → Task 1; #6–#10 (component) → Tasks 2–3. ✅
 - No backend / no schema change / no persistence → no task touches `types/`, `app/api/`, or any index writer. ✅

@@ -135,7 +135,7 @@ the prompt manually.
 | Failure | Detection | Behavior |
 |---|---|---|
 | Clipboard write rejects (focus/permission/insecure context) | `navigator.clipboard.writeText(...)` promise rejects, or `navigator.clipboard?.writeText` is undefined | Confirmation switches to a **fallback** state that displays the prompt text so the user can select-copy it manually. Gemini tab still opened. No throw. |
-| Clipboard write succeeds | promise resolves | Confirmation shows **"✓ Prompt copied — paste (⌘V) into Gemini"**, auto-closes ~2.5s. |
+| Clipboard write succeeds | promise resolves | Confirmation shows **"✓ Prompt copied — paste (⌘V / Ctrl+V) into Gemini"**, auto-closes ~2.5s. |
 | Popup blocked | *not detected* — see the `window.open` note above | No dedicated state. The clipboard copy still succeeded; the user opens Gemini manually. |
 
 Side-effect ordering: call `window.open` and `navigator.clipboard.writeText` both within the
@@ -167,10 +167,13 @@ clipboard copy.
 
 - **Unit (jest + ts-jest)** — `lib/ask-gemini.ts`, TDD:
   behaviors #1–#5. Pure functions, exact-string assertions, both query params asserted.
-- **Component (@testing-library/react)** — `VideoMenu`:
-  behaviors #6–#11. Mock `navigator.clipboard.writeText` (resolve and reject cases) and
-  `window.open` (handle and `null` cases); assert call arguments, the confirmation text, the
-  fallback path, and timer cleanup (fake timers).
+- **Component (@testing-library/react)** — `AskGeminiMenuItem` (+ one wiring assertion in
+  `VideoMenu`): behaviors #6–#10. Mock `navigator.clipboard.writeText` (resolve, reject, and
+  *unavailable* cases) and `window.open`; assert call arguments, the confirmation text, the
+  fallback path, that `window.open` still fires when the clipboard fails, and timer cleanup.
+  Use `role="status"` for the success state and `role="alert"` for the fallback (matching the
+  codebase's success/error convention). Flush async with
+  `await act(async () => { await jest.advanceTimersByTimeAsync(0); })` (fake timers).
 - **E2E:** none — an external browser tab cannot be asserted; the component test is the
   coverage boundary.
 
