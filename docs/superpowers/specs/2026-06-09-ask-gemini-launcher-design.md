@@ -59,13 +59,21 @@ click "Ask Gemini about this video"
   └─ prompt = buildGeminiPrompt(video)          // pure, language-aware
   └─ url    = buildGeminiUrl(prompt)            // pure, encoded
   └─ navigator.clipboard.writeText(prompt)      // async; drives confirmation/fallback text
-  └─ window.open(url, '_blank', 'noopener,noreferrer')   // new tab; null if popup-blocked
-  └─ render inline confirmation in the menu, auto-close after ~2.5s
+  └─ window.open(url, '_blank', 'noopener,noreferrer')   // new tab; return value ignored (see note)
+  └─ render inline confirmation in the menu, auto-close after ~2.5s (success only)
 ```
 
 Both side-effects fire **synchronously inside the click handler** so they run in the browser's
 user-gesture context (clipboard writes and `window.open` are gesture-gated; deferring them
 risks silent blocking).
+
+**`window.open` return value is not used.** With `noopener` set, `window.open` returns `null`
+**even on success** (per the HTML spec), so the return value cannot distinguish a blocked popup
+from a successful one. We keep `noopener,noreferrer` for security (the opened tab gets no
+`window.opener` handle and no referrer) and accept that a blocked popup is not separately
+detected: the clipboard copy still succeeds, and the user can open Gemini manually. The
+confirmation is driven solely by the clipboard promise (resolve → success; reject/unavailable →
+fallback).
 
 ---
 
@@ -113,12 +121,12 @@ unchanged.
 | Element | Dismissal mechanism | Expected result |
 |---|---|---|
 | Inline confirmation — **success** state | Auto-close timer (~2.5s after a successful copy) | Confirmation clears and the menu closes via the existing `onClose` |
-| Inline confirmation — **fallback / popup-blocked** state | **No auto-close** (the prompt text / instruction must stay readable) | Persists until the user dismisses the menu manually |
+| Inline confirmation — **fallback** state | **No auto-close** (the prompt text must stay readable) | Persists until the user dismisses the menu manually |
 | Inline confirmation (any state) | User clicks backdrop / presses Escape | Menu closes immediately (existing behavior); any pending timer is cleared on unmount |
 | Menu (host) | Existing Escape / backdrop | Unchanged |
 
-Only the **success** state auto-closes. The fallback and popup-blocked states stay open so the
-user can read/copy the prompt or open Gemini manually.
+Only the **success** state auto-closes. The fallback state stays open so the user can read/copy
+the prompt manually.
 
 ---
 
@@ -126,14 +134,15 @@ user can read/copy the prompt or open Gemini manually.
 
 | Failure | Detection | Behavior |
 |---|---|---|
-| Clipboard write rejects (focus/permission/insecure context) | `navigator.clipboard.writeText(...)` promise rejects, or `navigator.clipboard` is undefined | Confirmation switches to a **fallback** state that displays the prompt text so the user can select-copy it manually. Gemini tab still opened. No throw. |
-| Popup blocked | `window.open(...)` returns `null` | Confirmation notes Gemini could not be opened automatically and that the prompt is copied, so the user can open Gemini themselves. Clipboard copy still attempted. |
-| Both succeed | promise resolves and `window.open` returns a handle | Confirmation shows **"✓ Prompt copied — paste (⌘V) into Gemini"**, auto-closes ~2.5s. |
+| Clipboard write rejects (focus/permission/insecure context) | `navigator.clipboard.writeText(...)` promise rejects, or `navigator.clipboard?.writeText` is undefined | Confirmation switches to a **fallback** state that displays the prompt text so the user can select-copy it manually. Gemini tab still opened. No throw. |
+| Clipboard write succeeds | promise resolves | Confirmation shows **"✓ Prompt copied — paste (⌘V) into Gemini"**, auto-closes ~2.5s. |
+| Popup blocked | *not detected* — see the `window.open` note above | No dedicated state. The clipboard copy still succeeded; the user opens Gemini manually. |
 
 Side-effect ordering: call `window.open` and `navigator.clipboard.writeText` both within the
-gesture; the confirmation state is driven by the clipboard promise's resolve/reject and by the
-`window.open` return value. A clipboard failure must not prevent opening Gemini, and a blocked
-popup must not prevent the clipboard copy.
+gesture; the confirmation state is driven **solely by the clipboard promise** (resolve →
+success; reject/unavailable → fallback). The `window.open` return value is ignored. A clipboard
+failure must not prevent opening Gemini, and a failure to open Gemini must not prevent the
+clipboard copy.
 
 ---
 
@@ -147,11 +156,10 @@ popup must not prevent the clipboard copy.
 | 4 | URL encoding | `buildGeminiUrl(prompt)` | `https://gemini.google.com/app?prompt=<encodeURIComponent(prompt)>&autosubmit=false` |
 | 5 | URL special chars | prompt containing spaces, `:`, `?`, `&`, Hangul | all encoded in the `prompt` value; `autosubmit=false` intact and parseable |
 | 6 | Menu item always enabled | render VideoMenu for any video | item is an enabled `<button>` (never `aria-disabled`) |
-| 7 | Click copies + opens | click the item | `clipboard.writeText` called with `buildGeminiPrompt(video)`; `window.open` called with `buildGeminiUrl(...)` and `'_blank','noopener,noreferrer'` |
-| 8 | Success confirmation | click, clipboard resolves, window opens | "✓ Prompt copied…" shown; auto-closes ~2.5s |
-| 9 | Clipboard-reject fallback | click, `writeText` rejects | fallback state shows the prompt text; no unhandled rejection; Gemini still opened |
-| 10 | Popup-blocked note | click, `window.open` returns `null` | confirmation notes blocked-popup; clipboard copy still attempted |
-| 11 | Timer cleanup | menu unmounts before timer fires | no state update after unmount (no act/leak warning) |
+| 7 | Click copies + opens | click the item | `clipboard.writeText` called with `buildGeminiPrompt(video)`; `window.open` called with `buildGeminiUrl(...)` and `'_blank','noopener,noreferrer'`; return value ignored |
+| 8 | Success confirmation | click, clipboard resolves | "✓ Prompt copied…" shown; auto-closes ~2.5s |
+| 9 | Clipboard-reject fallback | click, `writeText` rejects (or clipboard unavailable) | fallback state shows the prompt text; no unhandled rejection; Gemini still opened; no auto-close |
+| 10 | Timer cleanup | menu unmounts before timer fires | no state update after unmount (no act/leak warning) |
 
 ---
 

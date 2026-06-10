@@ -144,10 +144,10 @@ git commit -m "feat(ask-gemini): pure prompt + URL builders"
 - Create: `components/AskGeminiMenuItem.tsx`
 - Test: `tests/components/AskGeminiMenuItem.test.tsx`
 
-**Behavior contract (from spec Enumerated Behaviors #6–#11):**
+**Behavior contract (from spec Enumerated Behaviors #6–#10):**
 - Click → `window.open(buildGeminiUrl(prompt), '_blank', 'noopener,noreferrer')` and `navigator.clipboard.writeText(prompt)`, both fired synchronously in the handler.
-- Clipboard resolves + popup opened → **success** state ("✓ Prompt copied…"), schedule `onClose` after `AUTO_CLOSE_MS` (2500).
-- Clipboard resolves + popup `null` (blocked) → **blocked** state (notes it; no auto-close).
+- **`window.open` return value is ignored** — with `noopener` it returns `null` even on success, so it cannot distinguish blocked from success. Confirmation is driven solely by the clipboard promise.
+- Clipboard resolves → **success** state ("✓ Prompt copied…"), schedule `onClose` after `AUTO_CLOSE_MS` (2500).
 - Clipboard rejects, or `navigator.clipboard?.writeText` is unavailable → **fallback** state showing the prompt in a read-only textarea (no auto-close).
 - Timer cleared on unmount.
 
@@ -234,23 +234,6 @@ it('shows the prompt to copy manually when the clipboard write rejects', async (
   expect(onClose).not.toHaveBeenCalled();
 });
 
-it('notes a blocked popup but still copies the prompt', async () => {
-  const writeText = jest.fn().mockResolvedValue(undefined);
-  mockClipboard(writeText);
-  jest.spyOn(window, 'open').mockReturnValue(null);
-  const onClose = jest.fn();
-  render(<AskGeminiMenuItem video={video()} onClose={onClose} />);
-
-  clickItem();
-  expect(writeText).toHaveBeenCalledWith(EN);
-
-  await act(async () => { await Promise.resolve(); });
-  expect(screen.getByText(/open gemini\.google\.com/i)).toBeInTheDocument();
-
-  act(() => { jest.advanceTimersByTime(5000); });
-  expect(onClose).not.toHaveBeenCalled();
-});
-
 it('clears the auto-close timer on unmount', async () => {
   const writeText = jest.fn().mockResolvedValue(undefined);
   mockClipboard(writeText);
@@ -294,7 +277,6 @@ const AUTO_CLOSE_MS = 2500;
 type Confirmation =
   | { kind: 'idle' }
   | { kind: 'success' }
-  | { kind: 'blocked' }
   | { kind: 'fallback'; prompt: string };
 
 export default function AskGeminiMenuItem({ video, onClose }: AskGeminiMenuItemProps) {
@@ -305,18 +287,15 @@ export default function AskGeminiMenuItem({ video, onClose }: AskGeminiMenuItemP
 
   function handleClick() {
     const prompt = buildGeminiPrompt(video);
-    const popup = window.open(buildGeminiUrl(prompt), '_blank', 'noopener,noreferrer');
-    const popupBlocked = popup === null;
+    // noopener,noreferrer for security; with noopener the return value is null even on
+    // success, so it is intentionally ignored. Confirmation is driven by the clipboard promise.
+    window.open(buildGeminiUrl(prompt), '_blank', 'noopener,noreferrer');
 
     const write = navigator.clipboard?.writeText?.(prompt);
     if (write && typeof write.then === 'function') {
       write.then(() => {
-        if (popupBlocked) {
-          setConfirmation({ kind: 'blocked' });
-        } else {
-          setConfirmation({ kind: 'success' });
-          timerRef.current = setTimeout(onClose, AUTO_CLOSE_MS);
-        }
+        setConfirmation({ kind: 'success' });
+        timerRef.current = setTimeout(onClose, AUTO_CLOSE_MS);
       }).catch(() => {
         setConfirmation({ kind: 'fallback', prompt });
       });
@@ -334,12 +313,6 @@ export default function AskGeminiMenuItem({ video, onClose }: AskGeminiMenuItemP
       {confirmation.kind === 'success' && (
         <div role="status" className="px-4 py-2 text-xs text-emerald-400">
           ✓ Prompt copied — paste (⌘V) into Gemini
-        </div>
-      )}
-
-      {confirmation.kind === 'blocked' && (
-        <div role="status" className="px-4 py-2 text-xs text-amber-400">
-          Prompt copied. Could not open Gemini automatically — open gemini.google.com and paste (⌘V).
         </div>
       )}
 
@@ -362,7 +335,7 @@ export default function AskGeminiMenuItem({ video, onClose }: AskGeminiMenuItemP
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npx jest AskGeminiMenuItem`
-Expected: PASS — 5 tests.
+Expected: PASS — 4 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -451,10 +424,11 @@ After all three tasks:
 - Approach 2 (clipboard guaranteed + `?prompt=…&autosubmit=false`) → Task 1 `buildGeminiUrl` + Task 2 click handler. ✅
 - Exact EN/KO prompt strings → Task 1 tests + impl. ✅
 - URL Contract (both params asserted) → Task 1 `buildGeminiUrl` tests + Task 2 `EXPECTED_URL` assertion. ✅
-- Three outcomes (success auto-close, fallback stays open, blocked stays open) → Task 2 tests #1/#3/#4. ✅
-- Timer cleanup on unmount → Task 2 test #5. ✅
+- `window.open` return value ignored (noopener returns null even on success) → Task 2 impl comment + no test depends on the return value. ✅
+- Two outcomes (success auto-close, fallback stays open) → Task 2 tests #1/#3. ✅
+- Timer cleanup on unmount → Task 2 test #4. ✅
 - Always-enabled menu item → Task 3 test. ✅
-- Behaviors #1–#5 (builders) → Task 1; #6–#11 (component) → Tasks 2–3. ✅
+- Behaviors #1–#5 (builders) → Task 1; #6–#10 (component) → Tasks 2–3. ✅
 - No backend / no schema change / no persistence → no task touches `types/`, `app/api/`, or any index writer. ✅
 
 **Placeholder scan:** none — every code step contains complete code and exact commands.
