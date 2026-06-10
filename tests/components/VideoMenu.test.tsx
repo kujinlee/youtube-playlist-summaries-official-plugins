@@ -57,3 +57,10 @@ it('disables "View Deep Dive HTML" when there is no deepDiveMd', () => {
   expect(screen.queryByRole('link', { name: /view deep dive html/i })).not.toBeInTheDocument();
   expect(screen.getByText(/view deep dive html/i)).toHaveAttribute('aria-disabled', 'true');
 });
+
+it('renders an enabled "Ask Gemini about this video" button', () => {
+  renderMenu(video());
+  expect(
+    screen.getByRole('button', { name: /ask gemini about this video/i }),
+  ).toBeEnabled();
+});

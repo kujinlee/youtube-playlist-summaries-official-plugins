@@ -1,6 +1,7 @@
 'use client';
 
 import type { Video } from '@/types';
+import AskGeminiMenuItem from './AskGeminiMenuItem';
 
 interface VideoMenuProps {
   video: Video;
@@ -56,6 +57,9 @@ export default function VideoMenu({ video, outputFolder, baseOutputFolder, onDee
         <a href={video.youtubeUrl} onClick={onClose} target="_blank" rel="noopener noreferrer" className={itemClass}>
           Watch on YouTube
         </a>
+      </li>
+      <li role="none">
+        <AskGeminiMenuItem video={video} onClose={onClose} />
       </li>
       <li role="none">
         <a href={obsidianHref(baseOutputFolder, outputFolder, summaryFile)} onClick={onClose} target="_blank" rel="noopener noreferrer" className={itemClass}>
