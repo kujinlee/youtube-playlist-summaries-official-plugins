@@ -49,6 +49,7 @@ These files are not @-included — read them when the trigger condition is met.
    - **Required:** immediately after saving the plan, create a Post-Plan Gate checklist (see below) — do not dispatch any implementation subagent until all items are marked complete
 
 3. **Implementation** (per task)
+   - **Execution method default (set 2026-06-09):** use **`superpowers:subagent-driven-development`** — a fresh subagent per task with two-stage review between tasks. Proceed with this method automatically; do **not** ask the user to choose between subagent-driven and inline execution each time. (The Phase 2 plan-approval gate still applies — this default governs only *how* an already-approved plan is executed.)
    - At task start: create a TaskCreate checklist (see Per-Task Checklist below) — do not write any code until the list exists
    - Write failing tests → implement → Claude code review → Codex adversarial review → address → mark done
    - Save each review to `docs/reviews/task-N-<name>-review.md` (Claude) and `docs/reviews/task-N-<name>-codex.md` (Codex)
