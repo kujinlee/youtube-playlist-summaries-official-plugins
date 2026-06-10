@@ -37,6 +37,7 @@ function renderRow(
     onAnnotationChange?: jest.Mock;
     onDeepDive?: jest.Mock;
     onArchive?: jest.Mock;
+    onGenerateHtml?: jest.Mock;
   } = {},
 ) {
   const video = { ...baseVideo, ...overrides };
@@ -52,6 +53,7 @@ function renderRow(
           dimUnscored={options.dimUnscored ?? false}
           onDeepDive={options.onDeepDive ?? jest.fn()}
           onArchive={options.onArchive ?? jest.fn()}
+          onGenerateHtml={options.onGenerateHtml ?? jest.fn()}
           onAnnotationChange={onAnnotationChange}
         />
       </tbody>
@@ -231,6 +233,7 @@ describe('VideoRow', () => {
                 dimUnscored={false}
                 onDeepDive={jest.fn()}
                 onArchive={jest.fn()}
+                onGenerateHtml={jest.fn()}
                 onAnnotationChange={jest.fn()}
               />
             </tbody>
@@ -263,6 +266,7 @@ describe('VideoRow', () => {
                   dimUnscored={false}
                   onDeepDive={jest.fn()}
                   onArchive={jest.fn()}
+                  onGenerateHtml={jest.fn()}
                   onAnnotationChange={jest.fn()}
                 />
               </tbody>

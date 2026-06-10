@@ -11,6 +11,7 @@ interface VideoListProps {
   minPersonalScore?: number;
   onDeepDive: (videoId: string) => void;
   onArchive: (videoId: string, action: 'archive' | 'unarchive') => void;
+  onGenerateHtml: (videoId: string) => void;
   onAnnotationChange?: (videoId: string, patch: Partial<Pick<Video, 'personalScore' | 'personalNote' | 'corrections' | 'tldr' | 'takeaways'>>) => void;
   sortColumn?: SortColumn | null;
   sortOrder?: SortOrder;
@@ -48,6 +49,7 @@ export default function VideoList({
   minPersonalScore = 0,
   onDeepDive,
   onArchive,
+  onGenerateHtml,
   onAnnotationChange = noop,
   sortColumn,
   sortOrder = 'asc',
@@ -135,6 +137,7 @@ export default function VideoList({
             dimUnscored={minPersonalScore > 0 && video.personalScore === undefined}
             onDeepDive={onDeepDive}
             onArchive={onArchive}
+            onGenerateHtml={onGenerateHtml}
             onAnnotationChange={onAnnotationChange}
           />
         ))}

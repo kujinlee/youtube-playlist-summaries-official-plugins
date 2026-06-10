@@ -9,6 +9,7 @@ interface VideoMenuProps {
   onDeepDive: (videoId: string) => void;
   onArchive: (videoId: string, action: 'archive' | 'unarchive') => void;
   onEditCorrections: () => void;
+  onGenerateHtml: (videoId: string) => void;
   onClose: () => void;
 }
 
@@ -34,13 +35,16 @@ function obsidianHref(baseOutputFolder: string, outputFolder: string, file: stri
 const itemClass = 'block w-full px-4 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-700';
 const disabledClass = 'block w-full px-4 py-2 text-left text-sm text-zinc-500 cursor-not-allowed';
 
-export default function VideoMenu({ video, outputFolder, baseOutputFolder, onDeepDive, onArchive, onEditCorrections, onClose }: VideoMenuProps) {
+export default function VideoMenu({ video, outputFolder, baseOutputFolder, onDeepDive, onArchive, onEditCorrections, onGenerateHtml, onClose }: VideoMenuProps) {
   const hasDeepDive = !!video.deepDiveMd;
   const hasSummaryPdf = !!video.summaryPdf;
   const hasDeepDivePdf = !!video.deepDivePdf;
   const summaryFile = video.summaryMd?.replace(/\.md$/, '') ?? video.id;
   const deepDiveFile = video.deepDiveMd?.replace(/\.md$/, '') ?? `${video.id}-deep-dive`;
   const pdfBase = `/api/pdf/${encodeURIComponent(video.id)}?outputFolder=${encodeURIComponent(outputFolder)}`;
+  const hasSummary = !!video.summaryMd;
+  const hasSummaryHtml = !!video.summaryHtml;
+  const htmlViewHref = `/api/html/${encodeURIComponent(video.id)}?outputFolder=${encodeURIComponent(outputFolder)}&type=summary`;
 
   return (
     <ul
@@ -74,6 +78,26 @@ export default function VideoMenu({ video, outputFolder, baseOutputFolder, onDee
           </a>
         )}
       </li>
+      <li role="none">
+        {hasSummaryHtml ? (
+          <a href={htmlViewHref} onClick={onClose} target="_blank" rel="noopener noreferrer" className={itemClass}>
+            View HTML doc
+          </a>
+        ) : hasSummary ? (
+          <button type="button" onClick={() => { onGenerateHtml(video.id); onClose(); }} className={itemClass}>
+            Generate HTML doc
+          </button>
+        ) : (
+          <span aria-disabled="true" className={disabledClass}>Generate HTML doc</span>
+        )}
+      </li>
+      {hasSummaryHtml && (
+        <li role="none">
+          <button type="button" onClick={() => { onGenerateHtml(video.id); onClose(); }} className={itemClass}>
+            Regenerate HTML doc
+          </button>
+        </li>
+      )}
       <li role="none">
         <button type="button" onClick={() => { onDeepDive(video.id); onClose(); }} className={itemClass}>
           Deep Dive

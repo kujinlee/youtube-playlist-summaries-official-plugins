@@ -51,6 +51,7 @@ export const VideoSchema = z.object({
   summaryPdf: z.string().nullable(),
   deepDiveMd: z.string().nullable(),
   deepDivePdf: z.string().nullable(),
+  summaryHtml: z.string().nullable().optional(),
   processedAt: z.string().datetime(),
   videoType: VideoTypeSchema.optional(),
   audience: AudienceSchema.optional(),

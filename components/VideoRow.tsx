@@ -17,6 +17,7 @@ interface VideoRowProps {
   dimUnscored: boolean;
   onDeepDive: (videoId: string) => void;
   onArchive: (videoId: string, action: 'archive' | 'unarchive') => void;
+  onGenerateHtml: (videoId: string) => void;
   onAnnotationChange: (videoId: string, patch: Partial<Pick<Video, 'personalScore' | 'personalNote' | 'corrections' | 'tldr' | 'takeaways'>>) => void;
 }
 
@@ -43,7 +44,7 @@ const AUDIENCE_COLOR: Record<Audience, string> = {
 // Total column count in VideoList: 1 chevron + 15 data columns = 16
 const TOTAL_COLUMNS = 16;
 
-export default function VideoRow({ video, rank, outputFolder, baseOutputFolder, dimUnscored, onDeepDive, onArchive, onAnnotationChange }: VideoRowProps) {
+export default function VideoRow({ video, rank, outputFolder, baseOutputFolder, dimUnscored, onDeepDive, onArchive, onGenerateHtml, onAnnotationChange }: VideoRowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [showCorrections, setShowCorrections] = useState(false);
@@ -108,6 +109,7 @@ export default function VideoRow({ video, rank, outputFolder, baseOutputFolder, 
                   baseOutputFolder={baseOutputFolder}
                   onDeepDive={onDeepDive}
                   onArchive={onArchive}
+                  onGenerateHtml={onGenerateHtml}
                   onEditCorrections={() => setShowCorrections(true)}
                   onClose={() => setMenuOpen(false)}
                 />

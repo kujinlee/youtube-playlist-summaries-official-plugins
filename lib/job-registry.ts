@@ -72,3 +72,21 @@ export function _resetJobRegistry(): void {
   activeByFolder.clear();
   jobFolders.clear();
 }
+
+/** Returns the jobId currently holding the lock for `key`, or undefined. */
+export function getActiveJob(key: string): string | undefined {
+  return activeByFolder.get(key);
+}
+
+/**
+ * Release a job's lock key WITHOUT deleting its registry entry, so late SSE
+ * subscribers can still replay buffered terminal events. Pair with a deferred
+ * deleteJob() for eventual cleanup.
+ */
+export function releaseJobLock(jobId: string): void {
+  const folder = jobFolders.get(jobId);
+  if (folder) {
+    activeByFolder.delete(folder);
+    jobFolders.delete(jobId);
+  }
+}
