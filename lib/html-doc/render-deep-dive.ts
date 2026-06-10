@@ -5,7 +5,7 @@ import MarkdownIt from 'markdown-it';
 const md = new MarkdownIt({ html: false });
 
 function frontmatterField(src: string, key: string): string | null {
-  const m = src.match(new RegExp(`^${key}:\\s*"?([^"\\n]*)"?\\s*$`, 'm'));
+  const m = src.match(new RegExp(`^${key}:\\s*"?([^"\\r\\n]*)"?\\s*$`, 'm'));
   return m?.[1]?.trim() ?? null;
 }
 
@@ -44,7 +44,7 @@ export function renderDeepDiveHtml(mdContent: string, sourceMd: string): string 
   const lang = (frontmatterField(mdContent, 'lang') ?? 'EN').toLowerCase();
   const videoId = frontmatterField(mdContent, 'video_id') ?? '';
   // Strip the leading YAML frontmatter block, then render the body faithfully.
-  const body = mdContent.replace(/^---\n[\s\S]*?\n---\n/, '');
+  const body = mdContent.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
   const title = body.match(/^#\s+(.+)$/m)?.[1]?.trim() ?? 'Deep Dive';
   const bodyHtml = md.render(body);
 

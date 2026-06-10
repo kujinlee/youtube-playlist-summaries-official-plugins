@@ -73,6 +73,13 @@ describe('renderDeepDiveHtml', () => {
     expect(html).not.toContain('href="javascript:');
   });
 
+  it('strips CRLF (Windows) frontmatter and still renders the body', () => {
+    const sample = `---\nvideo_id: "crlf1"\nlang: EN\n---\n\n# CRLF Title (Deep Dive)\n\nBody survives.\n`;
+    const crlf = renderDeepDiveHtml(sample.replace(/\n/g, '\r\n'), 'crlf-deep-dive.md');
+    expect(crlf).not.toContain('video_id:');
+    expect(crlf).toContain('Body survives.');
+  });
+
   it('renders Korean content', () => {
     const ko = renderDeepDiveHtml(
       `---\nvideo_id: "k1"\nlang: KO\n---\n\n# 한국어 (Deep Dive)\n\n### **1. 개요**\n본문입니다.\n`,
