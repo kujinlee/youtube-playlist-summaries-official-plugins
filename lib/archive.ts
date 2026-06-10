@@ -57,7 +57,28 @@ async function moveIfExists(src: string, dest: string): Promise<boolean> {
   }
 }
 
-function updateIndexIfKnown(outputFolder: string, videoId: string, fields: { archived: boolean }): void {
+// Cached HTML files for a video: htmls/<summaryBase>.html and htmls/<deepDiveBase>.html.
+// Returns only paths safely within outputFolder.
+function getCachedHtmlPaths(outputFolder: string, videoId: string): string[] {
+  const index = readIndex(outputFolder);
+  const video = index.videos.find((v) => v.id === videoId);
+  if (!video) return [];
+  const base = path.resolve(outputFolder);
+  const out: string[] = [];
+  for (const md of [video.summaryMd, video.deepDiveMd]) {
+    if (!md) continue;
+    const rel = path.join('htmls', `${md.replace(/\.md$/, '')}.html`);
+    const abs = path.resolve(base, rel);
+    if (abs.startsWith(base + path.sep)) out.push(abs);
+  }
+  return out;
+}
+
+function unlinkIfExists(p: string): void {
+  try { fs.unlinkSync(p); } catch { /* not present — fine */ }
+}
+
+function updateIndexIfKnown(outputFolder: string, videoId: string, fields: Partial<{ archived: boolean; summaryHtml: string | null }>): void {
   try {
     updateVideoFields(outputFolder, videoId, fields);
   } catch (err: unknown) {
@@ -71,13 +92,16 @@ export async function archiveVideo(outputFolder: string, videoId: string): Promi
   assertOutputFolder(outputFolder);
   assertVideoId(videoId);
 
+  // Delete cached HTML BEFORE moving files — index paths are still root-relative at this point.
+  for (const p of getCachedHtmlPaths(outputFolder, videoId)) unlinkIfExists(p);
+
   await ensureArchiveDir(outputFolder);
 
   for (const { root, archived } of getFilePairs(outputFolder, videoId)) {
     await moveIfExists(root, archived);
   }
 
-  updateIndexIfKnown(outputFolder, videoId, { archived: true });
+  updateIndexIfKnown(outputFolder, videoId, { archived: true, summaryHtml: null });
 }
 
 export async function unarchiveVideo(outputFolder: string, videoId: string): Promise<void> {
@@ -89,5 +113,8 @@ export async function unarchiveVideo(outputFolder: string, videoId: string): Pro
     await moveIfExists(archived, root);
   }
 
-  updateIndexIfKnown(outputFolder, videoId, { archived: false });
+  // Defensively clear any cached HTML — it may reference stale pre-archive paths.
+  for (const p of getCachedHtmlPaths(outputFolder, videoId)) unlinkIfExists(p);
+
+  updateIndexIfKnown(outputFolder, videoId, { archived: false, summaryHtml: null });
 }
