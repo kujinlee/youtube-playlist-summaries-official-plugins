@@ -102,6 +102,20 @@ it('falls back and still opens Gemini when the clipboard API is unavailable', as
   expect(onClose).not.toHaveBeenCalled();
 });
 
+it('does not double-fire onClose when clicked twice', async () => {
+  const writeText = jest.fn().mockResolvedValue(undefined);
+  setClipboard(writeText);
+  jest.spyOn(window, 'open').mockReturnValue({} as Window);
+  const onClose = jest.fn();
+  render(<AskGeminiMenuItem video={video()} onClose={onClose} />);
+
+  await act(async () => { fireEvent.click(askButton()); await jest.advanceTimersByTimeAsync(0); });
+  await act(async () => { fireEvent.click(askButton()); await jest.advanceTimersByTimeAsync(0); });
+
+  await flush(2500);
+  expect(onClose).toHaveBeenCalledTimes(1); // first timer was cleared by the second click
+});
+
 it('clears the auto-close timer on unmount', async () => {
   const writeText = jest.fn().mockResolvedValue(undefined);
   setClipboard(writeText);

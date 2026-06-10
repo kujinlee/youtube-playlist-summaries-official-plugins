@@ -20,10 +20,13 @@ type Confirmation =
 export default function AskGeminiMenuItem({ video, onClose }: AskGeminiMenuItemProps) {
   const [confirmation, setConfirmation] = useState<Confirmation>({ kind: 'idle' });
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
 
   useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
 
   function handleClick() {
+    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
     const prompt = buildGeminiPrompt(video);
     // noopener,noreferrer for security; with noopener the return value is null even on
     // success, so it is intentionally ignored. Confirmation is driven by the clipboard promise.
@@ -33,7 +36,7 @@ export default function AskGeminiMenuItem({ video, onClose }: AskGeminiMenuItemP
     if (write && typeof write.then === 'function') {
       write.then(() => {
         setConfirmation({ kind: 'success' });
-        timerRef.current = setTimeout(onClose, AUTO_CLOSE_MS);
+        timerRef.current = setTimeout(() => onCloseRef.current(), AUTO_CLOSE_MS);
       }).catch(() => {
         setConfirmation({ kind: 'fallback', prompt });
       });
@@ -49,7 +52,7 @@ export default function AskGeminiMenuItem({ video, onClose }: AskGeminiMenuItemP
       </button>
 
       {confirmation.kind === 'success' && (
-        <div role="status" className="px-4 py-2 text-xs text-emerald-400">
+        <div role="status" className="px-4 py-2 text-xs text-green-400">
           ✓ Prompt copied — paste (⌘V / Ctrl+V) into Gemini
         </div>
       )}
