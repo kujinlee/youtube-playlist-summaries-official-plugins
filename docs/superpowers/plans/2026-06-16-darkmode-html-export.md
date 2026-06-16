@@ -37,8 +37,8 @@
 3 | Explicit dark override | — | output contains `[data-theme="dark"]{…dark…}`
 4 | System-dark for un-toggled doc | — | output contains `@media(prefers-color-scheme:dark){:root:not([data-theme]){…dark…}}`
 5 | Toggle button styled | — | output contains `#theme-toggle{` with `position:fixed` and `var(--card)`/`var(--ink)`
-6 | Color transition | — | output contains `transition:background .2s,color .2s`
-7 | Print hides toggle | — | output contains `@media print{#theme-toggle{display:none}}`
+6 | Transition gated to post-load | — | output contains `html.theme-ready` + `transition:background-color .2s,color .2s` (no fade on dark load — H1)
+7 | Print forces light + hides toggle | — | print block re-applies light vars to `:root,[data-theme="light"],[data-theme="dark"]` and hides `#theme-toggle` (H3)
 8 | Empty-key safety (edge) | `light={}` | does not throw; emits `:root{}`
 
 **theme.ts head script (`THEME_HEAD_SCRIPT`)**
@@ -70,6 +70,9 @@
 26 | Toggle flips | click `#theme-toggle` | `data-theme` becomes opposite of system; bg changes
 27 | Override remembered | toggle then reload | `data-theme` reflects the saved choice after reload
 28 | Print hides toggle | emulate print media | `#theme-toggle` not visible
+29 | Explicit light beats dark OS | OS dark + toggle to light | `data-theme="light"`, body bg = light (regression for the `:not([data-theme])` guard — M1/MT1)
+30 | No-override reload follows system | reload without toggling | `data-theme` null, body bg = system color (proves persistence is real, not system-following)
+31 | Deep-dive follows system dark | OS dark, deep-dive doc | deep-dive body bg = `#0f1115`; toggle visible (M6)
 
 ---
 
@@ -121,9 +124,15 @@ describe('themeStyleBlock', () => {
     expect(css).toContain('color:var(--ink)');
   });
 
-  it('adds a color transition and hides the toggle in print', () => {
-    expect(css).toContain('transition:background .2s,color .2s');
-    expect(css).toContain('@media print{#theme-toggle{display:none}}');
+  it('gates the color transition behind a post-load readiness class (no load fade)', () => {
+    expect(css).toContain('html.theme-ready');
+    expect(css).toContain('transition:background-color .2s,color .2s');
+  });
+
+  it('forces the LIGHT palette and hides the toggle when printing', () => {
+    // Print must re-apply light vars regardless of data-theme so a dark doc prints a light card.
+    expect(css).toContain('@media print{:root,[data-theme="light"],[data-theme="dark"]{--page:#ffffff');
+    expect(css).toContain('#theme-toggle{display:none}');
   });
 
   it('does not throw on an empty palette', () => {
@@ -156,6 +165,11 @@ describe('THEME_TOGGLE_SCRIPT', () => {
     expect(THEME_TOGGLE_SCRIPT).toContain('matchMedia');
     expect(THEME_TOGGLE_SCRIPT).toContain("setItem('html-doc-theme',next)");
     expect(THEME_TOGGLE_SCRIPT).toContain('try{');
+  });
+
+  it('enables transitions only after first paint (requestAnimationFrame → theme-ready)', () => {
+    expect(THEME_TOGGLE_SCRIPT).toContain('requestAnimationFrame');
+    expect(THEME_TOGGLE_SCRIPT).toContain("classList.add('theme-ready')");
   });
 });
 ```
@@ -190,6 +204,12 @@ function vars(palette: Palette): string {
  *
  * The dark palette is emitted in BOTH the attribute selector and the media query so a
  * document the reader never toggled still follows the OS preference.
+ *
+ * Two correctness details:
+ *  - The color transition is gated behind `html.theme-ready` (added by the toggle script on
+ *    the first requestAnimationFrame) so a doc that loads in dark does NOT fade in from light.
+ *  - The print block re-applies the LIGHT palette to every theme state so a dark doc prints a
+ *    legible light card (the structural print rule additionally whitens the body / drops shadow).
  */
 export function themeStyleBlock(light: Palette, dark: Palette): string {
   const l = vars(light);
@@ -199,9 +219,9 @@ export function themeStyleBlock(light: Palette, dark: Palette): string {
 [data-theme="light"]{${l}}
 [data-theme="dark"]{${d}}
 @media(prefers-color-scheme:dark){:root:not([data-theme]){${d}}}
-body{transition:background .2s,color .2s}
+html.theme-ready,html.theme-ready *{transition:background-color .2s,color .2s}
 #theme-toggle{position:fixed;top:1rem;right:1rem;width:2.4rem;height:2.4rem;border-radius:50%;border:1px solid rgba(128,128,128,.35);background:var(--card);color:var(--ink);font-size:1.1rem;line-height:1;cursor:pointer;box-shadow:var(--shadow);display:flex;align-items:center;justify-content:center;z-index:10}
-@media print{#theme-toggle{display:none}}
+@media print{:root,[data-theme="light"],[data-theme="dark"]{${l}}#theme-toggle{display:none}}
 `;
 }
 
@@ -221,6 +241,8 @@ export const THEME_TOGGLE_BUTTON =
 /**
  * End-of-`<body>` handler. Effective theme = explicit `data-theme`, else system preference.
  * Click flips it, sets `data-theme`, persists to localStorage (try/catch), and syncs the icon.
+ * After the first paint it adds `theme-ready` to <html> so subsequent theme changes animate
+ * but the initial load does not (kills the light→dark fade for dark-default readers).
  */
 export const THEME_TOGGLE_SCRIPT =
   `<script>(function(){` +
@@ -230,7 +252,7 @@ export const THEME_TOGGLE_SCRIPT =
   `function syncIcon(){btn.textContent=effective()==='dark'?'☀️':'\u{1F319}'}` +
   `btn.addEventListener('click',function(){var next=effective()==='dark'?'light':'dark';` +
   `root.setAttribute('data-theme',next);try{localStorage.setItem('${STORAGE_KEY}',next)}catch(e){}syncIcon()});` +
-  `syncIcon()})();</script>`;
+  `syncIcon();requestAnimationFrame(function(){root.classList.add('theme-ready')})})();</script>`;
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -260,12 +282,15 @@ Append to `tests/lib/html-doc/render.test.ts` (inside the existing `describe('re
 ```ts
   it('keeps light-mode colors identical (no visual regression) via CSS vars', () => {
     const html = renderMagazineHtml(parsed, model);
-    // Light palette values equal the previously-hardcoded hex
-    expect(html).toContain('--page:#eef0f3');
-    expect(html).toContain('--card:#fbf9f6');
-    expect(html).toContain('--ink:#2a2622');
-    expect(html).toContain('--gold:#b07700');
-    expect(html).toContain('--goldline:#e0a800');
+    // EVERY light palette value must equal the previously-hardcoded hex (exhaustive — H4).
+    const LIGHT_EXPECTED: Record<string, string> = {
+      page: '#eef0f3', card: '#fbf9f6', ink: '#2a2622', meta: '#8a8276', rule: '#ece7df',
+      ghost: '#f0e7d6', gold: '#b07700', goldline: '#e0a800', li: '#4a463f', foot: '#9a917f',
+      shadow: '0 1px 3px rgba(0,0,0,.08)',
+    };
+    for (const [k, v] of Object.entries(LIGHT_EXPECTED)) {
+      expect(html).toContain(`--${k}:${v}`);
+    }
     // Structural rules now reference the vars
     expect(html).toContain('background:var(--page)');
     expect(html).toContain('color:var(--ink)');
@@ -319,7 +344,7 @@ const STRUCTURAL_CSS = `
 *{box-sizing:border-box}
 body{margin:0;background:var(--page);color:var(--ink);
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",'Apple SD Gothic Neo',Helvetica,Arial,sans-serif}
-.v4{max-width:50rem;margin:0 auto;background:var(--card);padding:2.8rem 3rem 4rem;box-shadow:var(--shadow);transition:background .2s}
+.v4{max-width:50rem;margin:0 auto;background:var(--card);padding:2.8rem 3rem 4rem;box-shadow:var(--shadow)}
 .doc-title{font-family:${SERIF};font-size:2rem;line-height:1.2;margin:0 0 .15em}
 .doc-meta{color:var(--meta);font-size:.9rem;margin:0 0 1.8em}
 .callout{margin:0 0 2.4em;border-top:2px solid var(--goldline);border-bottom:2px solid var(--goldline);padding:1em 0}
@@ -395,10 +420,15 @@ Append to `tests/lib/html-doc/render-deep-dive.test.ts` (inside the existing `de
 
 ```ts
   it('keeps light-mode colors identical via CSS vars (no regression)', () => {
-    expect(html).toContain('--page:#f3f4f6');
-    expect(html).toContain('--card:#fff');
-    expect(html).toContain('--h2:#5b46d6');
-    expect(html).toContain('--codebg:#f5f4fb');
+    // EVERY light palette value must equal the previously-hardcoded hex (exhaustive — H4).
+    const LIGHT_EXPECTED: Record<string, string> = {
+      page: '#f3f4f6', card: '#fff', ink: '#1e1e22', h1: '#111', h2: '#5b46d6', h3: '#2a2540',
+      h4: '#3a3550', link: '#5b46d6', hr: '#e6e6ea', strong: '#111', codebg: '#f5f4fb',
+      preborder: '#e6e6ea', quote: '#6b7280', shadow: '0 1px 3px rgba(0,0,0,.07)',
+    };
+    for (const [k, v] of Object.entries(LIGHT_EXPECTED)) {
+      expect(html).toContain(`--${k}:${v}`);
+    }
     expect(html).toContain('background:var(--page)');
     expect(html).toContain('color:var(--ink)');
   });
@@ -447,7 +477,7 @@ const STRUCTURAL_CSS = `
 *{box-sizing:border-box}
 body{margin:0;background:var(--page);color:var(--ink);line-height:1.65;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",'Apple SD Gothic Neo','Malgun Gothic',Helvetica,Arial,sans-serif}
-.dd{max-width:52rem;margin:0 auto;background:var(--card);padding:2.6rem 3rem 4rem;box-shadow:var(--shadow);transition:background .2s}
+.dd{max-width:52rem;margin:0 auto;background:var(--card);padding:2.6rem 3rem 4rem;box-shadow:var(--shadow)}
 .dd h1{font-size:1.9rem;line-height:1.25;margin:.2em 0 .5em;color:var(--h1)}
 .dd h2{font-size:1.4rem;margin:1.8em 0 .4em;color:var(--h2)}
 .dd h3{font-size:1.18rem;margin:1.5em 0 .3em;color:var(--h3)}
@@ -517,8 +547,11 @@ Create `tests/e2e/darkmode-html.spec.ts`:
 
 ```ts
 import { expect, test } from '@playwright/test';
-import { renderMagazineHtml } from '@/lib/html-doc/render';
-import type { ParsedSummary, MagazineModel } from '@/lib/html-doc/types';
+// Relative imports (NOT '@/…'): the '@/' alias is unproven for RUNTIME (value) imports under
+// Playwright's loader — the only existing E2E '@/' import is `import type` (erased). (Review B1)
+import { renderMagazineHtml } from '../../lib/html-doc/render';
+import { renderDeepDiveHtml } from '../../lib/html-doc/render-deep-dive';
+import type { ParsedSummary, MagazineModel } from '../../lib/html-doc/types';
 
 const parsed: ParsedSummary = {
   title: 'Dark Mode Demo', channel: 'Chan', duration: '10:00', url: 'https://youtu.be/x',
@@ -531,7 +564,18 @@ const model: MagazineModel = {
   ] }],
 };
 
+const DD_MD = `---
+video_id: "dd-e2e"
+lang: EN
+---
+
+# Deep Dive Dark Demo
+
+Body paragraph for the dark-mode runtime check.
+`;
+
 const DOC_URL = 'https://example.test/doc.html';
+const DD_URL = 'https://example.test/deepdive.html';
 
 /** Intercept DOC_URL and return freshly-rendered magazine HTML. */
 async function serveDoc(page: import('@playwright/test').Page) {
@@ -541,8 +585,17 @@ async function serveDoc(page: import('@playwright/test').Page) {
   );
 }
 
-const LIGHT_BG = 'rgb(238, 240, 243)'; // #eef0f3
-const DARK_BG = 'rgb(26, 23, 20)';     // #1a1714
+/** Intercept DD_URL and return freshly-rendered deep-dive HTML (M6 — deep-dive coverage). */
+async function serveDeepDive(page: import('@playwright/test').Page) {
+  const html = renderDeepDiveHtml(DD_MD, 'deep-dive-dark-demo.md');
+  await page.route(DD_URL, (route) =>
+    route.fulfill({ status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' }, body: html }),
+  );
+}
+
+const LIGHT_BG = 'rgb(238, 240, 243)'; // magazine #eef0f3
+const DARK_BG = 'rgb(26, 23, 20)';     // magazine #1a1714
+const DD_DARK_BG = 'rgb(15, 17, 21)';  // deep-dive #0f1115
 
 test.describe('exported HTML dark mode', () => {
   test('follows system dark preference when never toggled', async ({ page }) => {
@@ -572,6 +625,18 @@ test.describe('exported HTML dark mode', () => {
     expect(bg).toBe(DARK_BG);
   });
 
+  test('explicit LIGHT override beats a dark OS preference (regression for the :not guard)', async ({ page }) => {
+    // M1/MT1 — highest-value gap: OS dark + user explicitly chose light → light must win.
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await serveDoc(page);
+    await page.goto(DOC_URL);
+    // System dark → first toggle flips to light (effective was 'dark').
+    await page.locator('#theme-toggle').click();
+    expect(await page.evaluate(() => document.documentElement.getAttribute('data-theme'))).toBe('light');
+    const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+    expect(bg).toBe(LIGHT_BG);
+  });
+
   test('remembers a manual override across reloads', async ({ page }) => {
     await page.emulateMedia({ colorScheme: 'light' });
     await serveDoc(page);
@@ -583,19 +648,42 @@ test.describe('exported HTML dark mode', () => {
     expect(bg).toBe(DARK_BG);
   });
 
+  test('without a prior toggle, reload stays on the system theme (persistence is real)', async ({ page }) => {
+    // Proves the remembered-dark above came from storage, not from system-following.
+    await page.emulateMedia({ colorScheme: 'light' });
+    await serveDoc(page);
+    await page.goto(DOC_URL);
+    await page.reload();
+    expect(await page.evaluate(() => document.documentElement.getAttribute('data-theme'))).toBeNull();
+    expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(LIGHT_BG);
+  });
+
   test('hides the toggle when printing', async ({ page }) => {
     await serveDoc(page);
     await page.goto(DOC_URL);
     await page.emulateMedia({ media: 'print' });
     await expect(page.locator('#theme-toggle')).toBeHidden();
   });
+
+  test('deep-dive export follows system dark (M6 — deep-dive runtime coverage)', async ({ page }) => {
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await serveDeepDive(page);
+    await page.goto(DD_URL);
+    expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(DD_DARK_BG);
+    // Toggle is wired in the deep-dive doc too.
+    await expect(page.locator('#theme-toggle')).toBeVisible();
+  });
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run test to confirm the layer**
+
+Task 4 is a **confirmation / E2E layer, not red-green TDD** — per the project TDD policy E2E/UI wiring is explicitly "No" for strict TDD (see `docs/dev-process.md` → TDD Policy). Because Tasks 1–3 commit the feature first, this spec is expected **GREEN on first run** after Task 3.
 
 Run: `npx playwright test darkmode-html`
-Expected: FAIL only if Tasks 2–3 are not yet done; if run after Task 3 it should PASS. (If running strictly TDD-first, run before Task 2 → FAIL: no `#theme-toggle`, bg stays light.)
+Expected: PASS (all scenarios).
+
+To observe a meaningful RED instead, run this spec **after Task 1 but before Task 2** → FAIL: no `#theme-toggle`, body background stays light under emulated dark.
 
 - [ ] **Step 3: Implementation**
 
@@ -661,3 +749,24 @@ Phase 4 verification (manual, on real `file://`): open a generated summary `.htm
 **Placeholder scan:** no TBD/TODO; every code step shows full code; every run step shows command + expected output.
 
 **Type consistency:** `Palette` type defined in Task 1, imported in Tasks 2/3. Function `themeStyleBlock(light, dark)` and constants `THEME_HEAD_SCRIPT`/`THEME_TOGGLE_BUTTON`/`THEME_TOGGLE_SCRIPT` named identically across all tasks. Storage key `'html-doc-theme'` identical in head script, toggle script, and tests.
+
+---
+
+## Revision Log — Adversarial Review (2026-06-16)
+
+Review: `docs/reviews/plan-darkmode-html-export-adversarial.md` (Claude fallback; Codex usage-limited
+until 2026-07-03 — **a manual Codex adversarial pass is still owed before merge**).
+
+Addressed in this plan revision:
+- **B1** — E2E uses relative imports (`../../lib/html-doc/…`), not the unproven `@/` runtime alias.
+- **H1** — Color transition gated behind `html.theme-ready` (added on first `requestAnimationFrame`); removed the ungated `transition` from `.v4`/`.dd`. Kills the light→dark fade for dark-default readers. New behavior #6 + unit assertions.
+- **H3** — `themeStyleBlock` print block re-applies the **light** palette to all theme states so a dark doc prints a light card (spec §7). New behavior #7 + unit assertion.
+- **H4** — No-regression assertions now exhaustive (loop over every palette key) in Tasks 2 and 3.
+- **M1/MT1** — Added E2E #29: OS dark + explicit light override → light wins (guards the `:not([data-theme])` invariant).
+- **M3** — Task 4 reframed as a confirmation/E2E layer with an explicit RED recipe (run after Task 1, before Task 2).
+- **M6** — Added E2E #31: deep-dive follows system dark + toggle present.
+- **M2** (bonus) — Added E2E #30: no-override reload stays system, proving persistence is real.
+
+Verified clean by the review, no change needed: **L1** (all shared vars present in all four palettes), **L2** (try/catch has no uncaught path), **L3** (rgb mapping correct), specificity/explicit-light cascade (correct via selector non-match).
+
+**M4** (reuse fixture verbatim): the E2E `ParsedSummary`/`ParsedSection`/`MagazineModel` fixture shape was cross-checked against `lib/html-doc/types.ts` and matches — retained as written.
