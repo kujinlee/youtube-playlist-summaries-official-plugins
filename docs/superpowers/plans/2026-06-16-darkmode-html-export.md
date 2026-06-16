@@ -345,6 +345,7 @@ const STRUCTURAL_CSS = `
 body{margin:0;background:var(--page);color:var(--ink);
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",'Apple SD Gothic Neo',Helvetica,Arial,sans-serif}
 .v4{max-width:50rem;margin:0 auto;background:var(--card);padding:2.8rem 3rem 4rem;box-shadow:var(--shadow)}
+html.theme-ready .v4{transition:background-color .2s,color .2s}
 .doc-title{font-family:${SERIF};font-size:2rem;line-height:1.2;margin:0 0 .15em}
 .doc-meta{color:var(--meta);font-size:.9rem;margin:0 0 1.8em}
 .callout{margin:0 0 2.4em;border-top:2px solid var(--goldline);border-bottom:2px solid var(--goldline);padding:1em 0}
@@ -478,6 +479,7 @@ const STRUCTURAL_CSS = `
 body{margin:0;background:var(--page);color:var(--ink);line-height:1.65;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",'Apple SD Gothic Neo','Malgun Gothic',Helvetica,Arial,sans-serif}
 .dd{max-width:52rem;margin:0 auto;background:var(--card);padding:2.6rem 3rem 4rem;box-shadow:var(--shadow)}
+html.theme-ready .dd{transition:background-color .2s,color .2s}
 .dd h1{font-size:1.9rem;line-height:1.25;margin:.2em 0 .5em;color:var(--h1)}
 .dd h2{font-size:1.4rem;margin:1.8em 0 .4em;color:var(--h2)}
 .dd h3{font-size:1.18rem;margin:1.5em 0 .3em;color:var(--h3)}
