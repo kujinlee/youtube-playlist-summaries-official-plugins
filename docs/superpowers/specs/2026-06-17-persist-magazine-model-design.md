@@ -73,16 +73,22 @@ HTML, persist the envelope:
 ```ts
 type ReRenderResult =
   | { status: 'rerendered'; htmlPath: string }
-  | { status: 'skipped-no-model' }      // no summaryMd / no summaryHtml / no model file / unknown id
+  | { status: 'skipped-not-eligible' }  // no video / no summaryMd / no summaryHtml — nothing to refresh
+  | { status: 'skipped-no-model' }      // eligible (has summaryHtml) but the model file is absent/invalid
   | { status: 'skipped-no-md' }         // model present but .md gone from disk
   | { status: 'skipped-unparseable' }   // .md present but parseSummaryMarkdown threw
   | { status: 'skipped-drift'; mdSections: string[]; modelSections: string[] };
 
 export function reRenderSummaryHtml(videoId: string, outputFolder: string): ReRenderResult;
 ```
+> Implementation note: the eligibility skip (no video / no `summaryMd` / no `summaryHtml`) is a
+> distinct `skipped-not-eligible` status, split from `skipped-no-model` during code review so the
+> CLI can stay silent on "nothing to refresh" while still flagging "has HTML but model missing —
+> regenerate." The two are tallied separately by `reRenderAll`.
+
 Steps:
 1. Resolve the video from the index. No video / no `summaryMd` / **no `summaryHtml`** (D6 — nothing
-   existing to refresh) → `skipped-no-model`. Derive `base` from `video.summaryMd`.
+   existing to refresh) → `skipped-not-eligible`. Derive `base` from `video.summaryMd`.
 2. Read `models/<base>.json`. Absent / unparseable / schema-invalid → `skipped-no-model`
    (a `console.warn` is logged when a present file fails validation).
 3. Read the current `.md`; missing → `skipped-no-md`.
@@ -158,8 +164,8 @@ new validation added.
 
 | Condition | Behavior |
 |-----------|----------|
-| Video missing / no `summaryMd` / no `summaryHtml` | `skipped-no-model` (nothing existing to refresh) |
-| Model file absent | `skipped-no-model` |
+| Video missing / no `summaryMd` / no `summaryHtml` | `skipped-not-eligible` (nothing existing to refresh) |
+| Model file absent (but eligible) | `skipped-no-model` |
 | Model file present but unparseable / fails schema | `skipped-no-model` + `console.warn` |
 | `.md` missing on disk | `skipped-no-md` |
 | `.md` present but unparseable (e.g. zero sections) | `skipped-unparseable` (no throw out of the single-call) |
