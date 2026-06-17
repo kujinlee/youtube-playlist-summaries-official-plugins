@@ -43,6 +43,8 @@ export async function runHtmlDoc(
 
   // Persist the model so future style changes can re-render offline (no Gemini). `sourceSections`
   // captures the section titles the model was built against — the re-render drift guard.
+  // A later HTML/index failure may leave this model as an orphan; that's intentional and harmless —
+  // re-render is gated on summaryHtml (set only on full success), and a retry overwrites it atomically.
   const base = video.summaryMd.replace(/\.md$/, '');
   writeModelEnvelope(outputFolder, base, {
     sourceMd: video.summaryMd,
