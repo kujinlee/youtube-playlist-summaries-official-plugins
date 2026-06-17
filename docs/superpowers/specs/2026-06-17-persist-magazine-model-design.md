@@ -36,49 +36,66 @@ single offline command — no Gemini, deterministic output.
 
 | # | Decision | Choice |
 |---|----------|--------|
-| D1 | Re-render input | **Re-parse current `.md` + cached model**, with a section-count drift guard |
+| D1 | Re-render input | **Re-parse current `.md` + cached model**, guarded by **section-title** equality (not just count — see §4.2) |
 | D2 | Trigger surface | **CLI/script**, offline batch |
-| D3 | Model JSON shape | **Thin envelope**: `{ sourceMd, generatedAt, model }` |
+| D3 | Model JSON shape | **Thin envelope**: `{ sourceMd, generatedAt, sourceSections, model }` |
 | D4 | Model file location | **By convention**: `models/<base>.json`, existence-checked; no index field, no migration |
 | D5 | Code structure | **Lib function** (`rerender.ts`) does the work; **thin CLI script** loops the index |
+| D6 | Re-render scope | Only summaries that **already have `summaryHtml`** (it refreshes an existing doc) |
+
+> **Drift guard — why titles, not counts (adversarial review H1).** The renderer zips
+> `model.sections[i]` with `parsed.sections[i]` **by index**. A count-only guard misses a `.md`
+> edit that reorders or replaces a section while keeping the count — the cached lead/bullets would
+> render under the wrong heading. Only section *titles*/numerals and the model lead/bullets are
+> rendered (section *prose* is not), so verifying the section-title array fully protects alignment
+> while still letting non-title edits (TL;DR, channel, takeaways) flow through. The envelope therefore
+> stores `sourceSections` (the section titles the model was built against), and re-render skips on any
+> title mismatch.
 
 ## 4. Architecture
 
 ### 4.1 Write the model — `lib/html-doc/generate.ts`
 In `runHtmlDoc`, after `generateMagazineModel(...)` returns the model and **before** rendering
-HTML, persist it:
+HTML, persist the envelope:
 - Path: `<outputFolder>/models/<base>.json`, where `base = video.summaryMd` with the trailing
   `.md` removed (same base used for `htmls/<base>.html`).
+- Envelope fields: `sourceMd`, `generatedAt`, `sourceSections` (= `parsed.sections.map(s => s.title)`,
+  the titles the model was transformed against), and `model`.
 - Atomic write: temp file → `rename` (mirrors the existing HTML/index write pattern).
+- **Validated on write** (`ModelEnvelopeSchema.parse`) so an invalid model fails loud rather than
+  producing a file the reader would silently reject (adversarial review B1).
 - `mkdirSync(models/, { recursive: true })`.
-- Additive and benign on partial failure: if a later step (HTML write / index update) fails, an
-  orphan `models/<base>.json` is harmless — a model with no HTML is exactly what the re-render
-  path consumes.
+- Orphan handling: if a later step fails, an orphan `models/<base>.json` may remain. It is harmless
+  because re-render is gated on `summaryHtml` (D6) — an orphan model whose summary never finished
+  generating (`summaryHtml` still null) is simply ignored until a successful regeneration overwrites it.
 
 ### 4.2 Re-render library — `lib/html-doc/rerender.ts` (new)
 ```ts
 type ReRenderResult =
   | { status: 'rerendered'; htmlPath: string }
-  | { status: 'skipped-no-model' }
-  | { status: 'skipped-no-md' }
-  | { status: 'skipped-drift'; mdSections: number; modelSections: number };
+  | { status: 'skipped-no-model' }      // no summaryMd / no summaryHtml / no model file / unknown id
+  | { status: 'skipped-no-md' }         // model present but .md gone from disk
+  | { status: 'skipped-unparseable' }   // .md present but parseSummaryMarkdown threw
+  | { status: 'skipped-drift'; mdSections: string[]; modelSections: string[] };
 
 export function reRenderSummaryHtml(videoId: string, outputFolder: string): ReRenderResult;
 ```
 Steps:
-1. Resolve the video from the index; derive `base` from `video.summaryMd`. No `summaryMd` →
-   `skipped-no-model` (nothing to render).
-2. Read `models/<base>.json`. Absent / unparseable → `skipped-no-model`.
+1. Resolve the video from the index. No video / no `summaryMd` / **no `summaryHtml`** (D6 — nothing
+   existing to refresh) → `skipped-no-model`. Derive `base` from `video.summaryMd`.
+2. Read `models/<base>.json`. Absent / unparseable / schema-invalid → `skipped-no-model`
+   (a `console.warn` is logged when a present file fails validation).
 3. Read the current `.md`; missing → `skipped-no-md`.
-4. `parsed = parseSummaryMarkdown(md)`; set `parsed.sourceMd = video.summaryMd`.
-5. **Drift guard:** if `parsed.sections.length !== envelope.model.sections.length` →
-   `skipped-drift` (do **not** render — the index-zip would misalign; the doc needs a Gemini
-   regeneration).
+4. `parsed = parseSummaryMarkdown(md)` wrapped in try/catch; a throw (e.g. zero sections) →
+   `skipped-unparseable`. Set `parsed.sourceMd = video.summaryMd`.
+5. **Drift guard (title equality):** if `parsed.sections.map(s => s.title)` is not deep-equal to
+   `envelope.sourceSections` → `skipped-drift` (carry both title arrays for reporting). Do **not**
+   render — the section content moved; the doc needs a Gemini regeneration.
 6. `html = renderMagazineHtml(parsed, envelope.model)`; atomic-write `htmls/<base>.html`.
-   No Gemini call. No index mutation (`summaryHtml` is already set).
+   No Gemini call. No index mutation (`summaryHtml` is already set, per D6).
 
-Pure and deterministic given the two files; trivially unit-testable with the Gemini boundary
-never touched.
+Total function: returns a defined status for every data condition and throws only on an HTML
+**write** I/O failure. Pure given the two files; unit-testable with the Gemini boundary never touched.
 
 ### 4.3 CLI script — `scripts/rerender-html.ts` (new)
 - Read the playlist index for a given `outputFolder` (arg or settings).
@@ -105,6 +122,7 @@ Example: summary `full-ai-prompting-course-with-andrew-ng.md`
 |-------|------|---------|
 | `sourceMd` | string | The summary note filename this model was derived from (provenance). |
 | `generatedAt` | string (ISO 8601) | When the model was produced by Gemini. |
+| `sourceSections` | string[] | The section titles the model was transformed against (drift guard, §4.2). Same length & order as `model.sections`. |
 | `model` | `MagazineModel` | The transform output: `{ sections: [{ lead, bullets: [{ label, text }] }] }`. |
 
 **Annotated sample** (`models/full-ai-prompting-course-with-andrew-ng.json`):
@@ -112,6 +130,7 @@ Example: summary `full-ai-prompting-course-with-andrew-ng.md`
 {
   "sourceMd": "full-ai-prompting-course-with-andrew-ng.md",
   "generatedAt": "2026-06-17T10:30:00.000Z",
+  "sourceSections": ["The Foundations of Prompting"],
   "model": {
     "sections": [
       {
@@ -127,19 +146,27 @@ Example: summary `full-ai-prompting-course-with-andrew-ng.md`
 }
 ```
 `model` conforms to `MagazineModelSchema` (`lib/html-doc/types.ts`): `sections` ≥ 1, each with a
-non-empty `lead` and 3–7 bullets of `{ label, text }`. The envelope is validated on read; a
-malformed file is treated as `skipped-no-model` (never crashes the batch).
+non-empty `lead` and 3–7 bullets of `{ label, text }`. The envelope is **validated on both write
+and read** (`ModelEnvelopeSchema`): write fails loud on an invalid model; a malformed/invalid file
+on read is logged (`console.warn`) and treated as `skipped-no-model` (never crashes the batch).
+
+**Path safety (accepted-low):** `base` is derived from `video.summaryMd`, a bare slug filename;
+the index is locally trusted. This mirrors the pre-existing `htmls/<base>.html` path handling — no
+new validation added.
 
 ## 6. Error Handling
 
 | Condition | Behavior |
 |-----------|----------|
+| Video missing / no `summaryMd` / no `summaryHtml` | `skipped-no-model` (nothing existing to refresh) |
 | Model file absent | `skipped-no-model` |
-| Model file present but unparseable / fails schema | `skipped-no-model` (logged) |
+| Model file present but unparseable / fails schema | `skipped-no-model` + `console.warn` |
 | `.md` missing on disk | `skipped-no-md` |
-| `parsed.sections` ≠ `model.sections` (count) | `skipped-drift` (flag for regeneration) |
-| HTML write failure | atomic temp cleanup, throw (script reports and continues to next) |
-| Model write failure in `runHtmlDoc` | throw before HTML render (no HTML written without a model) |
+| `.md` present but unparseable (e.g. zero sections) | `skipped-unparseable` (no throw out of the single-call) |
+| `parsed` section titles ≠ `sourceSections` | `skipped-drift` (flag for regeneration) |
+| HTML write failure | atomic temp cleanup, throw (batch reports it as `error` and continues) |
+| Invalid model at `writeModelEnvelope` | throw (fails the generation; no unreadable file written) |
+| Model write failure in `runHtmlDoc` | throw before HTML render |
 
 ## 7. Onboarding Existing Summaries
 

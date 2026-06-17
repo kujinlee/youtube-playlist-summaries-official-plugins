@@ -36,29 +36,33 @@
 1 | Round-trip write→read | valid envelope | `models/<base>.json` written (pretty JSON); `readModelEnvelope` returns the same object
 2 | Atomic write | write | uses temp file + rename; no `.tmp` left behind on success
 3 | mkdir models/ | write when dir absent | creates `models/` recursively
-4 | Absent file read | no file | `readModelEnvelope` → `null`
-5 | Malformed JSON read | file is not JSON | `null` (no throw)
-6 | Schema-invalid read | JSON but wrong shape (e.g. bullets empty) | `null` (no throw)
+4 | Absent file read | no file | `readModelEnvelope` → `null` (no warn)
+5 | Malformed JSON read | file is not JSON | `null` + `console.warn`
+6 | Schema-invalid read | JSON but wrong shape (e.g. bullets empty) | `null` + `console.warn`
+6b | Write-time validation (B1) | invalid model passed to write | `writeModelEnvelope` throws, no file written
 7 | Temp cleanup on write failure | rename throws | temp file removed, error rethrown
 
 **generate.ts**
-8 | Writes envelope after transform | `runHtmlDoc` success | `models/<base>.json` exists with `{sourceMd, generatedAt, model}` matching the transform output
+8 | Writes envelope after transform | `runHtmlDoc` success | `models/<base>.json` exists with `{sourceMd, generatedAt, sourceSections, model}`; `sourceSections` = parsed section titles
 9 | Envelope before HTML | success | model file present alongside `htmls/<base>.html`
 10 | No envelope when transform fails | Gemini rejects | no `models/<base>.json` (write never reached)
-11 | Orphan model benign on index failure | index update throws | HTML cleaned up (existing behavior unchanged); model file may remain — acceptable, not an error
+11 | Existing fixtures updated (M1) | existing generate tests | transform fixtures use ≥3 bullets so write-validation passes
+11b | Orphan model on index failure | index update throws | HTML cleaned up (existing behavior unchanged); orphan model harmless (re-render gated on summaryHtml — H3)
 
 **rerender.ts — reRenderSummaryHtml**
-12 | Happy re-render | model + md present, counts match | writes `htmls/<base>.html` via `renderMagazineHtml`; **Gemini never called**; returns `{status:'rerendered'}`
+12 | Happy re-render | model + md present, titles match | writes `htmls/<base>.html` via `renderMagazineHtml`; **Gemini never called**; `{status:'rerendered'}`
 13 | No model | model file absent | `{status:'skipped-no-model'}`, no write
 14 | No summaryMd | video.summaryMd null | `{status:'skipped-no-model'}`
+14b | No summaryHtml (H3) | video.summaryHtml null | `{status:'skipped-no-model'}` (nothing existing to refresh)
 15 | Missing .md | model present, .md gone | `{status:'skipped-no-md'}`, no write
-16 | Section drift | parsed.sections ≠ model.sections | `{status:'skipped-drift', mdSections, modelSections}`, no write
+15b | Unparseable .md (M4) | .md present, zero sections | `{status:'skipped-unparseable'}`, no write, no throw
+16 | Section-TITLE drift (H1) | parsed titles ≠ `sourceSections` | `{status:'skipped-drift', mdSections, modelSections}` (title arrays), no write
 17 | Atomic html write | re-render | temp+rename; temp cleaned on failure
 18 | Video not in index | unknown id | `{status:'skipped-no-model'}`
 
 **rerender.ts — reRenderAll**
-19 | Tally across videos | mixed folder | counts rerendered / skipped-* / errors; details list per video
-20 | Per-video error isolation | one video's .md unparseable | counted as `error`, loop continues to others
+19 | Tally across videos | mixed folder | counts rerendered / skipped-no-model / skipped-no-md / skipped-unparseable / skipped-drift / errors; per-video details
+20 | Per-video isolation | one video's .md has no sections | counted as `skipped-unparseable`, loop continues; `errors` reserved for unexpected (e.g. write I/O) throws
 
 **scripts/rerender-html.ts**
 21 | Usage guard | no args | prints usage, exits 1
@@ -88,6 +92,7 @@ const BASE = 'a-title';
 const ENVELOPE: ModelEnvelope = {
   sourceMd: 'a-title.md',
   generatedAt: '2026-06-17T10:30:00.000Z',
+  sourceSections: ['The Foundation'],
   model: {
     sections: [
       { lead: 'Lead one.', bullets: [
@@ -127,12 +132,24 @@ describe('model-store', () => {
     expect(readModelEnvelope(dir, 'bad')).toBeNull();
   });
 
-  it('returns null when the envelope fails schema validation', () => {
+  it('returns null (and warns) when the envelope fails schema validation', () => {
     fs.mkdirSync(path.join(dir, 'models'), { recursive: true });
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     // bullets must be 3–7; empty array is invalid
-    const bad = { sourceMd: 'x.md', generatedAt: 'now', model: { sections: [{ lead: 'l', bullets: [] }] } };
+    const bad = { sourceMd: 'x.md', generatedAt: 'now', sourceSections: ['s'], model: { sections: [{ lead: 'l', bullets: [] }] } };
     fs.writeFileSync(path.join(dir, 'models', 'bad2.json'), JSON.stringify(bad), 'utf-8');
     expect(readModelEnvelope(dir, 'bad2')).toBeNull();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('throws when asked to write an invalid model (write-time validation)', () => {
+    const invalid = {
+      sourceMd: 'a-title.md', generatedAt: 'now', sourceSections: ['s'],
+      model: { sections: [{ lead: 'l', bullets: [{ label: 'A', text: 'a' }] }] }, // <3 bullets
+    } as unknown as ModelEnvelope;
+    expect(() => writeModelEnvelope(dir, BASE, invalid)).toThrow();
+    expect(fs.existsSync(path.join(dir, 'models', 'a-title.json'))).toBe(false);
   });
 });
 ```
@@ -153,11 +170,16 @@ import path from 'path';
 import { z } from 'zod';
 import { MagazineModelSchema } from './types';
 
-/** The persisted summary-model file: the Gemini transform output plus provenance. */
+/**
+ * The persisted summary-model file: the Gemini transform output plus provenance.
+ * `sourceSections` is the section titles the model was built against — the drift guard the
+ * re-render path compares the current .md's section titles against (adversarial review H1).
+ */
 export const ModelEnvelopeSchema = z
   .object({
     sourceMd: z.string().min(1),
     generatedAt: z.string().min(1),
+    sourceSections: z.array(z.string()),
     model: MagazineModelSchema,
   })
   .strict();
@@ -168,8 +190,12 @@ function modelPath(outputFolder: string, base: string): string {
   return path.join(outputFolder, 'models', `${base}.json`);
 }
 
-/** Atomically write the envelope to models/<base>.json (temp file → rename). */
+/**
+ * Atomically write the envelope to models/<base>.json (temp file → rename). Validated on write
+ * (B1): an invalid model throws here rather than producing a file the reader would reject.
+ */
 export function writeModelEnvelope(outputFolder: string, base: string, envelope: ModelEnvelope): void {
+  ModelEnvelopeSchema.parse(envelope); // fail loud on an invalid model
   const dir = path.join(outputFolder, 'models');
   fs.mkdirSync(dir, { recursive: true });
   const finalPath = modelPath(outputFolder, base);
@@ -189,23 +215,28 @@ export function readModelEnvelope(outputFolder: string, base: string): ModelEnve
   try {
     raw = fs.readFileSync(modelPath(outputFolder, base), 'utf-8');
   } catch {
-    return null;
+    return null; // absent — not an error
   }
   let json: unknown;
   try {
     json = JSON.parse(raw);
   } catch {
+    console.warn(`[model-store] malformed JSON in models/${base}.json — ignoring`);
     return null;
   }
   const parsed = ModelEnvelopeSchema.safeParse(json);
-  return parsed.success ? parsed.data : null;
+  if (!parsed.success) {
+    console.warn(`[model-store] models/${base}.json failed schema validation — ignoring`);
+    return null;
+  }
+  return parsed.data;
 }
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx jest model-store.test`
-Expected: PASS (5 tests).
+Expected: PASS (6 tests — round-trip, mkdir/no-temp, absent→null, malformed→null+warn, schema-invalid→null+warn, invalid-write throws).
 
 - [ ] **Step 5: Commit**
 
@@ -222,6 +253,22 @@ git commit -m "feat(html-doc): model-store — persisted magazine-model envelope
 - Modify: `lib/html-doc/generate.ts`
 - Test: `tests/lib/html-doc/generate.test.ts`
 
+- [ ] **Step 0: Update existing fixtures to ≥3 bullets (required by B1 write-validation)**
+
+`generate.ts` will now call `writeModelEnvelope`, which validates the model (bullets 3–7). The
+existing transform fixtures in `tests/lib/html-doc/generate.test.ts` return **1 bullet** per
+section and would now throw inside `runHtmlDoc`. Update every `mockTransform.mockResolvedValueOnce`
+fixture in that file so each section has **3 bullets**. The two affected fixtures are in the
+`'transforms, writes htmls/<base>.html…'` test and the `'removes the orphan HTML…'` test. Replace
+each section's `bullets:` with three entries, e.g.:
+
+```ts
+// before: bullets: [{ label: 'L', text: 't' }]
+bullets: [{ label: 'L', text: 't' }, { label: 'M', text: 'u' }, { label: 'N', text: 'v' }]
+```
+Their existing assertions (html contains `Lead one.`, `summaryHtml` set, orphan cleanup) are
+unaffected by the extra bullets.
+
 - [ ] **Step 1: Write the failing test**
 
 Append to `tests/lib/html-doc/generate.test.ts` (after the existing `it(...)` blocks, before the file's final close):
@@ -230,8 +277,8 @@ Append to `tests/lib/html-doc/generate.test.ts` (after the existing `it(...)` bl
 it('persists the magazine model envelope to models/<base>.json', async () => {
   const model = {
     sections: [
-      { lead: 'Lead one.', bullets: [{ label: 'L', text: 't' }] },
-      { lead: 'Lead two.', bullets: [{ label: 'M', text: 'u' }] },
+      { lead: 'Lead one.', bullets: [{ label: 'L', text: 't' }, { label: 'M', text: 'u' }, { label: 'N', text: 'v' }] },
+      { lead: 'Lead two.', bullets: [{ label: 'O', text: 'w' }, { label: 'P', text: 'x' }, { label: 'Q', text: 'y' }] },
     ],
   };
   mockTransform.mockResolvedValueOnce(model);
@@ -242,6 +289,8 @@ it('persists the magazine model envelope to models/<base>.json', async () => {
   const envelope = JSON.parse(fs.readFileSync(modelPath, 'utf-8'));
   expect(envelope.sourceMd).toBe('a-title.md');
   expect(typeof envelope.generatedAt).toBe('string');
+  // SUMMARY_MD has sections "## 1. First" and "## Conclusion"; titles have the ordinal stripped.
+  expect(envelope.sourceSections).toEqual(['First', 'Conclusion']);
   expect(envelope.model).toEqual(model);
 });
 
@@ -268,12 +317,13 @@ import { writeModelEnvelope } from './model-store';
 Then, in `runHtmlDoc`, immediately after the transform line `const model = await generateMagazineModel(...)` and BEFORE the `onProgress({ ... 'Rendering HTML…' ... })` line, insert:
 
 ```ts
-  // Persist the model so future style changes can re-render offline (no Gemini). Written before
-  // the HTML so a partial later failure leaves only a benign orphan the re-render path can consume.
+  // Persist the model so future style changes can re-render offline (no Gemini). `sourceSections`
+  // captures the section titles the model was built against — the re-render drift guard (H1).
   const base = video.summaryMd.replace(/\.md$/, '');
   writeModelEnvelope(outputFolder, base, {
     sourceMd: video.summaryMd,
     generatedAt: new Date().toISOString(),
+    sourceSections: parsed.sections.map((s) => s.title),
     model,
   });
 ```
@@ -344,6 +394,11 @@ const MODEL = {
     { lead: 'Lead two.', bullets: [{ label: 'D', text: 'd' }, { label: 'E', text: 'e' }, { label: 'F', text: 'f' }] },
   ],
 };
+// SUMMARY_MD parses to two sections whose titles (ordinal stripped) are 'First' and 'Conclusion'.
+const SECTIONS = ['First', 'Conclusion'];
+function envelope(model = MODEL, sourceSections = SECTIONS) {
+  return { sourceMd: 'a-title.md', generatedAt: 'now', sourceSections, model };
+}
 
 let dir: string;
 function writeIndex(videos: unknown[]) {
@@ -374,7 +429,7 @@ afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
 
 describe('reRenderSummaryHtml', () => {
   it('re-renders from the cached model without calling Gemini', () => {
-    writeModelEnvelope(dir, 'a-title', { sourceMd: 'a-title.md', generatedAt: 'now', model: MODEL });
+    writeModelEnvelope(dir, 'a-title', envelope());
     const res = reRenderSummaryHtml(VIDEO_ID, dir);
     expect(res).toEqual({ status: 'rerendered', htmlPath: 'htmls/a-title.html' });
     const html = fs.readFileSync(path.join(dir, 'htmls', 'a-title.html'), 'utf-8');
@@ -393,16 +448,34 @@ describe('reRenderSummaryHtml', () => {
     expect(reRenderSummaryHtml(VIDEO_ID, dir)).toEqual({ status: 'skipped-no-model' });
   });
 
+  it('skips when the video has no summaryHtml (nothing existing to refresh — H3)', () => {
+    writeModelEnvelope(dir, 'a-title', envelope()); // model exists…
+    writeIndex([baseVideo({ summaryHtml: null })]); // …but no current HTML
+    expect(reRenderSummaryHtml(VIDEO_ID, dir)).toEqual({ status: 'skipped-no-model' });
+    expect(fs.existsSync(path.join(dir, 'htmls', 'a-title.html'))).toBe(false);
+  });
+
   it('skips when the .md is missing on disk', () => {
-    writeModelEnvelope(dir, 'a-title', { sourceMd: 'a-title.md', generatedAt: 'now', model: MODEL });
+    writeModelEnvelope(dir, 'a-title', envelope());
     fs.rmSync(path.join(dir, 'a-title.md'));
     expect(reRenderSummaryHtml(VIDEO_ID, dir)).toEqual({ status: 'skipped-no-md' });
   });
 
-  it('skips on section-count drift between .md and model', () => {
-    const oneSection = { sections: [MODEL.sections[0]] }; // md has 2 sections, model has 1
-    writeModelEnvelope(dir, 'a-title', { sourceMd: 'a-title.md', generatedAt: 'now', model: oneSection });
-    expect(reRenderSummaryHtml(VIDEO_ID, dir)).toEqual({ status: 'skipped-drift', mdSections: 2, modelSections: 1 });
+  it('skips when the .md is present but unparseable (M4)', () => {
+    writeModelEnvelope(dir, 'a-title', envelope());
+    fs.writeFileSync(path.join(dir, 'a-title.md'), '# Title only, no ## sections\n');
+    expect(reRenderSummaryHtml(VIDEO_ID, dir)).toEqual({ status: 'skipped-unparseable' });
+    expect(fs.existsSync(path.join(dir, 'htmls', 'a-title.html'))).toBe(false);
+  });
+
+  it('skips on section-TITLE drift between .md and model (H1)', () => {
+    // Same count (2) but different titles → title-array mismatch.
+    writeModelEnvelope(dir, 'a-title', envelope(MODEL, ['First', 'Renamed Conclusion']));
+    expect(reRenderSummaryHtml(VIDEO_ID, dir)).toEqual({
+      status: 'skipped-drift',
+      mdSections: ['First', 'Conclusion'],
+      modelSections: ['First', 'Renamed Conclusion'],
+    });
     expect(fs.existsSync(path.join(dir, 'htmls', 'a-title.html'))).toBe(false);
   });
 
@@ -434,11 +507,18 @@ export type ReRenderResult =
   | { status: 'rerendered'; htmlPath: string }
   | { status: 'skipped-no-model' }
   | { status: 'skipped-no-md' }
-  | { status: 'skipped-drift'; mdSections: number; modelSections: number };
+  | { status: 'skipped-unparseable' }
+  | { status: 'skipped-drift'; mdSections: string[]; modelSections: string[] };
+
+function sameTitles(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((t, i) => t === b[i]);
+}
 
 /**
  * Re-render one summary's HTML from its cached model + the current .md — no Gemini.
  * Deterministic: same model + same .md → same HTML under the current renderer.
+ * Only refreshes summaries that already have an HTML (D6); guards section-title alignment (H1).
+ * Total: returns a status for every data condition; throws only on an HTML write I/O failure.
  */
 export function reRenderSummaryHtml(videoId: string, outputFolder: string): ReRenderResult {
   assertOutputFolder(outputFolder);
@@ -446,7 +526,8 @@ export function reRenderSummaryHtml(videoId: string, outputFolder: string): ReRe
 
   const index = readIndex(outputFolder);
   const video = index.videos.find((v) => v.id === videoId);
-  if (!video || !video.summaryMd) return { status: 'skipped-no-model' };
+  // Re-render refreshes an EXISTING doc: needs a source note AND a current HTML.
+  if (!video || !video.summaryMd || !video.summaryHtml) return { status: 'skipped-no-model' };
 
   const base = video.summaryMd.replace(/\.md$/, '');
   const envelope = readModelEnvelope(outputFolder, base);
@@ -459,15 +540,17 @@ export function reRenderSummaryHtml(videoId: string, outputFolder: string): ReRe
     return { status: 'skipped-no-md' };
   }
 
-  const parsed = parseSummaryMarkdown(md);
+  let parsed;
+  try {
+    parsed = parseSummaryMarkdown(md);
+  } catch {
+    return { status: 'skipped-unparseable' };
+  }
   parsed.sourceMd = video.summaryMd;
 
-  if (parsed.sections.length !== envelope.model.sections.length) {
-    return {
-      status: 'skipped-drift',
-      mdSections: parsed.sections.length,
-      modelSections: envelope.model.sections.length,
-    };
+  const mdTitles = parsed.sections.map((s) => s.title);
+  if (!sameTitles(mdTitles, envelope.sourceSections)) {
+    return { status: 'skipped-drift', mdSections: mdTitles, modelSections: envelope.sourceSections };
   }
 
   const html = renderMagazineHtml(parsed, envelope.model);
@@ -489,7 +572,7 @@ export function reRenderSummaryHtml(videoId: string, outputFolder: string): ReRe
 - [ ] **Step 4: Run tests**
 
 Run: `npx jest rerender.test`
-Expected: PASS (6 tests).
+Expected: PASS (8 tests — happy, no-model, no-summaryMd, no-summaryHtml, missing-md, unparseable, title-drift, unknown-id).
 
 - [ ] **Step 5: Commit**
 
@@ -515,10 +598,10 @@ Append to `tests/lib/html-doc/rerender.test.ts` (after the existing `describe`):
 import { reRenderAll } from '../../../lib/html-doc/rerender';
 
 describe('reRenderAll', () => {
-  it('tallies re-rendered, skipped, and per-video errors across the index', () => {
-    // video A: has model → rerendered
-    writeModelEnvelope(dir, 'a-title', { sourceMd: 'a-title.md', generatedAt: 'now', model: MODEL });
-    // video B: summaryMd set but NO model → skipped-no-model
+  it('tallies re-rendered and skipped across the index', () => {
+    // video A: has model + HTML → rerendered
+    writeModelEnvelope(dir, 'a-title', envelope());
+    // video B: summaryMd + summaryHtml set but NO model → skipped-no-model
     fs.writeFileSync(path.join(dir, 'b-title.md'), SUMMARY_MD);
     const vidB = baseVideo({ id: 'vidB', summaryMd: 'b-title.md', summaryHtml: 'htmls/b-title.html' });
     writeIndex([baseVideo(), vidB]);
@@ -534,16 +617,17 @@ describe('reRenderAll', () => {
     );
   });
 
-  it('isolates a per-video error and keeps going', () => {
-    writeModelEnvelope(dir, 'a-title', { sourceMd: 'a-title.md', generatedAt: 'now', model: MODEL });
-    // video B: model present but .md content unparseable (no sections) → parseSummaryMarkdown throws
+  it('isolates an unparseable .md as a defined skip and keeps going', () => {
+    writeModelEnvelope(dir, 'a-title', envelope());
+    // video B: model + HTML present, but .md content has no sections → skipped-unparseable
     fs.writeFileSync(path.join(dir, 'b-title.md'), '# Just a title, no sections\n');
-    writeModelEnvelope(dir, 'b-title', { sourceMd: 'b-title.md', generatedAt: 'now', model: MODEL });
-    writeIndex([baseVideo(), baseVideo({ id: 'vidB', summaryMd: 'b-title.md' })]);
+    writeModelEnvelope(dir, 'b-title', { sourceMd: 'b-title.md', generatedAt: 'now', sourceSections: ['x'], model: MODEL });
+    writeIndex([baseVideo(), baseVideo({ id: 'vidB', summaryMd: 'b-title.md', summaryHtml: 'htmls/b-title.html' })]);
 
     const tally = reRenderAll(dir);
-    expect(tally.rerendered).toBe(1);   // A still succeeds
-    expect(tally.errors).toBe(1);       // B isolated
+    expect(tally.rerendered).toBe(1);          // A still succeeds
+    expect(tally.skippedUnparseable).toBe(1);  // B isolated, no throw
+    expect(tally.errors).toBe(0);
   });
 });
 ```
@@ -562,14 +646,15 @@ export interface ReRenderDetail {
   summaryMd: string | null;
   status: ReRenderResult['status'] | 'error';
   message?: string;
-  mdSections?: number;
-  modelSections?: number;
+  mdSections?: string[];
+  modelSections?: string[];
 }
 
 export interface ReRenderTally {
   rerendered: number;
   skippedNoModel: number;
   skippedNoMd: number;
+  skippedUnparseable: number;
   skippedDrift: number;
   errors: number;
   details: ReRenderDetail[];
@@ -580,7 +665,7 @@ export function reRenderAll(outputFolder: string): ReRenderTally {
   assertOutputFolder(outputFolder);
   const index = readIndex(outputFolder);
   const tally: ReRenderTally = {
-    rerendered: 0, skippedNoModel: 0, skippedNoMd: 0, skippedDrift: 0, errors: 0, details: [],
+    rerendered: 0, skippedNoModel: 0, skippedNoMd: 0, skippedUnparseable: 0, skippedDrift: 0, errors: 0, details: [],
   };
   for (const video of index.videos) {
     try {
@@ -589,6 +674,7 @@ export function reRenderAll(outputFolder: string): ReRenderTally {
         case 'rerendered': tally.rerendered++; break;
         case 'skipped-no-model': tally.skippedNoModel++; break;
         case 'skipped-no-md': tally.skippedNoMd++; break;
+        case 'skipped-unparseable': tally.skippedUnparseable++; break;
         case 'skipped-drift': tally.skippedDrift++; break;
       }
       tally.details.push({
@@ -610,7 +696,7 @@ export function reRenderAll(outputFolder: string): ReRenderTally {
 - [ ] **Step 4: Run tests**
 
 Run: `npx jest rerender.test`
-Expected: PASS (all 8 — the 6 single + 2 batch).
+Expected: PASS (all 10 — the 8 single + 2 batch).
 
 - [ ] **Step 5: Create the CLI script**
 
@@ -631,15 +717,19 @@ import { reRenderAll } from '../lib/html-doc/rerender';
 
 function run(outputFolder: string): void {
   const t = reRenderAll(outputFolder);
-  const skipped = t.skippedNoModel + t.skippedNoMd + t.skippedDrift;
+  const skipped = t.skippedNoModel + t.skippedNoMd + t.skippedUnparseable + t.skippedDrift;
   console.log(`[${outputFolder}] re-rendered ${t.rerendered}, skipped ${skipped}, errors ${t.errors}`);
   for (const d of t.details) {
     if (d.status === 'rerendered') continue;
     if (d.status === 'skipped-no-model' && !d.summaryMd) continue; // no summary at all → silent
     if (d.status === 'skipped-drift') {
-      console.log(`  skipped-drift:    ${d.summaryMd} (md ${d.mdSections} ≠ model ${d.modelSections} — regenerate)`);
+      console.log(`  skipped-drift:    ${d.summaryMd} (sections [${d.mdSections?.join(', ')}] ≠ model [${d.modelSections?.join(', ')}] — regenerate)`);
     } else if (d.status === 'skipped-no-model') {
       console.log(`  skipped-no-model: ${d.summaryMd} (regenerate once to enable)`);
+    } else if (d.status === 'skipped-no-md') {
+      console.log(`  skipped-no-md:    ${d.summaryMd} (.md missing on disk)`);
+    } else if (d.status === 'skipped-unparseable') {
+      console.log(`  skipped-unparse:  ${d.summaryMd} (.md has no sections — regenerate)`);
     } else if (d.status === 'error') {
       console.log(`  error:            ${d.summaryMd} (${d.message})`);
     }
@@ -687,4 +777,26 @@ Phase 4 verification (real app): regenerate one summary via `POST /api/videos/[i
 
 **Placeholder scan:** none — every code step is complete; every run step has a command + expected result.
 
-**Type consistency:** `ModelEnvelope` defined in Task 1, imported in Tasks 2–3. `writeModelEnvelope`/`readModelEnvelope` named identically throughout. `reRenderSummaryHtml` returns `ReRenderResult` (Task 3), consumed by `reRenderAll`→`ReRenderTally`/`ReRenderDetail` (Task 4). `model` field is a `MagazineModel` (from `types.ts`) everywhere. `base = summaryMd.replace(/\.md$/,'')` identical in generate.ts, model-store path, and rerender.ts.
+**Type consistency:** `ModelEnvelope` (now `{sourceMd, generatedAt, sourceSections, model}`) defined in Task 1, imported in Tasks 2–3. `writeModelEnvelope`/`readModelEnvelope` named identically throughout. `reRenderSummaryHtml` returns `ReRenderResult` (5 variants incl. `skipped-unparseable`; `skipped-drift` carries `string[]` title arrays) — consumed by `reRenderAll`→`ReRenderTally`/`ReRenderDetail` (Task 4, tally has `skippedUnparseable`). `model` is a `MagazineModel` everywhere. `base = summaryMd.replace(/\.md$/,'')` identical in generate.ts, model-store path, and rerender.ts.
+
+---
+
+## Revision Log — Adversarial Review (2026-06-17)
+
+Review: `docs/reviews/plan-persist-magazine-model-adversarial.md` (Claude fallback; Codex
+usage-limited until 2026-07-03 — **manual Codex pass owed before merge**). Addressed:
+
+- **B1 (Blocking)** — `writeModelEnvelope` validates on write (`ModelEnvelopeSchema.parse`); all test
+  fixtures use ≥3 bullets; Task 2 Step 0 updates the two existing `generate.test.ts` fixtures so they
+  don't throw under the new validation.
+- **H1 (High)** — drift guard is now **section-title equality** (`sourceSections` in the envelope),
+  not count — catches reorder/replace that a count check misses. Spec §3/§4 amended.
+- **H3 (High)** — `reRenderSummaryHtml` gates on `video.summaryHtml` (only refreshes existing docs),
+  so an orphan model from a failed generate never yields an index-unreferenced HTML.
+- **M1 (Med)** — added Task 2 Step 0 for the existing fixtures.
+- **M4 (Med)** — present-but-unparseable `.md` → defined `skipped-unparseable` (no throw out of the
+  single call); batch test updated; spec §6 row added.
+- **L3 (Low)** — `readModelEnvelope` logs `console.warn` on malformed/invalid (spec said "logged").
+
+Accepted with a note (spec §5): **L2** path-safety (pre-existing, local trust) and **L4**
+non-deterministic `generatedAt` (render is deterministic; never assert exact `generatedAt`).
