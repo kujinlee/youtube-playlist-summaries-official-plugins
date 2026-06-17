@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { reRenderSummaryHtml } from '../../../lib/html-doc/rerender';
+import { reRenderSummaryHtml, reRenderAll } from '../../../lib/html-doc/rerender';
 import { writeModelEnvelope } from '../../../lib/html-doc/model-store';
 import * as gemini from '../../../lib/gemini';
 
@@ -136,5 +136,48 @@ describe('reRenderSummaryHtml', () => {
 
   it('skips an unknown video id', () => {
     expect(reRenderSummaryHtml('nope99', dir)).toEqual({ status: 'skipped-not-eligible' });
+  });
+});
+
+describe('reRenderAll', () => {
+  it('tallies re-rendered and skipped across the index', () => {
+    // video A (baseVideo): has model + HTML → rerendered
+    writeModelEnvelope(dir, 'a-title', envelope());
+    // video B: summaryMd + summaryHtml set but NO model → skipped-no-model
+    fs.writeFileSync(path.join(dir, 'b-title.md'), SUMMARY_MD);
+    const vidB = baseVideo({ id: 'vidB', summaryMd: 'b-title.md', summaryHtml: 'htmls/b-title.html' });
+    writeIndex([baseVideo(), vidB]);
+
+    const tally = reRenderAll(dir);
+    expect(tally.rerendered).toBe(1);
+    expect(tally.skippedNoModel).toBe(1);
+    expect(tally.details).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ summaryMd: 'a-title.md', status: 'rerendered' }),
+        expect.objectContaining({ summaryMd: 'b-title.md', status: 'skipped-no-model' }),
+      ]),
+    );
+  });
+
+  it('counts a video with no summary as not-eligible (silent)', () => {
+    const vidC = baseVideo({ id: 'vidC', summaryMd: null, summaryHtml: null });
+    writeModelEnvelope(dir, 'a-title', envelope());
+    writeIndex([baseVideo(), vidC]);
+
+    const tally = reRenderAll(dir);
+    expect(tally.rerendered).toBe(1);
+    expect(tally.skippedNotEligible).toBe(1);
+  });
+
+  it('isolates an unparseable .md as a defined skip and keeps going', () => {
+    writeModelEnvelope(dir, 'a-title', envelope());
+    fs.writeFileSync(path.join(dir, 'b-title.md'), '# Just a title, no sections\n');
+    writeModelEnvelope(dir, 'b-title', { sourceMd: 'b-title.md', generatedAt: 'now', sourceSections: ['x'], model: MODEL });
+    writeIndex([baseVideo(), baseVideo({ id: 'vidB', summaryMd: 'b-title.md', summaryHtml: 'htmls/b-title.html' })]);
+
+    const tally = reRenderAll(dir);
+    expect(tally.rerendered).toBe(1);
+    expect(tally.skippedUnparseable).toBe(1);
+    expect(tally.errors).toBe(0);
   });
 });

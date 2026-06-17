@@ -71,3 +71,56 @@ export function reRenderSummaryHtml(videoId: string, outputFolder: string): ReRe
   }
   return { status: 'rerendered', htmlPath: htmlRel };
 }
+
+export interface ReRenderDetail {
+  summaryMd: string | null;
+  status: ReRenderResult['status'] | 'error';
+  message?: string;
+  mdSections?: string[];
+  modelSections?: string[];
+}
+
+export interface ReRenderTally {
+  rerendered: number;
+  skippedNotEligible: number;
+  skippedNoModel: number;
+  skippedNoMd: number;
+  skippedUnparseable: number;
+  skippedDrift: number;
+  errors: number;
+  details: ReRenderDetail[];
+}
+
+/** Re-render every summary in a playlist. Per-video errors are isolated, never abort the batch. */
+export function reRenderAll(outputFolder: string): ReRenderTally {
+  assertOutputFolder(outputFolder);
+  const index = readIndex(outputFolder);
+  const tally: ReRenderTally = {
+    rerendered: 0, skippedNotEligible: 0, skippedNoModel: 0, skippedNoMd: 0,
+    skippedUnparseable: 0, skippedDrift: 0, errors: 0, details: [],
+  };
+  for (const video of index.videos) {
+    try {
+      const res = reRenderSummaryHtml(video.id, outputFolder);
+      switch (res.status) {
+        case 'rerendered': tally.rerendered++; break;
+        case 'skipped-not-eligible': tally.skippedNotEligible++; break;
+        case 'skipped-no-model': tally.skippedNoModel++; break;
+        case 'skipped-no-md': tally.skippedNoMd++; break;
+        case 'skipped-unparseable': tally.skippedUnparseable++; break;
+        case 'skipped-drift': tally.skippedDrift++; break;
+      }
+      tally.details.push({
+        summaryMd: video.summaryMd,
+        status: res.status,
+        ...(res.status === 'skipped-drift'
+          ? { mdSections: res.mdSections, modelSections: res.modelSections }
+          : {}),
+      });
+    } catch (err) {
+      tally.errors++;
+      tally.details.push({ summaryMd: video.summaryMd, status: 'error', message: (err as Error).message });
+    }
+  }
+  return tally;
+}
