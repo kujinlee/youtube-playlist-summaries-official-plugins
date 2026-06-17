@@ -76,8 +76,8 @@ afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
 it('transforms, writes htmls/<base>.html, and records summaryHtml', async () => {
   mockTransform.mockResolvedValueOnce({
     sections: [
-      { lead: 'Lead one.', bullets: [{ label: 'L', text: 't' }] },
-      { lead: 'Lead two.', bullets: [{ label: 'M', text: 'u' }] },
+      { lead: 'Lead one.', bullets: [{ label: 'L', text: 't' }, { label: 'M', text: 'u' }, { label: 'N', text: 'v' }] },
+      { lead: 'Lead two.', bullets: [{ label: 'O', text: 'w' }, { label: 'P', text: 'x' }, { label: 'Q', text: 'y' }] },
     ],
   });
   const events: ProgressEvent[] = [];
@@ -109,12 +109,38 @@ it('throws when summaryMd is missing', async () => {
 it('removes the orphan HTML file when the index update fails', async () => {
   mockTransform.mockResolvedValueOnce({
     sections: [
-      { lead: 'L1', bullets: [{ label: 'A', text: 'a' }] },
-      { lead: 'L2', bullets: [{ label: 'B', text: 'b' }] },
+      { lead: 'L1', bullets: [{ label: 'A', text: 'a' }, { label: 'B', text: 'b' }, { label: 'C', text: 'c' }] },
+      { lead: 'L2', bullets: [{ label: 'D', text: 'd' }, { label: 'E', text: 'e' }, { label: 'F', text: 'f' }] },
     ],
   });
   mockUpdate.mockImplementationOnce(() => { throw new Error('index write failed'); });
 
   await expect(runHtmlDoc(VIDEO_ID, dir, () => {})).rejects.toThrow(/index write failed/);
   expect(fs.existsSync(path.join(dir, 'htmls', 'a-title.html'))).toBe(false); // cleaned up, no orphan
+});
+
+it('persists the magazine model envelope to models/<base>.json', async () => {
+  const model = {
+    sections: [
+      { lead: 'Lead one.', bullets: [{ label: 'L', text: 't' }, { label: 'M', text: 'u' }, { label: 'N', text: 'v' }] },
+      { lead: 'Lead two.', bullets: [{ label: 'O', text: 'w' }, { label: 'P', text: 'x' }, { label: 'Q', text: 'y' }] },
+    ],
+  };
+  mockTransform.mockResolvedValueOnce(model);
+  await runHtmlDoc(VIDEO_ID, dir, () => {});
+
+  const modelPath = path.join(dir, 'models', 'a-title.json');
+  expect(fs.existsSync(modelPath)).toBe(true);
+  const envelope = JSON.parse(fs.readFileSync(modelPath, 'utf-8'));
+  expect(envelope.sourceMd).toBe('a-title.md');
+  expect(typeof envelope.generatedAt).toBe('string');
+  // SUMMARY_MD has sections "## 1. First" and "## Conclusion"; titles have the ordinal stripped.
+  expect(envelope.sourceSections).toEqual(['First', 'Conclusion']);
+  expect(envelope.model).toEqual(model);
+});
+
+it('does not write a model envelope when the transform fails', async () => {
+  mockTransform.mockRejectedValueOnce(new Error('boom'));
+  await expect(runHtmlDoc(VIDEO_ID, dir, () => {})).rejects.toThrow(/boom/);
+  expect(fs.existsSync(path.join(dir, 'models', 'a-title.json'))).toBe(false);
 });

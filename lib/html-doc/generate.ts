@@ -5,6 +5,7 @@ import { assertOutputFolder, assertVideoId, readIndex, updateVideoFields } from 
 import { generateMagazineModel } from '../gemini';
 import { parseSummaryMarkdown } from './parse';
 import { renderMagazineHtml } from './render';
+import { writeModelEnvelope } from './model-store';
 import type { ProgressEvent } from '../../types';
 
 export async function runHtmlDoc(
@@ -40,10 +41,19 @@ export async function runHtmlDoc(
     video.language,
   );
 
+  // Persist the model so future style changes can re-render offline (no Gemini). `sourceSections`
+  // captures the section titles the model was built against — the re-render drift guard.
+  const base = video.summaryMd.replace(/\.md$/, '');
+  writeModelEnvelope(outputFolder, base, {
+    sourceMd: video.summaryMd,
+    generatedAt: new Date().toISOString(),
+    sourceSections: parsed.sections.map((s) => s.title),
+    model,
+  });
+
   onProgress({ type: 'step', videoId, step: 'Rendering HTML…', current: 3, total: 3 });
   const html = renderMagazineHtml(parsed, model);
 
-  const base = video.summaryMd.replace(/\.md$/, '');
   const htmlFilename = `htmls/${base}.html`;
   const htmlDir = path.join(outputFolder, 'htmls');
   fs.mkdirSync(htmlDir, { recursive: true });
