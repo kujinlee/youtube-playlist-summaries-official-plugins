@@ -47,3 +47,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .superpowers/
+
+# Transient scheduled-task lock (per-session runtime artifact)
+.claude/scheduled_tasks.lock
