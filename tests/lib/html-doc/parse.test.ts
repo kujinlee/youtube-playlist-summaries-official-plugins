@@ -187,3 +187,76 @@ second body
     expect(p.sections[0].prose).toContain('After the fence.');
   });
 });
+
+const WITH_TS = `# T
+
+**URL:** https://www.youtube.com/watch?v=vid123
+
+---
+
+## 1. Core Claim
+▶ [2:15–5:30](https://www.youtube.com/watch?v=vid123&t=135s)
+
+First paragraph.
+---
+## 2. No Timestamp
+Body only.
+---
+## Conclusion
+▶ [10:00–10:30](https://www.youtube.com/watch?v=vid123&t=600s)
+
+Wrap-up.
+`;
+
+describe('parseSummaryMarkdown — section timestamps', () => {
+  const parsed = parseSummaryMarkdown(WITH_TS);
+
+  it('lifts the ▶ line into timeRange and removes it from prose', () => {
+    const s0 = parsed.sections[0];
+    expect(s0.timeRange).toEqual({
+      startSec: 135,
+      endSec: 330,
+      label: '2:15–5:30',
+      url: 'https://www.youtube.com/watch?v=vid123&t=135s',
+    });
+    expect(s0.prose).toBe('First paragraph.');
+    expect(s0.prose).not.toContain('▶');
+  });
+
+  it('sets timeRange null when a section has no ▶ line', () => {
+    expect(parsed.sections[1].timeRange ?? null).toBeNull();
+    expect(parsed.sections[1].prose).toBe('Body only.');
+  });
+
+  it('resolves the Conclusion timestamp too', () => {
+    expect(parsed.sections[2].timeRange?.startSec).toBe(600);
+    expect(parsed.sections[2].timeRange?.endSec).toBe(630);
+  });
+
+  it('handles a section whose only content is the ▶ line (prose empty)', () => {
+    const md = `# T
+
+---
+
+## 1. A
+▶ [2:15–5:30](https://www.youtube.com/watch?v=vid123&t=135s)
+`;
+    const p = parseSummaryMarkdown(md);
+    expect(p.sections[0].timeRange?.startSec).toBe(135);
+    expect(p.sections[0].prose).toBe('');
+  });
+
+  it('does not throw and sets null on a malformed ▶ line', () => {
+    const malformed = `# T
+
+---
+
+## 1. A
+▶ not a link
+
+body
+`;
+    const p = parseSummaryMarkdown(malformed);
+    expect(p.sections[0].timeRange ?? null).toBeNull();
+  });
+});
