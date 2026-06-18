@@ -137,11 +137,9 @@ describe('writeSummaryDoc', () => {
 
 - [ ] **Step 2: Run — expect FAIL** `npx jest pipeline.test -t writeSummaryDoc` → `writeSummaryDoc is not a function`.
 
-- [ ] **Step 3: Implement** in `lib/pipeline.ts`. Add the input/result interfaces and the function (near the top, after imports):
+- [ ] **Step 3: Implement** in `lib/pipeline.ts`. First, **fix the type import** — add `GeminiSummaryResponse` to the existing `import type { … } from '../types';` line (it currently imports `ProgressEvent, Video, VideoMeta, RatingValue, VideoType, Audience`). Add `import { CURRENT_DOC_VERSION } from './doc-version';`. Then add the input/result interfaces and the function (near the top, after imports):
 
 ```ts
-import { CURRENT_DOC_VERSION } from './doc-version';
-
 export interface SummaryDocInput {
   videoId: string;
   title: string;
@@ -155,8 +153,8 @@ export interface SummaryDocResult {
   language: 'en' | 'ko';
   ratings: GeminiSummaryResponse['ratings'];
   overallScore: number;
-  videoType?: GeminiSummaryResponse['videoType'];
-  audience?: GeminiSummaryResponse['audience'];
+  videoType?: VideoType;
+  audience?: Audience;
   tags?: string[];
   tldr?: string;
   takeaways?: string[];
@@ -363,6 +361,12 @@ export async function ensureHtmlDoc(
 
   const stored: DocVersion = video.docVersion ?? PRE_FEATURE;
   const base = video.summaryMd.replace(/\.md$/, '');
+
+  // Forward only the child build's STEP events; ensureHtmlDoc owns the single terminal `done`,
+  // emitted AFTER the docVersion stamp (Codex Blocking: child `done` must not reach the route early).
+  // On error we throw — the route's `.catch` emits the job `error` event (don't double-emit here).
+  const forwardSteps = (e: ProgressEvent) => { if (e.type === 'step') onProgress(e); };
+
   onProgress({ type: 'start' });
 
   if (needsResummarize(stored, current)) {
@@ -379,23 +383,27 @@ export async function ensureHtmlDoc(
     // The .md sections changed → the cached magazine model is stale; drop it so the rebuild regenerates it.
     try { fs.unlinkSync(path.join(outputFolder, 'models', `${base}.json`)); } catch { /* no model — fine */ }
     onProgress({ type: 'step', videoId, step: 'Building HTML…', current: 2, total: 2 });
-    await runHtmlDoc(videoId, outputFolder, onProgress);
+    await runHtmlDoc(videoId, outputFolder, forwardSteps);
   } else if (!video.summaryHtml) {
     onProgress({ type: 'step', videoId, step: 'Building HTML…', current: 1, total: 1 });
-    await runHtmlDoc(videoId, outputFolder, onProgress);
+    await runHtmlDoc(videoId, outputFolder, forwardSteps);
   } else if (isOlder(stored, current)) {
     onProgress({ type: 'step', videoId, step: 'Re-rendering HTML…', current: 1, total: 1 });
     const rr = reRenderSummaryHtml(videoId, outputFolder);
-    if (rr.status !== 'rerendered') await runHtmlDoc(videoId, outputFolder, onProgress); // no model / drift → full build
+    if (rr.status !== 'rerendered') await runHtmlDoc(videoId, outputFolder, forwardSteps); // no model / drift → full build
   } else {
     onProgress({ type: 'done' });
     return; // already current with HTML — nothing to do
   }
 
-  updateVideoFields(outputFolder, videoId, { docVersion: current });
+  updateVideoFields(outputFolder, videoId, { docVersion: current }); // stamp BEFORE the terminal done
   onProgress({ type: 'done' });
 }
 ```
+
+> The child `runHtmlDoc` emits its own `start`/`done`; `forwardSteps` swallows both, so the route sees
+> exactly one `start` (here), the build's `step`s, and one `done` (after the stamp). `ensureHtmlDoc`
+> never emits `error` — it throws, and the route turns the rejection into the job's `error` event.
 
 - [ ] **Step 4: Run — expect PASS** `npx jest html-doc/ensure` → green. `npx tsc --noEmit` (only the 2 known errors).
 
@@ -416,19 +424,22 @@ git commit -m "feat(html-doc): ensureHtmlDoc — version-driven re-summarize/re-
 
 The existing POST route already `createJob` + runs an orchestrator with `onProgress` → job events → SSE. Only the orchestrator call changes.
 
-- [ ] **Step 1: Write/extend the test.** In the existing html-doc route test (or create `tests/app/html-doc-route.test.ts`), mock `lib/html-doc/ensure` and assert the route invokes `ensureHtmlDoc(videoId, outputFolder, <progress fn>)` and emits its events. Minimal new assertion:
+- [ ] **Step 1: Rewrite the existing route test.** `tests/api/html-doc-post.test.ts` currently mocks `lib/html-doc/generate` and asserts `runHtmlDoc` — **rewrite** it (don't supplement): `jest.mock('../../lib/html-doc/ensure')`, drop the generate mock, and replace the assertions with the new collaborator:
 
 ```ts
+import { ensureHtmlDoc } from '../../lib/html-doc/ensure';
 jest.mock('../../lib/html-doc/ensure');
 // … POST the route with { outputFolder } …
 expect(ensureHtmlDoc).toHaveBeenCalledWith('vid11111111', outputFolder, expect.any(Function));
 ```
 
-- [ ] **Step 2: Run — expect FAIL** (route still calls `runHtmlDoc`).
+Also inspect `tests/api/html-doc-pipeline.test.ts` and `tests/lib/job-registry-html.test.ts`: any that drive the **real** `ensureHtmlDoc` end-to-end (not mocked) use video fixtures with **no `docVersion`** → after the swap those would be treated as `{1,0}` and trigger re-summarize (calling `fetchTranscriptSegments`/`generateSummary`). For each such fixture, **add `docVersion: { major: 2, minor: 0 }`** so it exercises the build path unchanged (or, if the test intends to cover re-summarize, mock `writeSummaryDoc`). Run `npx jest html-doc-post html-doc-pipeline job-registry-html` to see exactly which break, and fix their fixtures.
 
-- [ ] **Step 3: Implement.** In `app/api/videos/[id]/html-doc/route.ts`, change the import `import { runHtmlDoc } from '../../../../../lib/html-doc/generate';` to `import { ensureHtmlDoc } from '../../../../../lib/html-doc/ensure';` and change the call `runHtmlDoc(videoId, outputFolder, (event) => {…})` to `ensureHtmlDoc(videoId, outputFolder, (event) => {…})`. Leave the job-registry/SSE wiring untouched.
+- [ ] **Step 2: Run — expect FAIL** (route still calls `runHtmlDoc`; rewritten test asserts `ensureHtmlDoc`).
 
-- [ ] **Step 4: Run — expect PASS** `npx jest html-doc-route` (and the existing html-doc route/job tests). `npx tsc --noEmit`.
+- [ ] **Step 3: Implement.** In `app/api/videos/[id]/html-doc/route.ts`, change the import `import { runHtmlDoc } from '../../../../../lib/html-doc/generate';` to `import { ensureHtmlDoc } from '../../../../../lib/html-doc/ensure';` and change the call `runHtmlDoc(videoId, outputFolder, (event) => {…})` to `ensureHtmlDoc(videoId, outputFolder, (event) => {…})`. Leave the job-registry/SSE wiring untouched (its `.catch` still emits the `error` event; its `onTerminal` still fires on the single `done`).
+
+- [ ] **Step 4: Run — expect PASS** `npx jest html-doc-post html-doc-pipeline job-registry-html` → green (fixtures updated). `npx tsc --noEmit`.
 
 - [ ] **Step 5: Commit**
 
@@ -442,33 +453,43 @@ git commit -m "feat(api): html-doc route drives ensureHtmlDoc (version-aware)"
 ### Task 5: Corrections invalidates the cached HTML
 
 **Files:**
-- Modify: `app/api/videos/[id]/regenerate/route.ts`
-- Test: `tests/lib/regenerate-route.test.ts` (or the existing corrections/regenerate test)
+- Modify: `app/api/videos/[id]/regenerate/route.ts` (clear `summaryHtml` in index + response)
+- Modify: `components/CorrectionsPanel.tsx` (patch type + onSuccess), `components/VideoList.tsx`, `components/VideoRow.tsx`, `app/page.tsx` (`onAnnotationChange` patch type includes `summaryHtml`)
+- Test: the existing corrections/regenerate route test
 
-After "Edit corrections" rewrites the `.md`, the cached HTML is stale but the version is unchanged; clear `summaryHtml` so the unified action rebuilds it on next click.
+After "Edit corrections" rewrites the `.md`, the cached HTML is stale but the version is unchanged; clear `summaryHtml` so the unified action rebuilds it. **And** thread that null into the in-memory row so the menu flips from a (stale) link to a button immediately — not only after a hard refetch (Codex High).
 
-- [ ] **Step 1: Write the failing test** — after a successful corrections POST, assert the index update includes `summaryHtml: null`:
+- [ ] **Step 1: Write the failing test** — after a successful corrections POST, assert the index update clears the HTML and the JSON response carries it:
 
 ```ts
 // mock index-store.updateVideoFields; POST corrections; then:
 expect(updateVideoFields).toHaveBeenCalledWith(outputFolder, videoId, expect.objectContaining({ summaryHtml: null }));
+// and the response body:
+expect(body).toEqual(expect.objectContaining({ summaryHtml: null }));
 ```
 
 - [ ] **Step 2: Run — expect FAIL.**
 
-- [ ] **Step 3: Implement.** In `regenerate/route.ts`, after the `await fs.promises.writeFile(mdPath, updatedContent, 'utf-8');` line, extend the existing index update so the refreshed-quick-view `updateVideoFields(outputFolder, videoId, { tldr, takeaways })` also clears the stale HTML:
+- [ ] **Step 3: Implement (route).** In `regenerate/route.ts`, extend the existing post-write quick-view update and the JSON response to clear the HTML:
 
 ```ts
     updateVideoFields(outputFolder, videoId, { tldr, takeaways, summaryHtml: null });
+    // …existing corrections persistence…
+    return NextResponse.json({ tldr, takeaways, corrections: trimmedCorrections, summaryHtml: null });
 ```
 
-- [ ] **Step 4: Run — expect PASS** `npx jest regenerate`. `npx tsc --noEmit`.
+- [ ] **Step 4: Implement (UI threading).** Widen the corrections patch type so the cleared HTML reaches the in-memory row:
+  - `components/CorrectionsPanel.tsx`: change `type Patch = Partial<Pick<Video, 'corrections' | 'tldr' | 'takeaways'>>;` to add `'summaryHtml'`; in the `onSuccess({ … })` call add `summaryHtml: (data.summaryHtml ?? null) as string | null`.
+  - `components/VideoList.tsx` and `components/VideoRow.tsx`: in the `onAnnotationChange` prop type `Partial<Pick<Video, 'personalScore' | 'personalNote' | 'corrections' | 'tldr' | 'takeaways'>>`, add `'summaryHtml'`.
+  - `app/page.tsx`: the existing annotation handler already merges the patch into the video (`{ ...v, ...patch }`), so `summaryHtml: null` now clears it in state → the menu item becomes a button. (If the handler's local patch type is also a `Pick`, widen it identically.)
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Run — expect PASS** `npx jest regenerate CorrectionsPanel`. `npx tsc --noEmit`.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add app/api/videos/\[id\]/regenerate/route.ts tests/
-git commit -m "fix(api): clear stale summaryHtml after corrections rewrite the .md"
+git add app/api/videos/\[id\]/regenerate/route.ts components/CorrectionsPanel.tsx components/VideoList.tsx components/VideoRow.tsx app/page.tsx tests/
+git commit -m "fix: clear stale summaryHtml after corrections — index, response, and in-memory row"
 ```
 
 ---
@@ -579,15 +600,19 @@ Pass `busy={busy}` into `<VideoMenu … />`.
 
 `app/page.tsx`: pass `busyVideoId={htmlJob?.videoId ?? null}` to `<VideoList … />`. (`htmlJob` already exists; `handleHtmlClose` already refetches videos so the row updates to current on completion.)
 
-- [ ] **Step 4: Run — expect PASS** `npx jest VideoRow`. `npx tsc --noEmit`.
+- [ ] **Step 4: Remove the conflicting auto-open** (Codex Medium). In `components/HtmlDocStatusBar.tsx`, the `data.type === 'done'` branch calls `window.open(viewUrl, …)`. Delete that `try { window.open(...) } catch {}` line. The user's model is "the menu becomes clickable" — on completion the status bar already shows the **"View HTML doc ↗"** link, and the refetched row's "HTML doc" item is now a direct link; both are real user-gesture opens (no popup-block, no double-open). Keep the auto-close timer.
 
-- [ ] **Step 5: Full suite** `npm test` → all green (no regressions). `npx tsc --noEmit` → only the 2 pre-existing errors.
+- [ ] **Step 5: Rewrite the stale E2E** (Codex Medium). `tests/e2e/html-doc.spec.ts` asserts `View / Generate / Regenerate HTML doc`. Rewrite its menu expectations around the single **"HTML doc"** item and `docVersion`: a fixture video with `summaryHtml` + `docVersion {2,0}` shows a direct link; a fixture with no `docVersion` (pre-feature) shows the action button → clicking it shows the hourglass (mock the route/SSE) → on done the item becomes a link whose served HTML contains `.ts` anchors. Remove assertions for the removed menu items. Check `tests/e2e/darkmode-html.spec.ts` / `deep-dive-html.spec.ts` for any "Generate/View HTML doc" menu reliance and update the summary-menu parts only.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Run — expect PASS** `npx jest VideoRow`; `npx playwright test html-doc` (E2E). `npx tsc --noEmit`.
+
+- [ ] **Step 7: Full suite** `npm test` → all green (no regressions). `npx tsc --noEmit` → only the 2 pre-existing errors.
+
+- [ ] **Step 8: Commit**
 
 ```bash
-git add components/VideoRow.tsx components/VideoList.tsx app/page.tsx tests/components/VideoRow.test.tsx
-git commit -m "feat(ui): per-row hourglass + busy threading for HTML doc regeneration"
+git add components/VideoRow.tsx components/VideoList.tsx app/page.tsx components/HtmlDocStatusBar.tsx tests/components/VideoRow.test.tsx tests/e2e/html-doc.spec.ts
+git commit -m "feat(ui): per-row hourglass + busy threading; menu-clickable completion (no auto-open)"
 ```
 
 ---
@@ -614,6 +639,8 @@ No spec requirement is without a task. Phase-2 bulk is out of scope by D3.
 **Placeholder scan:** every code step has complete code. Two prose directions remain — both reference concrete, already-read code: Task 2 "remove the now-duplicated frontmatter/… lines `writeSummaryDoc` replaced" (the exact lines are `pipeline.ts:264-302`), and Task 4's import/call swap (one line each).
 
 **Type consistency:** `DocVersion {major,minor}` (Task 1) is used identically in Tasks 3/6; `writeSummaryDoc(SummaryDocInput with baseName)` (Task 2) is called with `baseName` in Tasks 2/3; `ensureHtmlDoc(videoId, outputFolder, onProgress, current?)` (Task 3) is called by Task 4; `busy` prop flows VideoMenu (Task 6) ← VideoRow ← VideoList ← page (Task 7); `updateVideoFields(outputFolder, videoId, patch)` matches the existing index-store signature.
+
+**Codex plan-review findings folded in** (`docs/reviews/plan-resummarize-codex.md`): Blocking `done`-before-stamp → Task 3 `forwardSteps` + single terminal `done` after the version stamp, throws on error; High `GeminiSummaryResponse` import → Task 2; High stale-UI-after-corrections → Task 5 threads `summaryHtml: null` to the in-memory row; High route-test → Task 4 rewrites `html-doc-post.test.ts` + fixes `html-doc-pipeline`/`job-registry-html` fixtures (add `docVersion {2,0}`); Medium auto-open + stale E2E → Task 7. The injectable `current` param (Medium) is kept as an intentional test seam; progress-event drift (Low) accepted.
 
 ## Verification (Phase 4 — after all tasks)
 
