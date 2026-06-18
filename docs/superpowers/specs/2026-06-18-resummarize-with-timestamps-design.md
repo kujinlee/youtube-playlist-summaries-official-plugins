@@ -136,12 +136,21 @@ by the same `writeSummaryDoc`, matching the annotated sample in
 - **Menu:** `View / Generate / Regenerate HTML doc` collapse into **one "HTML doc" item** (shown when
   `summaryMd` exists; disabled otherwise). Deep-dive HTML, Obsidian, and PDF items are unchanged.
 - **Link vs. action (no wasted round-trip):** the client decides from data it already has —
-  - `summaryHtml` present **and** `!isOlder(video.docVersion ?? {1,0}, CURRENT_DOC_VERSION)` → render a
-    **direct link** to the GET serve URL (instant open on the click gesture).
-  - otherwise → render a **button** → `POST …/html-doc` runs `ensureHtmlDoc` with a **non-blocking**
-    status (*"Re-summarizing…" → "Building HTML…" → "Ready"*); on completion the row refreshes and the
-    status offers an **"Open HTML doc →"** button (a fresh user gesture → opens reliably, sidestepping
-    popup-blockers). No full-screen overlay; the user can keep browsing.
+  - `summaryHtml` present **and** `!isOlder(video.docVersion ?? {1,0}, CURRENT_DOC_VERSION)` → the item is
+    a **direct link** to the GET serve URL → clicking opens it instantly (the click gesture, so no
+    popup-block).
+  - otherwise → the item is a **button** that starts `POST …/html-doc` (`ensureHtmlDoc`).
+- **In-progress status (clear + local):** while a video is regenerating, an **hourglass / spinner shows
+  next to that row's menu trigger** — visible even with the menu closed — so the user always knows work
+  is happening on that row. The current step is available as the indicator's label/tooltip
+  (*"Re-summarizing…" → "Building HTML…"*). During this time the **"HTML doc" menu item is disabled**
+  (not re-clickable). The parent tracks per-video regen state (`videoId → status`), so other rows stay
+  fully interactive — no full-screen overlay, no blocking.
+- **Completion → clickable:** when `ensureHtmlDoc` finishes, the row refreshes from the updated index
+  (now `docVersion = CURRENT`, `summaryHtml` set), the hourglass clears, and **"HTML doc" returns to its
+  normal clickable state — now a direct link**. The user clicks it (a fresh gesture) to open the
+  freshly-built HTML with timestamps. On **error**, the indicator shows an error state and the item
+  stays a retry button (with the failure message available).
 - **Corrections invalidation (related fix):** the existing corrections-`regenerate` route rewrites the
   `.md` without bumping the version; to keep the unified item honest it must **clear `summaryHtml`**
   after rewriting, so the next "HTML doc" click re-renders the edited content. (Small, in-scope because
@@ -175,11 +184,13 @@ HTML-doc / deep-dive status pattern; nothing to dismiss.
 - **Unit/route `ensureHtmlDoc`:** the three branches — major-stale → re-summarize + full build + stamp;
   minor-stale / no-html → re-render (no Gemini) + stamp; current → no work; the D2 preserve-merge; model
   invalidation on re-summarize; the non-destructive-on-transcript-failure path; 404/422/500.
-- **Component `VideoMenu`:** single item; direct link when current; button when stale/absent; disabled
-  without `summaryMd`.
-- **E2E (Playwright, mock at the route/lib boundary):** stale video → "HTML doc" → status → "Open" →
-  served HTML contains `.ts` anchors and the meta version reflects current; current video → instant
-  link; corrections → `summaryHtml` cleared → next click re-renders.
+- **Component `VideoMenu` + row:** single item; direct link when current; button when stale/absent;
+  disabled without `summaryMd`; during regen the row shows the **hourglass** and the item is **disabled**;
+  on completion the hourglass clears and the item becomes a clickable direct link.
+- **E2E (Playwright, mock at the route/lib boundary):** stale video → click "HTML doc" → hourglass shown
+  + item disabled → on done, hourglass clears + item clickable → opening it serves HTML containing `.ts`
+  anchors; current video → instant link; error → error indicator + retry; corrections → `summaryHtml`
+  cleared → next click re-renders.
 
 ## 10. Non-Goals
 
