@@ -1,10 +1,19 @@
 import { z } from 'zod';
 
+/** A resolved clickable time range for one section (from the `▶ [start–end](url)` line). */
+export interface SectionTimeRange {
+  startSec: number; // integer seconds (from the URL &t= param)
+  endSec: number;   // integer seconds (from the end of the label)
+  label: string;    // e.g. "2:15–5:30"
+  url: string;      // https://www.youtube.com/watch?v=…&t=…s
+}
+
 /** A section as parsed from the summary markdown (deterministic, pre-transform). */
 export interface ParsedSection {
   numeral: string | null; // "1", "2", … or null (e.g. Conclusion)
   title: string;          // heading with any leading "N. " ordinal stripped
   prose: string;          // section body text (dividers removed)
+  timeRange?: SectionTimeRange | null; // clickable time range, when the .md has a ▶ line
 }
 
 /** Everything parsed from a summary .md without the LLM. */
