@@ -121,15 +121,16 @@ interface SectionTimeRange { startSec: number; endSec: number; label: string; ur
 | Summary section timestamp | `▶ 2:15–5:30` | `https://www.youtube.com/watch?v=<videoId>&t=<startSec>s` |
 
 - `<startSec>` is an integer (floor of `segments[index].offset`).
-- `target="_blank" rel="noopener"` in the rendered HTML (new tab; the `.md`/Obsidian link opens per
-  Obsidian's own behavior).
+- `target="_blank" rel="noopener noreferrer"` in the rendered HTML (new tab; `noreferrer` also avoids
+  leaking a local file path to YouTube when the HTML is opened from disk; the `.md`/Obsidian link
+  opens per Obsidian's own behavior).
 - Only the **start** is encoded in the URL; the `–end` is display-only.
 
 ## 7. Rendering (summary HTML)
 
 `render.ts` renders `parsed.sections[i].timeRange` (when present) as a small clickable element
 between the section heading and the lead:
-`<a class="ts" href="…&t=135s" target="_blank" rel="noopener">▶ 2:15–5:30</a>`. Styled unobtrusively
+`<a class="ts" href="…&t=135s" target="_blank" rel="noopener noreferrer">▶ 2:15–5:30</a>`. Styled unobtrusively
 with the existing gold token. Absent `timeRange` → nothing rendered (no layout change for
 old/degraded docs).
 
