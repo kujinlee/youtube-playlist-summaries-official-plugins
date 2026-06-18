@@ -170,4 +170,25 @@ describe('resolveTranscriptTokens — malformed token hardening (Codex)', () => 
     expect(out).not.toMatch(/▶/);
     expect(out).not.toMatch(/\[\[TS:/);
   });
+
+  it('degrades + scrubs an embedded-] malformed own-line token', () => {
+    const bad = '## 1. A\n[[TS:0]]\n\n## 2. B\n[[TS:a]b]]\n\nbody';
+    const out = resolveTranscriptTokens(bad, SEGS, 'vid123');
+    expect(out).not.toMatch(/▶/);
+    expect(out).not.toMatch(/\[\[TS:/);
+  });
+
+  it('scrubs an embedded-] inline token on the no-own-line path', () => {
+    const out = resolveTranscriptTokens('## 1. A\n\nbody [[TS:a]b]] x', SEGS, 'vid123');
+    expect(out).not.toMatch(/\[\[TS:/);
+  });
+
+  it('degrades when the final segment (used for video duration) has non-finite timing', () => {
+    const badLast = [
+      { text: 'a', offset: 0, duration: 5 },
+      { text: 'b', offset: 10, duration: NaN }, // last row feeds videoDuration
+    ];
+    const out = resolveTranscriptTokens('## 1. A\n[[TS:0]]\n\nbody', badLast, 'vid123');
+    expect(out).not.toMatch(/▶|\[\[TS:/);
+  });
 });

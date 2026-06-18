@@ -36,8 +36,8 @@ export function buildIndexedTranscript(segments: TranscriptSegment[]): string {
   return segments.map((s, i) => `[${i} @${formatTimestamp(s.offset)}] ${s.text}`).join('\n');
 }
 
-const OWN_LINE_TOKEN = /^\s*\[\[TS:([^\]]*)\]\]\s*$/;
-const ANY_TOKEN = /\[\[TS:[^\]]*\]\]/g;
+const OWN_LINE_TOKEN = /^\s*\[\[TS:(.*?)\]\]\s*$/;
+const ANY_TOKEN = /\[\[TS:.*?\]\]/g;
 const FENCE = /^\s*(```|~~~)/; // opens/closes a fenced code block (matches parse.ts:isFenceLine)
 
 /**
@@ -83,7 +83,10 @@ export function resolveTranscriptTokens(
     indices.every((n) => Number.isInteger(n) && n >= 0 && n < segments.length) &&
     indices.every((n, k) => k === 0 || n > indices[k - 1]) &&
     // Codex MEDIUM: don't trust transcript ordering — resolved offsets must be finite & strictly increasing.
-    indices.every((n, k) => Number.isFinite(segments[n].offset) && (k === 0 || segments[n].offset > segments[indices[k - 1]].offset));
+    indices.every((n, k) => Number.isFinite(segments[n].offset) && (k === 0 || segments[n].offset > segments[indices[k - 1]].offset)) &&
+    // Codex: the final segment feeds videoDuration (last token's end) — it must be finite too.
+    Number.isFinite(segments[segments.length - 1].offset) &&
+    Number.isFinite(segments[segments.length - 1].duration);
 
   if (tokenLines.length > 0 && !valid) {
     console.warn('resolveTranscriptTokens: degrading — invalid/missing segment indices or videoId');
