@@ -179,9 +179,23 @@ describe('resolveTranscriptTokens', () => {
     expect(out).not.toMatch(/\[\[TS:/); // no raw tokens remain
   });
 
-  it('returns markdown unchanged when there are no tokens', () => {
+  it('returns markdown unchanged when there are no tokens at all', () => {
     const plain = '## 1. A\n\nbody';
     expect(resolveTranscriptTokens(plain, SEGS, 'vid123')).toBe(plain);
+  });
+
+  it('strips a stray inline token even when there is NO own-line token (spec §8)', () => {
+    const inlineOnly = '## 1. A\n\nbody with stray [[TS:2]] inline only';
+    const out = resolveTranscriptTokens(inlineOnly, SEGS, 'vid123');
+    expect(out).not.toMatch(/\[\[TS:/);
+    expect(out).toContain('body with stray  inline only');
+  });
+
+  it('leaves a token inside a fenced code block untouched (fence-aware)', () => {
+    const fenced = '## 1. A\n[[TS:0]]\n\n```\nexample [[TS:1]] literal\n```\n';
+    const out = resolveTranscriptTokens(fenced, SEGS, 'vid123');
+    expect(out).toContain('▶ [0:00–'); // own-line token outside the fence resolved
+    expect(out).toContain('example [[TS:1]] literal'); // fenced token preserved verbatim
   });
 
   it('degrades (strips ALL tokens, no ▶ lines) when any index is out of range', () => {
@@ -229,15 +243,20 @@ export function buildIndexedTranscript(segments: TranscriptSegment[]): string {
 
 const OWN_LINE_TOKEN = /^\s*\[\[TS:(\d+)\]\]\s*$/;
 const ANY_TOKEN = /\[\[TS:\d+\]\]/g;
+const FENCE = /^\s*(```|~~~)/; // opens/closes a fenced code block (matches parse.ts:isFenceLine)
 
 /**
  * Replace each own-line `[[TS:<index>]]` token with a `▶ [start–end](url)` line, resolving the real
  * timestamp from `segments[index].offset`. End of a token = next token's start; the last token's
  * end = video duration (last segment offset + duration).
  *
- * All-or-nothing degradation: if any index is out of range, indices are not strictly increasing,
- * `videoId` is missing, or there are no segments, ALL tokens are stripped (no `▶` lines emitted).
- * Any stray inline token is stripped regardless, so no raw `[[TS:…]]` ever reaches the reader.
+ * Fence-aware: tokens inside ``` / ~~~ fenced code blocks are left verbatim (never counted toward
+ * validation, never rewritten) — mirroring parse.ts's fence handling.
+ *
+ * All-or-nothing degradation: if any (non-fenced, own-line) index is out of range, indices are not
+ * strictly increasing, `videoId` is missing, or there are no segments, ALL such token lines are
+ * dropped (no `▶` lines emitted). Any stray inline token OUTSIDE a fence is stripped regardless, so
+ * no raw `[[TS:…]]` ever reaches the reader (spec §8).
  */
 export function resolveTranscriptTokens(
   markdown: string,
@@ -245,37 +264,52 @@ export function resolveTranscriptTokens(
   videoId: string | null,
 ): string {
   const lines = markdown.split('\n');
-  const tokenLines: number[] = []; // line indices holding an own-line token
+
+  // Pass 1: collect own-line token line indices OUTSIDE fences, in document order.
+  const tokenLines: number[] = [];
   const indices: number[] = [];
+  let inFence = false;
   lines.forEach((line, i) => {
+    if (FENCE.test(line)) { inFence = !inFence; return; }
+    if (inFence) return;
     const m = line.match(OWN_LINE_TOKEN);
     if (m) { tokenLines.push(i); indices.push(parseInt(m[1], 10)); }
   });
 
-  if (tokenLines.length === 0) return markdown; // nothing to do; leave input untouched
-
   const valid =
+    tokenLines.length > 0 &&
     !!videoId &&
     segments.length > 0 &&
     indices.every((n) => Number.isInteger(n) && n >= 0 && n < segments.length) &&
     indices.every((n, k) => k === 0 || n > indices[k - 1]);
 
-  if (!valid) {
-    // Degrade: drop the token lines entirely, then scrub any stray inline tokens.
-    const kept = lines.filter((_, i) => !tokenLines.includes(i)).join('\n');
+  if (tokenLines.length > 0 && !valid) {
     console.warn('resolveTranscriptTokens: degrading — invalid/missing segment indices or videoId');
-    return kept.replace(ANY_TOKEN, '');
   }
 
-  const last = segments[segments.length - 1];
-  const videoDuration = Math.floor(last.offset + last.duration);
-  tokenLines.forEach((lineIdx, k) => {
-    const startSec = Math.floor(segments[indices[k]].offset);
-    const endSec = k + 1 < indices.length ? Math.floor(segments[indices[k + 1]].offset) : videoDuration;
-    lines[lineIdx] = timestampLine(startSec, endSec, videoId as string);
+  const lastSeg = segments[segments.length - 1];
+  const videoDuration = segments.length > 0 ? Math.floor(lastSeg.offset + lastSeg.duration) : 0;
+  const tokenSet = new Set(tokenLines);
+
+  // Pass 2: rebuild line-by-line, fence-aware.
+  let tokenK = 0;
+  inFence = false;
+  const out: (string | null)[] = lines.map((line, i) => {
+    if (FENCE.test(line)) { inFence = !inFence; return line; }
+    if (inFence) return line;                       // fenced content: verbatim
+    if (tokenSet.has(i)) {
+      if (!valid) return null;                      // degrade: drop the own-line token line
+      const startSec = Math.floor(segments[indices[tokenK]].offset);
+      const endSec = tokenK + 1 < indices.length
+        ? Math.floor(segments[indices[tokenK + 1]].offset)
+        : videoDuration;
+      tokenK++;
+      return timestampLine(startSec, endSec, videoId as string);
+    }
+    return line.replace(ANY_TOKEN, '');             // strip any stray inline (non-own-line) token
   });
-  // Scrub any stray inline tokens that were not on their own line.
-  return lines.join('\n').replace(ANY_TOKEN, '');
+
+  return out.filter((l): l is string => l !== null).join('\n');
 }
 ```
 
@@ -702,15 +736,27 @@ git commit -m "feat(timestamps): render section timestamp link in summary HTML"
 
 ---
 
-### Task 7: `generateSummary` emits + resolves tokens — `lib/gemini.ts`
+### Task 7: `generateSummary` token emission + pipeline wiring (producer side)
 
 **Files:**
 - Modify: `lib/gemini.ts` (signature, prompt, token resolution)
-- Test: `tests/lib/gemini.test.ts` (update existing `generateSummary` calls; add token tests)
+- Modify: `lib/pipeline.ts` (fetch segments; pass `segments` + `videoId`)
+- Test: `tests/lib/gemini.test.ts` (update `generateSummary` calls; add token tests)
+- Test: `tests/lib/pipeline.test.ts` (migrate transcript mocks to `fetchTranscriptSegments`)
 
 `generateSummary` changes signature from `(transcript: string, language)` to
 `(segments: TranscriptSegment[], language, videoId: string)`. It builds the indexed transcript,
-instructs Gemini to emit `[[TS:i]]` tokens, and resolves them in the returned `summary`.
+instructs Gemini to emit `[[TS:i]]` tokens, and resolves them in the returned `summary`. The pipeline
+caller switches to `fetchTranscriptSegments` and passes `segments` + `videoId`.
+
+> **Why this is one task, not two** (plan review M1/M2/B1): the `generateSummary` signature change and
+> its only source caller (`lib/pipeline.ts:250`) must change in the **same commit** — splitting them
+> leaves a commit where `pipeline.ts` calls a 2-arg function with the new 3-arg signature (`npm test`
+> stays green because `next/jest` uses SWC with no typecheck, but `npm run build` breaks). The
+> pipeline **test** mocks must also migrate in lockstep: `pipeline.test.ts` mocks `fetchTranscript`
+> per-test (17 happy-path sites + one error-injection test), and after the switch the pipeline never
+> calls `fetchTranscript`, so those mocks go dead and the error test silently stops exercising its
+> error path. All of it moves together here.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -798,12 +844,71 @@ describe('generateSummary — timestamps', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+**Now migrate `tests/lib/pipeline.test.ts` in lockstep.** This file mocks `youtube` wholesale
+(`jest.mock('../../lib/youtube')`) and currently drives the pipeline through `fetchTranscript`.
 
-Run: `npx jest gemini.test`
-Expected: FAIL — `generateSummary` does not accept segments / does not resolve tokens.
+(a) Replace the mock handle declaration (line 19) and add the segments handle:
 
-- [ ] **Step 3: Write the minimal implementation**
+```ts
+// was: const mockFetchTranscript = jest.mocked(youtube.fetchTranscript);
+const mockFetchTranscriptSegments = jest.mocked(youtube.fetchTranscriptSegments);
+```
+(Remove the `mockFetchTranscript` line entirely — after the switch the pipeline never calls
+`fetchTranscript`, so the handle is unused and would trip the no-unused-vars lint.)
+
+(b) **Global mechanical replace** across the file — every happy-path transcript mock (17 sites:
+lines 96,131,145,158,173,198,218,235,257,270,283,345,409,428,495,519,541):
+
+```ts
+// FROM:
+mockFetchTranscript.mockResolvedValue('transcript');
+// TO:
+mockFetchTranscriptSegments.mockResolvedValue([{ text: 'transcript', offset: 0, duration: 5 }]);
+```
+
+(c) **Convert the one error-injection test** ("continues to next video when one video fails",
+~line 110) — its contract is that the *first* video's transcript fetch throws:
+
+```ts
+// FROM:
+mockFetchTranscript
+  .mockRejectedValueOnce(new Error('No transcript available'))
+  .mockResolvedValueOnce('transcript');
+// TO:
+mockFetchTranscriptSegments
+  .mockRejectedValueOnce(new Error('No transcript available'))
+  .mockResolvedValueOnce([{ text: 'transcript', offset: 0, duration: 5 }]);
+```
+
+(d) Add one new test asserting the wiring (place it beside the other success-path tests, which call
+`runIngestion(PLAYLIST_URL, outputFolder, (e) => events.push(e))`):
+
+```ts
+it('fetches transcript segments and passes them with videoId to generateSummary', async () => {
+  mockFetchPlaylistVideos.mockResolvedValue([makeVideoMeta('vid1')]);
+  mockFetchTranscriptSegments.mockResolvedValue([{ text: 'hello world', offset: 0, duration: 5 }]);
+  mockDetectLanguage.mockReturnValue('en');
+  mockGenerateSummary.mockResolvedValue(makeSummaryResponse());
+
+  const events: ProgressEvent[] = [];
+  await runIngestion(PLAYLIST_URL, outputFolder, (e) => events.push(e));
+
+  expect(mockFetchTranscriptSegments).toHaveBeenCalledWith('vid1');
+  expect(mockGenerateSummary).toHaveBeenCalledWith(
+    [{ text: 'hello world', offset: 0, duration: 5 }],
+    'en',
+    'vid1',
+  );
+});
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `npx jest gemini.test pipeline.test`
+Expected: FAIL — `generateSummary` does not accept segments / does not resolve tokens;
+`youtube.fetchTranscriptSegments` is undefined in the mock until the source exports it.
+
+- [ ] **Step 3: Write the gemini.ts implementation**
 
 In `lib/gemini.ts`, add imports near the top (after the existing `MagazineModel` import):
 
@@ -867,81 +972,14 @@ ${indexedTranscript}
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [ ] **Step 4: Write the pipeline.ts implementation**
 
-Run: `npx jest gemini.test`
-Expected: PASS (all `generateSummary` blocks green).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add lib/gemini.ts tests/lib/gemini.test.ts
-git commit -m "feat(timestamps): generateSummary sends indexed transcript + resolves [[TS:i]] tokens"
-```
-
----
-
-### Task 8: Wire the pipeline — `lib/pipeline.ts`
-
-**Files:**
-- Modify: `lib/pipeline.ts` (import + transcript fetch + generateSummary call)
-- Test: `tests/lib/pipeline.test.ts` (update mocks to the new signatures)
-
-- [ ] **Step 1: Write the failing test**
-
-In `tests/lib/pipeline.test.ts`, add a mock handle for the new function near the other `jest.mocked`
-declarations (after line 19):
+In `lib/pipeline.ts`, update the import on line 3 — drop `fetchTranscript` (the pipeline no longer
+calls it; `lib/deep-dive.ts` keeps its own import) and add `fetchTranscriptSegments`:
 
 ```ts
-const mockFetchTranscriptSegments = jest.mocked(youtube.fetchTranscriptSegments);
+import { fetchPlaylistVideos, fetchTranscriptSegments, detectLanguage } from './youtube';
 ```
-
-In the shared `beforeEach`/setup where `mockFetchTranscript.mockResolvedValue('transcript')` is set,
-also provide segments and align `detectLanguage` (already mocked). Add to the setup block:
-
-```ts
-  mockFetchTranscriptSegments.mockResolvedValue([
-    { text: 'transcript', offset: 0, duration: 5 },
-  ]);
-```
-
-Add a new test asserting the new wiring:
-
-```ts
-it('fetches transcript segments and passes them with videoId to generateSummary', async () => {
-  mockFetchPlaylistVideos.mockResolvedValue([makeVideoMeta('vid1')]);
-  mockFetchTranscriptSegments.mockResolvedValue([{ text: 'hello world', offset: 0, duration: 5 }]);
-  mockDetectLanguage.mockReturnValue('en');
-  mockGenerateSummary.mockResolvedValue(makeSummaryResponse());
-
-  await runPipeline(/* same args as the surrounding tests use */);
-
-  expect(mockFetchTranscriptSegments).toHaveBeenCalledWith('vid1');
-  expect(mockGenerateSummary).toHaveBeenCalledWith(
-    [{ text: 'hello world', offset: 0, duration: 5 }],
-    'en',
-    'vid1',
-  );
-});
-```
-
-(Use the same `runPipeline` invocation and arg shape as the existing tests in the file.)
-
-- [ ] **Step 2: Run the test to verify it fails**
-
-Run: `npx jest pipeline.test`
-Expected: FAIL — pipeline still calls `fetchTranscript` / `generateSummary('transcript', language)`.
-
-- [ ] **Step 3: Write the minimal implementation**
-
-In `lib/pipeline.ts`, update the import on line 3:
-
-```ts
-import { fetchPlaylistVideos, fetchTranscript, fetchTranscriptSegments, detectLanguage } from './youtube';
-```
-
-(Keep `fetchTranscript` in the import — other code in the file may still reference it; if a lint
-"unused" error appears after this change, remove only `fetchTranscript` from the list.)
 
 Replace the transcript fetch + summary call (currently lines 244-250):
 
@@ -956,21 +994,33 @@ Replace the transcript fetch + summary call (currently lines 244-250):
       const { summary, ratings, overallScore, videoType, audience, tags, tldr, takeaways } = await generateSummary(segments, language, meta.videoId);
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+(`detectLanguage` now runs on `segments.map(s => s.text).join(' ')`, which is byte-identical to the
+old `fetchTranscript` output — no language-detection drift. Verified in the plan review.)
 
-Run: `npx jest pipeline.test`
-Expected: PASS (existing pipeline tests still green with the updated segment mocks; new test green).
+- [ ] **Step 5: Run the targeted tests to verify they pass**
 
-- [ ] **Step 5: Run the full suite**
+Run: `npx jest gemini.test pipeline.test`
+Expected: PASS — gemini token blocks green; pipeline tests green with the migrated segment mocks
+(including the error-injection test, which now rejects `fetchTranscriptSegments`).
+
+- [ ] **Step 6: Run the full suite**
 
 Run: `npm test`
 Expected: PASS — no regressions across the suite.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Typecheck** (plan review M1 — `next/jest` uses SWC and does NOT typecheck, so the
+suite can be green while the build is broken; this catches a stale 2-arg caller or signature drift)
+
+Run: `npx tsc --noEmit`
+Expected: no NEW errors involving `generateSummary`, `fetchTranscriptSegments`, or `pipeline.ts`.
+(If the repo has pre-existing unrelated `tsc` errors, confirm none are newly introduced by this task.)
+
+- [ ] **Step 8: Commit** (single commit — source signature + caller + both test files together, so no
+intermediate commit has a broken build)
 
 ```bash
-git add lib/pipeline.ts tests/lib/pipeline.test.ts
-git commit -m "feat(timestamps): pipeline fetches segments + passes videoId to generateSummary"
+git add lib/gemini.ts lib/pipeline.ts tests/lib/gemini.test.ts tests/lib/pipeline.test.ts
+git commit -m "feat(timestamps): generateSummary emits/resolves [[TS:i]] tokens; pipeline passes segments"
 ```
 
 ---
@@ -989,15 +1039,24 @@ git commit -m "feat(timestamps): pipeline fetches segments + passes videoId to g
 | §5.2 `SectionTimeRange` / optional `timeRange` | Task 4 |
 | §6 URL contract `watch?v=…&t=Ns` | Tasks 1 (`buildWatchUrl`), 6 (`target/rel`) |
 | §7 render `.ts` anchor | Task 6 |
-| §8 error handling (4 rows) | Task 2 (degrade/strip), Task 5 (malformed `▶`) |
+| §8 error handling (5 rows) | Task 2 (degrade / strip own-line + inline + fenced), Task 5 (malformed `▶`) |
 | §9 onboarding (regeneration only) | No code — documented behavior; no backfill task by design |
 | §12 deep-dive deferred | Out of scope by decision |
 
-No spec requirement is left without a task.
+No spec requirement is left without a task. (Tasks 7 and 8 were merged into a single producer-wiring
+Task 7 after the plan review — see its "Why this is one task" note.)
 
-**2. Placeholder scan:** No "TBD"/"handle edge cases"/uncoded steps — every code step has complete code. The only prose direction is "apply the same argument change to every `generateSummary(...)` call" in Task 7 and "use the same `runPipeline` invocation" in Task 8, which reference concrete existing call sites in those test files rather than unwritten logic.
+**2. Placeholder scan:** No "TBD"/"handle edge cases"/uncoded steps — every code step has complete
+code. The only prose directions are the **mechanical** test-mock migrations in Task 7
+(`generateSummary(...)` argument change across `gemini.test.ts`; the `mockFetchTranscript` →
+`mockFetchTranscriptSegments` find/replace across `pipeline.test.ts`), each an exact string
+substitution against concrete, enumerated existing call sites — not unwritten logic.
 
-**3. Type consistency:** `TranscriptSegment` (defined Task 1, imported Tasks 3/7), `SectionTimeRange`/`timeRange` (Task 4, consumed Tasks 5/6), `generateSummary(segments, language, videoId)` (Task 7, called Task 8), `resolveTranscriptTokens(markdown, segments, videoId)` and `buildIndexedTranscript(segments)` (Task 2, called Task 7) — all signatures match across tasks.
+**3. Type consistency:** `TranscriptSegment` (defined Task 1, imported Tasks 3/7),
+`SectionTimeRange`/`timeRange` (Task 4, consumed Tasks 5/6),
+`generateSummary(segments, language, videoId)` (Task 7 — signature + only caller updated in the same
+task), `resolveTranscriptTokens(markdown, segments, videoId)` and `buildIndexedTranscript(segments)`
+(Task 2, called Task 7) — all signatures match across tasks.
 
 ## Verification (Phase 4 — after all tasks)
 
