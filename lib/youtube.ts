@@ -82,7 +82,10 @@ export async function fetchTranscriptSegments(videoId: string): Promise<Transcri
   try {
     const segments = await YoutubeTranscript.fetchTranscript(videoId);
     // youtube-transcript returns offset/duration in milliseconds; store seconds.
-    return segments.map((s) => ({ text: s.text, offset: s.offset / 1000, duration: s.duration / 1000 }));
+    // Defensive: drop any row with a non-string text or non-finite timing (Codex MEDIUM).
+    return segments
+      .filter((s) => s && typeof s.text === 'string' && Number.isFinite(s.offset) && Number.isFinite(s.duration))
+      .map((s) => ({ text: s.text, offset: s.offset / 1000, duration: s.duration / 1000 }));
   } catch (err) {
     const cause = err instanceof Error ? err.message : String(err);
     throw new Error(`Failed to fetch transcript for video ${videoId}: ${cause}`, { cause: err });

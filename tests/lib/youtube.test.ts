@@ -341,6 +341,16 @@ describe('fetchTranscriptSegments', () => {
     (YoutubeTranscript.fetchTranscript as jest.Mock).mockResolvedValue([]);
     await expect(fetchTranscriptSegments('abc12345678')).resolves.toEqual([]);
   });
+
+  it('drops segments with non-finite offset/duration or non-string text (defensive)', async () => {
+    (YoutubeTranscript.fetchTranscript as jest.Mock).mockResolvedValue([
+      { text: 'ok', duration: 5000, offset: 0 },
+      { text: 'bad-dur', duration: NaN, offset: 1000 },
+      { text: 'bad-off', duration: 1000, offset: undefined },
+    ]);
+    const result = await fetchTranscriptSegments('abc12345678');
+    expect(result).toEqual([{ text: 'ok', offset: 0, duration: 5 }]);
+  });
 });
 
 describe('fetchPlaylistTitle', () => {

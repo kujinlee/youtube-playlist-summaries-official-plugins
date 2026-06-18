@@ -36,8 +36,8 @@ export function buildIndexedTranscript(segments: TranscriptSegment[]): string {
   return segments.map((s, i) => `[${i} @${formatTimestamp(s.offset)}] ${s.text}`).join('\n');
 }
 
-const OWN_LINE_TOKEN = /^\s*\[\[TS:(\d+)\]\]\s*$/;
-const ANY_TOKEN = /\[\[TS:\d+\]\]/g;
+const OWN_LINE_TOKEN = /^\s*\[\[TS:([^\]]*)\]\]\s*$/;
+const ANY_TOKEN = /\[\[TS:[^\]]*\]\]/g;
 const FENCE = /^\s*(```|~~~)/; // opens/closes a fenced code block (matches parse.ts:isFenceLine)
 
 /**
@@ -69,7 +69,11 @@ export function resolveTranscriptTokens(
     if (FENCE.test(line)) { inFence = !inFence; return; }
     if (inFence) return;
     const m = line.match(OWN_LINE_TOKEN);
-    if (m) { tokenLines.push(i); indices.push(parseInt(m[1], 10)); }
+    if (m) {
+      tokenLines.push(i);
+      const raw = m[1].trim();
+      indices.push(/^\d+$/.test(raw) ? Number(raw) : NaN);
+    }
   });
 
   const valid =
@@ -77,7 +81,9 @@ export function resolveTranscriptTokens(
     !!videoId &&
     segments.length > 0 &&
     indices.every((n) => Number.isInteger(n) && n >= 0 && n < segments.length) &&
-    indices.every((n, k) => k === 0 || n > indices[k - 1]);
+    indices.every((n, k) => k === 0 || n > indices[k - 1]) &&
+    // Codex MEDIUM: don't trust transcript ordering — resolved offsets must be finite & strictly increasing.
+    indices.every((n, k) => Number.isFinite(segments[n].offset) && (k === 0 || segments[n].offset > segments[indices[k - 1]].offset));
 
   if (tokenLines.length > 0 && !valid) {
     console.warn('resolveTranscriptTokens: degrading — invalid/missing segment indices or videoId');

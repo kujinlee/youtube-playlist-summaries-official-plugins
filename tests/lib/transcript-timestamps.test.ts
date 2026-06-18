@@ -138,3 +138,36 @@ describe('resolveTranscriptTokens', () => {
     expect(out).not.toMatch(/\[\[TS:/); // inline stray stripped
   });
 });
+
+describe('resolveTranscriptTokens — malformed token hardening (Codex)', () => {
+  it('degrades AND strips a malformed non-digit own-line token (no raw token leaks)', () => {
+    const bad = '## 1. A\n[[TS:0]]\n\n## 2. B\n[[TS:-1]]\n\nbody';
+    const out = resolveTranscriptTokens(bad, SEGS, 'vid123');
+    expect(out).not.toMatch(/▶/);
+    expect(out).not.toMatch(/\[\[TS:/);
+  });
+
+  it('treats a float token as invalid (degrades — does NOT resolve to index 1)', () => {
+    const bad = '## 1. A\n[[TS:1.5]]\n\nbody';
+    const out = resolveTranscriptTokens(bad, SEGS, 'vid123');
+    expect(out).not.toMatch(/▶/);
+    expect(out).not.toMatch(/\[\[TS:/);
+  });
+
+  it('strips a malformed non-digit inline token on the no-own-line-token path', () => {
+    const inlineBad = '## 1. A\n\nbody [[TS:abc]] inline';
+    const out = resolveTranscriptTokens(inlineBad, SEGS, 'vid123');
+    expect(out).not.toMatch(/\[\[TS:/);
+  });
+
+  it('degrades when segment offsets are non-monotonic even though indices increase', () => {
+    const badSegs = [
+      { text: 'a', offset: 100, duration: 5 },
+      { text: 'b', offset: 90, duration: 5 }, // out of chronological order
+    ];
+    const md = '## 1. A\n[[TS:0]]\n\n## 2. B\n[[TS:1]]\n\nbody';
+    const out = resolveTranscriptTokens(md, badSegs, 'vid123');
+    expect(out).not.toMatch(/▶/);
+    expect(out).not.toMatch(/\[\[TS:/);
+  });
+});
