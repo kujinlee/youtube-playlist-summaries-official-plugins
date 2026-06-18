@@ -9,7 +9,8 @@ jest.mock('../../lib/gemini');
 jest.mock('../../lib/pdf');
 jest.mock('../../lib/index-store');
 
-import { runIngestion, slugify, formatDuration, parseFrontmatterField, reconstructVideo, recoverOrphanedVideos, migrateToSlugFilenames, insertQuickViewCallout, stripQuickViewCallout } from '../../lib/pipeline';
+import { runIngestion, slugify, formatDuration, parseFrontmatterField, reconstructVideo, recoverOrphanedVideos, migrateToSlugFilenames, insertQuickViewCallout, stripQuickViewCallout, writeSummaryDoc } from '../../lib/pipeline';
+import * as fsReal from 'fs';
 import * as youtube from '../../lib/youtube';
 import * as gemini from '../../lib/gemini';
 import * as pdf from '../../lib/pdf';
@@ -955,5 +956,44 @@ describe('stripQuickViewCallout', () => {
     expect(matches).toBe(1);
     expect(reinserted).toContain('Updated TL;DR.');
     expect(reinserted).not.toContain('This video teaches X.');
+  });
+});
+
+describe('writeSummaryDoc', () => {
+  let outputFolder: string;
+
+  beforeEach(() => {
+    outputFolder = path.join(os.tmpdir(), `pipeline-wsd-test-${crypto.randomUUID()}`);
+    fs.mkdirSync(outputFolder, { recursive: true });
+    mockDetectLanguage.mockReturnValue('en');
+    mockGeneratePdf.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    fs.rmSync(outputFolder, { recursive: true, force: true });
+    jest.clearAllMocks();
+  });
+
+  it('writes <baseName>.md with the generated summary and returns AI fields; writes NO pdf', async () => {
+    mockFetchTranscriptSegments.mockResolvedValue([{ text: 'hello world', offset: 0, duration: 5 }]);
+    mockDetectLanguage.mockReturnValue('en');
+    mockGenerateSummary.mockResolvedValue(makeSummaryResponse({ summary: '## 1. A\n▶ [0:00–0:05](u)\nbody' }));
+
+    const result = await writeSummaryDoc({
+      videoId: 'vid11111111', title: 'T', youtubeUrl: 'https://youtu.be/x',
+      channel: 'Chan', durationSeconds: 5, outputFolder, baseName: 'my-base',
+    });
+
+    expect(result.summaryMd).toBe('my-base.md');
+    expect(result.language).toBe('en');
+    expect(result.ratings).toBeDefined();
+    const md = fsReal.readFileSync(`${outputFolder}/my-base.md`, 'utf-8');
+    expect(md).toContain('# T');
+    expect(md).toContain('## 1. A');
+    expect(md).toContain('▶ [0:00–0:05]');
+    expect(mockGeneratePdf).not.toHaveBeenCalled();
+    expect(mockGenerateSummary).toHaveBeenCalledWith(
+      [{ text: 'hello world', offset: 0, duration: 5 }], 'en', 'vid11111111',
+    );
   });
 });
