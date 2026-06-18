@@ -1,185 +1,205 @@
-# Re-summarize With Timestamps — Design Spec
+# Versioned HTML-Doc Regeneration (Timestamp Onboarding) — Design Spec
 
 **Date:** 2026-06-18
 **Status:** Draft — pending user review
-**Scope:** A per-video action that re-runs summary generation for an **already-summarized** video so its
-summary is rewritten **with `▶` timestamps** (the clickable-section-timestamps feature only writes
-timestamps during fresh ingestion; existing summaries predate it and have none).
+**Scope:** Collapse the HTML-doc menu into **one "HTML doc" action** that, on click, brings the doc up to
+the current output version — **re-summarizing** (to gain new content like `▶` timestamps) or
+**re-rendering** (for style-only changes) as needed, then shows it. This is what lets existing
+(pre-feature) summaries gain timestamps: clicking "HTML doc" onboards them one at a time.
+
+**Phase 1 (this spec):** the per-video versioned action + its reusable core.
+**Phase 2 (deferred):** a bulk "bring all docs to current version" sweep that reuses the same core in an
+SSE job. Out of scope here.
 
 ---
 
 ## 1. Goal
 
-Existing summaries were generated before the timestamps feature, so opening their HTML shows no `▶`
-links. There is currently no path to add timestamps to an existing video: the **Regenerate**
-(corrections) action runs `fixSummary` (text edits only), and **ingestion** skips videos already in the
-index. This adds a **per-video "Re-summarize"** action that regenerates the summary from the transcript
-through the shipped `generateSummary` (which emits the `[[TS:i]]` tokens → `▶` lines).
+The clickable-timestamps feature only writes `▶` lines during fresh ingestion, so the 240 existing
+summaries (generated earlier) show none. There is no path today to add them: **Regenerate** does
+`fixSummary` (text edits), and **ingestion** skips indexed videos. More generally, every future style or
+content change to the HTML doc has the same problem — old docs go stale with no on-demand refresh.
 
-**Phase 1 (this spec):** the per-video action + its reusable core.
-**Phase 2 (deferred):** a bulk "add timestamps to all missing" loop that wraps the same core in an SSE
-job. Out of scope here; the core is designed so the loop is a thin layer.
+This introduces a **document version** so staleness is decidable, and a **single "HTML doc" action**
+that regenerates the minimum necessary and shows the result.
 
 ## 2. Decisions (locked during brainstorming)
 
 | # | Decision | Choice |
 |---|----------|--------|
-| D1 | Existing summary content | **Re-summarize fresh (overwrite)** — new prose, AI ratings/tags/quick-view, plus `▶` timestamps. Reuses the shipped pipeline summary logic. |
-| D2 | Preserved across overwrite | Everything **not derived from the summary**: personal review (score/notes), `deepDive*`, `playlistIndex`, `archived`/`removedFromPlaylist`, dates, and the same `summaryMd` filename. |
-| D3 | Scope | **Per-video**, single video at a time. Bulk deferred to Phase 2. |
-| D4 | Architecture | **Extract a shared `writeSummaryDoc` lib function**; both ingestion and the new route call it (Approach A — single source of truth, no drift). |
-| D5 | Cached HTML | **Invalidate (lazy regen)** — delete the cached summary HTML/model and clear `summaryHtml`; the HTML rebuilds with timestamps the next time the user opens it. No eager (extra-Gemini) regen. |
-| D6 | Failure safety | **Non-destructive** — transcript fetch + `generateSummary` run before the `.md` is overwritten, so a missing transcript or Gemini error leaves the current summary intact. |
+| D1 | Existing summary content | **Re-summarize fresh (overwrite)** when the summary format advanced — new prose, AI ratings/tags/quick-view, plus `▶` timestamps. |
+| D2 | Preserved across overwrite | Everything **not derived from the summary**: personal review (score/notes), `deepDive*`, `playlistIndex`, `archived`/`removedFromPlaylist`, dates, the same `summaryMd` filename. |
+| D3 | Scope | **Per-video**, on demand. Bulk deferred to Phase 2. |
+| D4 | Shared core | Extract `writeSummaryDoc` from `runIngestion`; ingestion and re-summarize call it → no drift. |
+| D5 | Trigger | **One unified "HTML doc" menu item** (replaces View / Generate / Regenerate). It shows the current HTML if up to date, else regenerates then shows. |
+| D6 | Staleness model | A **`major.minor` document version**. **Major** = summary/content format (bump ⇒ re-summarize, a Gemini call). **Minor** = HTML render/style (bump ⇒ re-render from the cached model, no Gemini). Timestamps = the first **major** bump (`1.0 → 2.0`). |
+| D7 | PDF | **Untouched** — `writeSummaryDoc` does not generate the PDF; ingestion keeps its own PDF step; the re-summarize path skips PDF (the existing, now-stale PDF is left as-is; PDFs may be obsoleted once HTML is printable). |
+| D8 | Confirmation | **None** (it is the user's deliberate, version-driven action). Transparency comes from explicit non-blocking status, not a modal. |
+| D9 | Failure safety | **Non-destructive** — transcript fetch + `generateSummary` run before the `.md` is overwritten, so errors leave the current summary intact. |
 
-## 3. Architecture: extract `writeSummaryDoc`
+## 3. Document version
 
-The per-video summary work currently inlined in `runIngestion`'s loop (`lib/pipeline.ts:244–334`) moves
-into one reusable function:
+A single shared constant, readable by both the menu (client) and the server:
+
+```ts
+// lib/doc-version.ts
+export interface DocVersion { major: number; minor: number }
+export const CURRENT_DOC_VERSION: DocVersion = { major: 2, minor: 0 }; // major 2 = ▶ timestamps
+
+export function isOlder(a: DocVersion, b: DocVersion): boolean {
+  return a.major < b.major || (a.major === b.major && a.minor < b.minor);
+}
+export function needsResummarize(stored: DocVersion, current: DocVersion): boolean {
+  return stored.major < current.major; // a summary-format (major) advance requires regenerating the .md
+}
+```
+
+- Each video stores `docVersion?: DocVersion` in the index (optional). **Absent ⇒ `{1,0}`** (pre-feature
+  baseline).
+- **Stamped to `CURRENT_DOC_VERSION`** by every producer: ingestion, re-summarize, and re-render.
+- **Bump policy:** changing `generateSummary`'s `.md` output → bump **major** (and document it as
+  summary-breaking by virtue of being a major bump). Changing only the HTML template/CSS → bump
+  **minor**.
+
+### Staleness → action
+
+| Stored vs `CURRENT_DOC_VERSION` (+ HTML present?) | Action |
+|---|---|
+| `stored.major < current.major` | **Re-summarize** the `.md` (Gemini) → full HTML rebuild (new model + render) → stamp current |
+| `stored.major == current.major` & `stored.minor < current.minor`, **or** no cached HTML | **Re-render** HTML from the cached magazine model (no Gemini) → stamp current |
+| `stored >= current` & HTML present | **Show current** (no work) |
+
+A major regeneration also refreshes the render, so a re-summarized doc is stamped at the full current
+`major.minor`. Re-summarizing changes the `.md` sections, so it invalidates the cached magazine model;
+the subsequent rebuild regenerates the model — inherent to the rebuild, not a separate version axis.
+
+## 4. Shared core: `writeSummaryDoc`
+
+The per-video summary work inlined in `runIngestion` (`lib/pipeline.ts:244–334`, **excluding** the PDF
+step) moves into one reusable function:
 
 ```ts
 interface SummaryDocInput {
-  videoId: string;
-  title: string;
-  youtubeUrl: string;
-  channel?: string;          // meta.channelTitle (ingestion) or video.channel (re-summarize)
+  videoId: string; title: string; youtubeUrl: string;
+  channel?: string;          // meta.channelTitle (ingest) | video.channel (re-summarize)
   durationSeconds: number;
   outputFolder: string;
-  baseName: string;          // target file stem — caller decides: new slug, or existing video.summaryMd − .md
+  baseName: string;          // target file stem — caller chooses: new slug | existing video.summaryMd − .md
 }
-
 interface SummaryDocResult {
-  language: 'en' | 'ko';
-  ratings: Ratings;
-  overallScore: number;
-  videoType?: string;
-  audience?: string;
-  tags?: string[];
-  tldr?: string;
-  takeaways?: string[];
-  mdContent: string;
-  summaryMd: string;         // `${baseName}.md`
-  summaryPdf: string;        // `pdfs/${baseName}.pdf`
+  language: 'en' | 'ko'; ratings: Ratings; overallScore: number;
+  videoType?: string; audience?: string; tags?: string[]; tldr?: string; takeaways?: string[];
+  mdContent: string; summaryMd: string;  // `${baseName}.md`
 }
-
 async function writeSummaryDoc(input: SummaryDocInput): Promise<SummaryDocResult>;
 ```
 
-It does exactly what the loop does today: `fetchTranscriptSegments` → derive text → `detectLanguage` →
-`generateSummary(segments, language, videoId)` → build frontmatter + header + body + quick-view callout
-→ write `<baseName>.md` → `generatePdf` → return the fields. **No behavior change for ingestion** — it
-produces a byte-identical document; only the code location moves.
+`fetchTranscriptSegments` → derive text → `detectLanguage` → `generateSummary(segments, language, videoId)`
+→ build frontmatter + header + body + quick-view → write `<baseName>.md` → return. **No PDF inside**
+(D7). **Ingestion output is byte-identical** — it keeps its slug `baseName`, calls `writeSummaryDoc`,
+then runs its existing `generatePdf` and builds the new `Video` (now also stamping `docVersion`).
 
-- **`runIngestion`** computes its collision-avoiding slug `baseName` (the existing
-  `while (fs.existsSync(...))` loop), calls `writeSummaryDoc`, then builds the new `Video` and
-  `upsertVideo` as today.
-- **Re-summarize** passes the existing `baseName` → overwrites the same `.md` + PDF in place.
+## 5. The unified "HTML doc" orchestration
 
-The shared boundary stops at content + file write; each caller owns its own **index** update (ingestion
-creates a new `Video`; re-summarize merges into the existing one) — sharing that too would entangle
-"new vs merge" for no gain.
+A single function (e.g. `ensureHtmlDoc(videoId, outputFolder, onProgress)` in `lib/html-doc/`) drives
+the action, composing existing pieces:
 
-## 4. Re-summarize flow
+1. Load the `Video`; require `summaryMd` (else disabled). `baseName = summaryMd − .md`;
+   `stored = video.docVersion ?? {1,0}`.
+2. **If `needsResummarize(stored, CURRENT)`** → progress *"Re-summarizing (adding timestamps)…"*;
+   `writeSummaryDoc({…, baseName})` overwrites the `.md` with `▶` lines; delete the cached
+   `models/<base>.json` (model now stale); **merge** the returned AI fields into the `Video` (D2 preserve
+   set untouched).
+3. **Build the HTML** → progress *"Building HTML…"*:
+   - If a valid cached model exists (minor-only refresh) → **re-render** via the persist-model path
+     (`reRenderSummaryHtml` — parse `.md` + cached model → render → write `htmls/<base>.html`), no Gemini.
+   - Else (after re-summarize, or no/invalid model) → **full generate** (`runHtmlDoc` path: parse →
+     `generateMagazineModel` (Gemini) → render → write), which also writes the fresh model.
+4. Set `summaryHtml = htmls/<base>.html`; **stamp `docVersion = CURRENT_DOC_VERSION`**; `upsertVideo`.
+5. Return `{ url }` (the GET serve URL).
 
-**Route:** `POST /api/videos/[id]/resummarize` with body `{ outputFolder: string }`. Synchronous
-(awaits and returns JSON), mirroring the existing corrections-`regenerate` route — it is a single
-Gemini call (~10–30s).
+`route`: `POST /api/videos/[id]/html-doc` is **enhanced** to call `ensureHtmlDoc` (it already exists for
+HTML generation; it gains the version check + the re-summarize branch). Up-to-date videos short-circuit
+at step 3's "show current" with no Gemini and no rewrite.
 
-1. `assertOutputFolder` + `assertVideoId`; read the index; find the `Video`. 404 if absent; 422 if it
-   has no `summaryMd` (nothing to re-summarize).
-2. `baseName = video.summaryMd.replace(/\.md$/, '')`.
-3. `writeSummaryDoc({ videoId: video.id, title: video.title, youtubeUrl: video.youtubeUrl,
-   channel: video.channel, durationSeconds: video.durationSeconds, outputFolder, baseName })` →
-   overwrites `<base>.md` + PDF with a fresh summary **containing `▶` lines**.
-4. **Merge** the regenerated summary-derived fields into the existing `Video`
-   (`ratings`, `overallScore`, `videoType`, `audience`, `tags`, `tldr`, `takeaways`, `language`),
-   **preserving** all other fields (D2). `summaryMd`/`summaryPdf` stay the same.
-5. **Invalidate cached HTML** (D5): delete `htmls/<base>.html` and `models/<base>.json` if present
-   (best-effort, ignore ENOENT — mirrors `deep-dive.ts`'s stale-HTML unlink), and set
-   `summaryHtml: null`.
-6. `upsertVideo(outputFolder, mergedVideo)`.
-7. Respond `{ ok: true, summaryMd }`.
+## 6. Output File Format
 
-After this, the menu shows **"Generate HTML doc"** again (since `summaryHtml` is null); opening it
-rebuilds the HTML from the new `.md` → timestamps appear.
+The rewritten `.md` is **identical in format to a freshly-ingested summary** (frontmatter, `# Title`,
+`**Channel:** … | **Duration:** … | **URL:** …`, the `> [!summary]` Quick Reference callout, numbered
+`## N.` sections + `## Conclusion`, each optionally preceded by `▶ [start–end](…&t=Ns)`). It is produced
+by the same `writeSummaryDoc`, matching the annotated sample in
+`2026-06-17-clickable-section-timestamps-design.md` §5. The only difference from ingestion: it is
+**overwritten in place** at the existing `baseName`. The index `Video` gains one field, `docVersion`.
 
-## 5. Output File Format
+## 7. UI / UX
 
-The rewritten `.md` is **identical in format to a freshly-ingested summary** — frontmatter
-(tags/video_id/channel/lang/type/audience/score), `# Title`, `**Channel:** … | **Duration:** … |
-**URL:** …`, the `> [!summary]` Quick Reference callout, then the numbered `## N.` sections and
-`## Conclusion`, each optionally preceded by a `▶ [start–end](…&t=Ns)` line. It is produced by the same
-`writeSummaryDoc`, so it matches the annotated sample in
-`2026-06-17-clickable-section-timestamps-design.md` §5. The only difference from ingestion: the file is
-**overwritten in place** at the existing `baseName` rather than written to a new slug file.
-
-## 6. UI / UX
-
-- **Trigger:** a new `VideoMenu` item, **"Re-summarize (adds ▶ timestamps)"**, shown only when
-  `video.summaryMd` is set (same gate as "Edit corrections"). It fires a new `onResummarize(videoId)`
-  callback, following the existing menu-item → parent-callback pattern.
-- **Confirmation (destructive):** before running, a confirm prompt — *"Re-summarize this video? This
-  regenerates the summary from the transcript (adding timestamps) and replaces the current summary,
-  ratings, and tags. Your personal review is kept."* Phase 1 uses the browser-native `confirm()` (no
-  custom modal to build/test); it can be upgraded to a styled dialog later. Cancel aborts with no
-  request sent.
-- **Progress (non-blocking):** while the request is in flight, a per-video inline status —
-  *"Re-summarizing…"* → *"Done"* (error → an inline error message) — matching the non-blocking status
-  pattern used by HTML-doc / deep-dive generation. The user can keep browsing other rows. No
-  full-screen overlay.
-- **On success:** the row refreshes from the updated index (new score/tags; `summaryHtml` cleared so
-  the menu offers "Generate HTML doc").
+- **Menu:** `View / Generate / Regenerate HTML doc` collapse into **one "HTML doc" item** (shown when
+  `summaryMd` exists; disabled otherwise). Deep-dive HTML, Obsidian, and PDF items are unchanged.
+- **Link vs. action (no wasted round-trip):** the client decides from data it already has —
+  - `summaryHtml` present **and** `!isOlder(video.docVersion ?? {1,0}, CURRENT_DOC_VERSION)` → render a
+    **direct link** to the GET serve URL (instant open on the click gesture).
+  - otherwise → render a **button** → `POST …/html-doc` runs `ensureHtmlDoc` with a **non-blocking**
+    status (*"Re-summarizing…" → "Building HTML…" → "Ready"*); on completion the row refreshes and the
+    status offers an **"Open HTML doc →"** button (a fresh user gesture → opens reliably, sidestepping
+    popup-blockers). No full-screen overlay; the user can keep browsing.
+- **Corrections invalidation (related fix):** the existing corrections-`regenerate` route rewrites the
+  `.md` without bumping the version; to keep the unified item honest it must **clear `summaryHtml`**
+  after rewriting, so the next "HTML doc" click re-renders the edited content. (Small, in-scope because
+  it affects this menu's correctness.)
 
 ### URL Contracts
-None — this feature generates no new links or URLs. The existing "View/Generate HTML doc" and Obsidian
-links in `VideoMenu` are unchanged.
+No new links or URLs are generated. The GET serve URL (`/api/html/[id]?outputFolder=…&type=summary`) and
+the Obsidian/PDF links are unchanged.
 
 ### Overlay Dismissal
+No modal/overlay/confirm is introduced (D8). The non-blocking status bar follows the existing
+HTML-doc / deep-dive status pattern; nothing to dismiss.
 
-| Component | Mechanism | Expected result |
-|-----------|-----------|-----------------|
-| Re-summarize confirm (`confirm()`) | OK | Proceed: send the POST, show "Re-summarizing…" |
-| Re-summarize confirm (`confirm()`) | Cancel / Escape | Abort: no request, menu already closed, no state change |
-
-## 7. Error Handling
+## 8. Error Handling
 
 | Condition | Behavior |
 |-----------|----------|
-| Video not found in index | 404; inline error; existing `.md` untouched |
-| Video has no `summaryMd` | 422 ("nothing to re-summarize"); inline error |
-| Transcript fetch fails (no transcript now) | `writeSummaryDoc` throws before any write → 500; **existing summary intact** |
+| Video not found | 404; inline error; nothing written |
+| No `summaryMd` | menu item disabled; route returns 422 if called |
+| Transcript fetch fails on re-summarize | `writeSummaryDoc` throws **before** any write → 500; existing `.md`, `docVersion`, and HTML untouched |
 | `generateSummary` (Gemini) fails | throws before write → 500; existing summary intact |
-| PDF generation fails after `.md` write | `.md` already updated (matches ingestion: PDF is a non-critical convenience copy); surface as a non-fatal note if practical |
-| HTML/model unlink ENOENT | ignored (best-effort invalidation) |
+| `generateMagazineModel` fails during build | 500; if re-summarize already overwrote the `.md`, the `.md` is new but `summaryHtml`/`docVersion` are **not** advanced (so a retry rebuilds the HTML); surfaced as an error |
+| Model unlink ENOENT | ignored (best-effort) |
 | `outputFolder`/`videoId` invalid | 400 (assert guards) |
 
-## 8. Testing
+## 9. Testing
 
-- **Unit (`writeSummaryDoc`):** mock `lib/youtube`/`lib/gemini`; assert it writes `<baseName>.md` with
-  the expected content (frontmatter + quick-view + `▶`-bearing summary) and returns the AI fields;
-  assert ingestion still produces byte-identical output after the extraction (regression).
-- **Unit/route (`resummarize`):** mock the lib boundary; assert overwrite of the existing `summaryMd`,
-  the preserve-merge (personal review/deepDive/playlistIndex survive; AI fields replaced), the
-  HTML/model invalidation + `summaryHtml: null`, and the 404/422/500 paths (incl. non-destructive on
-  transcript failure).
-- **Component (`VideoMenu`/parent):** the item renders only with `summaryMd`; confirm-cancel sends no
-  request; confirm-OK calls the route and shows the non-blocking status; success clears `summaryHtml`.
-- **E2E (Playwright, mock at the route/lib boundary):** menu → Re-summarize → confirm → status → row
-  reflects new state → "Generate HTML doc" available.
+- **Unit `lib/doc-version.ts`:** `isOlder` / `needsResummarize` across major>, minor>, equal, absent.
+- **Unit `writeSummaryDoc`:** writes `<baseName>.md` with the expected `▶`-bearing content + returns AI
+  fields; **no PDF written**; ingestion still byte-identical after extraction (regression).
+- **Unit/route `ensureHtmlDoc`:** the three branches — major-stale → re-summarize + full build + stamp;
+  minor-stale / no-html → re-render (no Gemini) + stamp; current → no work; the D2 preserve-merge; model
+  invalidation on re-summarize; the non-destructive-on-transcript-failure path; 404/422/500.
+- **Component `VideoMenu`:** single item; direct link when current; button when stale/absent; disabled
+  without `summaryMd`.
+- **E2E (Playwright, mock at the route/lib boundary):** stale video → "HTML doc" → status → "Open" →
+  served HTML contains `.ts` anchors and the meta version reflects current; current video → instant
+  link; corrections → `summaryHtml` cleared → next click re-renders.
 
-## 9. Non-Goals
+## 10. Non-Goals
 
-- Bulk / "all missing" onboarding (Phase 2).
-- Timestamps-only insertion that preserves existing prose (rejected in D1 — full re-summarize chosen).
+- Bulk "bring all to current" sweep (Phase 2).
+- Timestamps-only insertion preserving existing prose (rejected in D1 — full re-summarize).
 - Re-running the deep-dive (separate document; untouched).
-- A styled confirm modal (native `confirm()` for Phase 1).
-- Eager HTML regeneration (D5 — lazy invalidation instead).
+- Regenerating the PDF (D7).
+- A model-format version axis (a model change rides a **major** bump for now).
+- A styled confirm modal (D8).
 
-## 10. File Structure
+## 11. File Structure
 
 | File | Responsibility | Action |
 |------|----------------|--------|
-| `lib/pipeline.ts` | Extract `writeSummaryDoc`; `runIngestion` delegates to it. | Modify |
-| `lib/resummarize.ts` | The re-summarize orchestration (load video → `writeSummaryDoc` → merge index → invalidate HTML), kept out of the route so it's unit-testable and reusable by the Phase 2 bulk loop. | Create |
-| `app/api/videos/[id]/resummarize/route.ts` | `POST` endpoint. | Create |
-| `components/VideoMenu.tsx` | "Re-summarize" item + `onResummarize` prop. | Modify |
-| `components/VideoRow.tsx` / `VideoList.tsx` | Wire `onResummarize`, confirm, non-blocking status. | Modify |
+| `lib/doc-version.ts` | `DocVersion`, `CURRENT_DOC_VERSION`, `isOlder`, `needsResummarize`. Shared client+server. | Create |
+| `lib/pipeline.ts` | Extract `writeSummaryDoc` (no PDF); `runIngestion` delegates + stamps `docVersion`. | Modify |
+| `lib/html-doc/ensure.ts` | `ensureHtmlDoc` — version check → re-summarize / re-render / show; stamp `docVersion`. | Create |
+| `lib/html-doc/generate.ts`, `rerender.ts` | Reused by `ensureHtmlDoc` (full build / cached re-render). | Reuse |
+| `types.ts` (Video) | Add `docVersion?: DocVersion`. | Modify |
+| `app/api/videos/[id]/html-doc/route.ts` | Call `ensureHtmlDoc`. | Modify |
+| `app/api/videos/[id]/regenerate/route.ts` | Clear `summaryHtml` after rewriting the `.md`. | Modify |
+| `components/VideoMenu.tsx` | Single "HTML doc" item; link-vs-button from `docVersion`. | Modify |
+| `components/VideoRow.tsx` / `VideoList.tsx` | Wire the unified action + non-blocking status + "Open". | Modify |
