@@ -4,9 +4,14 @@ import type { Video } from '@/types';
 // ---------------------------------------------------------------------------
 // Fixture data
 // Fixture set covers:
-//   - one video with summaryHtml: null  (EN) — used in Scenario 1 (generate) + Scenario 3 (error)
-//   - one video with summaryHtml set    (EN) — used in Scenario 2 (already-generated)
-//   - one KO video with summaryHtml: null  — used in Scenario 4 (KO round-trip)
+//   - one video that is CURRENT (summaryHtml set AND docVersion: {major:2,minor:0})
+//     → "HTML doc" renders as a direct <a> link (no Generate/Regenerate/View labels)
+//   - one video that is PRE-FEATURE (summaryHtml set but NO docVersion)
+//     → "HTML doc" renders as a <button> → triggers job → status bar
+//   - one video with summaryHtml: null (no docVersion)
+//     → "HTML doc" renders as a <button> → triggers job → status bar
+//   - one KO video with summaryHtml: null — used in KO round-trip test
+//   - error case: PRE-FEATURE video + transform fails → status bar shows error
 // ---------------------------------------------------------------------------
 
 const OUTPUT_FOLDER = '/tmp/test-html-doc';
@@ -112,14 +117,52 @@ async function stubHtmlServe(
 // Scenarios
 // ---------------------------------------------------------------------------
 
-test('generates an HTML doc from an existing summary and reveals the View link', async ({ page }) => {
-  // Fixture: EN video with summaryHtml: null (not yet generated)
-  const video = makeVideo({ id: 'vid-hd1', summaryHtml: null });
+test('a CURRENT video (summaryHtml + docVersion:{2,0}) shows a single HTML doc link — no Generate/Regenerate/View labels', async ({ page }) => {
+  // Fixture: video that is CURRENT — direct link, no job triggering
+  const video = makeVideo({
+    id: 'vid-hd-current',
+    summaryHtml: 'htmls/deep-dive-into-llms.html',
+    docVersion: { major: 2, minor: 0 },
+  });
 
   await stubSettings(page);
   await stubVideos(page, [video]);
-  await stubHtmlDocPost(page, 'vid-hd1');
-  await stubHtmlDocStream(page, 'vid-hd1', [
+
+  await page.goto('/');
+  await expect(page.getByText('Deep Dive into LLMs')).toBeVisible();
+
+  // Open the row menu
+  await page.getByRole('button', { name: 'Menu' }).click();
+
+  // "HTML doc" is a direct link (role=link, not button) — no View/Regenerate/Generate text
+  const htmlLink = page.getByRole('link', { name: /^HTML doc$/i });
+  await expect(htmlLink).toBeVisible();
+
+  // Verify the href carries both required params
+  const href = await htmlLink.getAttribute('href');
+  const u = new URL(href!, page.url());
+  expect(u.pathname).toBe(`/api/html/${video.id}`);
+  expect(u.searchParams.get('outputFolder')).toBe(OUTPUT_FOLDER);
+  expect(u.searchParams.get('type')).toBe('summary');
+
+  // No "Generate" or "Regenerate" or separate "View" label
+  await expect(page.getByRole('button', { name: /generate html doc/i })).not.toBeVisible();
+  await expect(page.getByRole('button', { name: /regenerate html doc/i })).not.toBeVisible();
+  await expect(page.getByRole('link', { name: /view html doc/i })).not.toBeVisible();
+});
+
+test('a PRE-FEATURE video (summaryHtml set, no docVersion) shows "HTML doc" as a button that starts the job', async ({ page }) => {
+  // Fixture: summaryHtml set but NO docVersion → treat as stale → button
+  const video = makeVideo({
+    id: 'vid-hd2',
+    summaryHtml: 'htmls/deep-dive-into-llms.html',
+    // docVersion intentionally absent
+  });
+
+  await stubSettings(page);
+  await stubVideos(page, [video]);
+  await stubHtmlDocPost(page, 'vid-hd2');
+  await stubHtmlDocStream(page, 'vid-hd2', [
     { type: 'step', step: 'Reading summary…', current: 1, total: 3 },
     { type: 'step', step: 'Transforming to skim view…', current: 2, total: 3 },
     { type: 'step', step: 'Rendering HTML…', current: 3, total: 3 },
@@ -129,9 +172,9 @@ test('generates an HTML doc from an existing summary and reveals the View link',
   await page.goto('/');
   await expect(page.getByText('Deep Dive into LLMs')).toBeVisible();
 
-  // Open the row menu and click "Generate HTML doc"
+  // Open the row menu — "HTML doc" must be a button (not a link)
   await page.getByRole('button', { name: 'Menu' }).click();
-  await page.getByRole('button', { name: /generate html doc/i }).click();
+  await page.getByRole('button', { name: /^HTML doc$/i }).click();
 
   // Status bar mounts in running state — progressbar visible
   await expect(page.getByRole('status', { name: /html doc progress/i })).toBeVisible();
@@ -149,33 +192,41 @@ test('generates an HTML doc from an existing summary and reveals the View link',
   expect(u.searchParams.get('type')).toBe('summary');
 });
 
-test('a video that already has summaryHtml shows View + Regenerate, no Generate', async ({ page }) => {
-  // Fixture: EN video with summaryHtml already set
-  const video = makeVideo({ id: 'vid-hd2', summaryHtml: 'htmls/deep-dive-into-llms.html' });
+test('a video with no summaryHtml shows "HTML doc" as a button that starts the job and reveals the View link', async ({ page }) => {
+  // Fixture: EN video with summaryHtml: null (not yet generated)
+  const video = makeVideo({ id: 'vid-hd1', summaryHtml: null });
 
   await stubSettings(page);
   await stubVideos(page, [video]);
+  await stubHtmlDocPost(page, 'vid-hd1');
+  await stubHtmlDocStream(page, 'vid-hd1', [
+    { type: 'step', step: 'Reading summary…', current: 1, total: 3 },
+    { type: 'step', step: 'Transforming to skim view…', current: 2, total: 3 },
+    { type: 'step', step: 'Rendering HTML…', current: 3, total: 3 },
+    { type: 'done' },
+  ]);
 
   await page.goto('/');
   await expect(page.getByText('Deep Dive into LLMs')).toBeVisible();
 
-  // Open the row menu
+  // Open the row menu and click the single "HTML doc" button
   await page.getByRole('button', { name: 'Menu' }).click();
+  await page.getByRole('button', { name: /^HTML doc$/i }).click();
 
-  // "View HTML doc" link present with correct href
-  const viewLink = page.getByRole('link', { name: /view html doc/i });
+  // Status bar mounts in running state — progressbar visible
+  await expect(page.getByRole('status', { name: /html doc progress/i })).toBeVisible();
+  await expect(page.getByRole('progressbar')).toBeVisible();
+
+  // After done: "View HTML doc ↗" link appears in the status bar
+  const viewLink = page.getByRole('status', { name: /html doc progress/i })
+    .getByRole('link', { name: /view html doc/i });
   await expect(viewLink).toBeVisible();
+
+  // Assert BOTH required params on the href
   const href = await viewLink.getAttribute('href');
   const u = new URL(href!, page.url());
-  expect(u.pathname).toBe(`/api/html/${video.id}`);
   expect(u.searchParams.get('outputFolder')).toBe(OUTPUT_FOLDER);
   expect(u.searchParams.get('type')).toBe('summary');
-
-  // "Regenerate HTML doc" button present
-  await expect(page.getByRole('button', { name: /regenerate html doc/i })).toBeVisible();
-
-  // "Generate HTML doc" button absent (already generated — only Regenerate is shown)
-  await expect(page.getByRole('button', { name: /^generate html doc$/i })).not.toBeVisible();
 });
 
 test('surfaces an error in the status bar when the transform fails (no file written)', async ({ page }) => {
@@ -192,9 +243,9 @@ test('surfaces an error in the status bar when the transform fails (no file writ
   await page.goto('/');
   await expect(page.getByText('Deep Dive into LLMs')).toBeVisible();
 
-  // Trigger generate
+  // Trigger via the single "HTML doc" button
   await page.getByRole('button', { name: 'Menu' }).click();
-  await page.getByRole('button', { name: /generate html doc/i }).click();
+  await page.getByRole('button', { name: /^HTML doc$/i }).click();
 
   // Status bar shows error (role=alert inside the status region)
   const errorBar = page.getByRole('status', { name: /html doc progress/i });
@@ -202,12 +253,12 @@ test('surfaces an error in the status bar when the transform fails (no file writ
   await expect(errorBar.getByRole('alert')).toBeVisible();
   await expect(errorBar.getByRole('alert')).toContainText('Gemini transform failed');
 
-  // The menu still shows "Generate HTML doc" (no file written — summaryHtml still null)
+  // The menu still shows "HTML doc" as a button (no file written — summaryHtml still null)
   // Re-open the menu to verify. Scope Dismiss to the status bar to avoid the backfill banner's
   // "Dismiss backfill" button matching the same /dismiss/i pattern.
   await errorBar.getByRole('button', { name: 'Dismiss', exact: true }).click();
   await page.getByRole('button', { name: 'Menu' }).click();
-  await expect(page.getByRole('button', { name: /generate html doc/i })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^HTML doc$/i })).toBeVisible();
   await expect(page.getByRole('link', { name: /view html doc/i })).not.toBeVisible();
 });
 
@@ -240,9 +291,9 @@ test('KO summary generates without mangling Korean text', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByText('한국어 딥 다이브')).toBeVisible();
 
-  // Generate the HTML doc
+  // Generate the HTML doc via the single "HTML doc" button
   await page.getByRole('button', { name: 'Menu' }).click();
-  await page.getByRole('button', { name: /generate html doc/i }).click();
+  await page.getByRole('button', { name: /^HTML doc$/i }).click();
 
   // Wait for done — View link appears
   const viewLink = page.getByRole('status', { name: /html doc progress/i })

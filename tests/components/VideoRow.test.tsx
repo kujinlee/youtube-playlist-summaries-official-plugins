@@ -514,6 +514,29 @@ describe('VideoRow', () => {
     });
   });
 
+  describe('busy hourglass', () => {
+    const rowProps = {
+      video: baseVideo,
+      rank: 1,
+      outputFolder: OUTPUT_FOLDER,
+      baseOutputFolder: BASE_OUTPUT_FOLDER,
+      dimUnscored: false,
+      onDeepDive: jest.fn(),
+      onArchive: jest.fn(),
+      onGenerateHtml: jest.fn(),
+      onAnnotationChange: jest.fn(),
+    };
+
+    it('shows an hourglass next to the menu while busy', () => {
+      render(<table><tbody><VideoRow {...rowProps} busy /></tbody></table>);
+      expect(screen.getByLabelText('Regenerating')).toBeInTheDocument();
+    });
+    it('no hourglass when not busy', () => {
+      render(<table><tbody><VideoRow {...rowProps} /></tbody></table>);
+      expect(screen.queryByLabelText('Regenerating')).toBeNull();
+    });
+  });
+
   describe('VideoRow — expand/collapse', () => {
     beforeEach(() => {
       // Provide a default fetch mock so VideoQuickView does not throw when

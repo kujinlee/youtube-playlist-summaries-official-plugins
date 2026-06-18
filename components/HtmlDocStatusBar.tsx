@@ -40,7 +40,6 @@ export default function HtmlDocStatusBar({ videoId, jobId, title, viewUrl, onClo
         terminal = true;
         setState({ status: 'done' });
         es.close();
-        try { window.open(viewUrl, '_blank', 'noopener'); } catch { /* popup blocked — link shown */ }
         doneTimer = setTimeout(() => onCloseRef.current(), 4000);
       } else if (data.type === 'error') {
         terminal = true;

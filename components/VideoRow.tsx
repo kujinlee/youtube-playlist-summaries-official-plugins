@@ -15,6 +15,7 @@ interface VideoRowProps {
   outputFolder: string;
   baseOutputFolder: string;
   dimUnscored: boolean;
+  busy?: boolean;
   onDeepDive: (videoId: string) => void;
   onArchive: (videoId: string, action: 'archive' | 'unarchive') => void;
   onGenerateHtml: (videoId: string) => void;
@@ -44,7 +45,7 @@ const AUDIENCE_COLOR: Record<Audience, string> = {
 // Total column count in VideoList: 1 chevron + 15 data columns = 16
 const TOTAL_COLUMNS = 16;
 
-export default function VideoRow({ video, rank, outputFolder, baseOutputFolder, dimUnscored, onDeepDive, onArchive, onGenerateHtml, onAnnotationChange }: VideoRowProps) {
+export default function VideoRow({ video, rank, outputFolder, baseOutputFolder, dimUnscored, busy = false, onDeepDive, onArchive, onGenerateHtml, onAnnotationChange }: VideoRowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [showCorrections, setShowCorrections] = useState(false);
@@ -99,6 +100,7 @@ export default function VideoRow({ video, rank, outputFolder, baseOutputFolder, 
             >
               ☰
             </button>
+            {busy && <span role="status" aria-label="Regenerating" title="Regenerating…" className="shrink-0 text-amber-400 animate-pulse">⏳</span>}
             {menuOpen && (
               // Stop menu clicks (backdrop + items) from bubbling to the title-cell expand handler
               <div role="presentation" onClick={(e) => e.stopPropagation()}>
@@ -107,6 +109,7 @@ export default function VideoRow({ video, rank, outputFolder, baseOutputFolder, 
                   video={video}
                   outputFolder={outputFolder}
                   baseOutputFolder={baseOutputFolder}
+                  busy={busy}
                   onDeepDive={onDeepDive}
                   onArchive={onArchive}
                   onGenerateHtml={onGenerateHtml}
