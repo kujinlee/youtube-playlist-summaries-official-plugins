@@ -64,8 +64,8 @@ export async function POST(request: Request, { params }: Params) {
 
     await fs.promises.writeFile(mdPath, updatedContent, 'utf-8');
 
-    // Update index with refreshed quick-view data
-    updateVideoFields(outputFolder, videoId, { tldr, takeaways });
+    // Update index with refreshed quick-view data; clear stale HTML cache
+    updateVideoFields(outputFolder, videoId, { tldr, takeaways, summaryHtml: null });
 
     // PDF regeneration fires in background — same pattern as backfill.
     // Failure is non-critical; the .md is already updated.
@@ -80,6 +80,7 @@ export async function POST(request: Request, { params }: Params) {
       tldr,
       takeaways,
       corrections: trimmedCorrections,
+      summaryHtml: null,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
