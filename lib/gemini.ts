@@ -52,7 +52,7 @@ export async function generateSummary(
   - 3–6 numbered H2 sections (## 1. Section Title) covering main concepts
   - A final ## Conclusion section
   - Immediately AFTER each ## heading line (including ## Conclusion), a line containing ONLY a token of the form [[TS:<index>]], where <index> is the bracketed number of the transcript segment (from the indexed transcript below) where that section's content begins. The indices MUST strictly increase down the document.
-  - Horizontal rules (---) between sections
+  - Horizontal rules (---) between sections, each on its own line with a blank line above and below it
   - Do NOT include frontmatter, H1 title, or metadata lines — only section content
 - "ratings": object with integer scores 1–5 for usefulness, depth, originality, recency, completeness
 - "videoType": one of "Tutorial", "Analysis", "Case Study", "Framework", "Demo", "Interview"
