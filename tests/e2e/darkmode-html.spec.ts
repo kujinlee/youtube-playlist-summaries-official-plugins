@@ -47,7 +47,7 @@ async function serveDeepDive(page: import('@playwright/test').Page) {
 
 const LIGHT_BG = 'rgb(238, 240, 243)'; // magazine #eef0f3
 const DARK_BG = 'rgb(26, 23, 20)';     // magazine #1a1714
-const DD_DARK_BG = 'rgb(15, 17, 21)';  // deep-dive #0f1115
+const DD_DARK_BG = 'rgb(26, 23, 20)';  // deep-dive dark --page #1a1714 (shared magazine palette)
 
 test.describe('exported HTML dark mode', () => {
   test('follows system dark preference when never toggled', async ({ page }) => {
@@ -135,7 +135,12 @@ test.describe('exported HTML dark mode', () => {
     await page.emulateMedia({ colorScheme: 'dark' });
     await serveDeepDive(page);
     await page.goto(DD_URL);
-    expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(DD_DARK_BG);
+    // body background → --page dark = #1a1714 = rgb(26, 23, 20). toHaveCSS retries past transition.
+    await expect(page.locator('body')).toHaveCSS('background-color', DD_DARK_BG);
+    // .dd card background → --card dark = #221d18 = rgb(34, 29, 24).
+    await expect(page.locator('article.dd')).toHaveCSS('background-color', 'rgb(34, 29, 24)');
+    // .dd p ink → --ink dark = #e8e2d6 = rgb(232, 226, 214).
+    await expect(page.locator('.dd p').first()).toHaveCSS('color', 'rgb(232, 226, 214)');
     await expect(page.locator('#theme-toggle')).toBeVisible();
   });
 
@@ -146,7 +151,8 @@ test.describe('exported HTML dark mode', () => {
     await page.goto(DD_URL);
     await page.locator('#theme-toggle').click(); // system dark → flips to explicit light
     expect(await page.evaluate(() => document.documentElement.getAttribute('data-theme'))).toBe('light');
-    // deep-dive light --page is #f3f4f6 = rgb(243, 244, 246). toHaveCSS retries past the fade.
-    await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(243, 244, 246)');
+    // deep-dive light --page is #eef0f3 = rgb(238, 240, 243) (shared magazine palette).
+    // toHaveCSS retries past the .2s transition.
+    await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(238, 240, 243)');
   });
 });

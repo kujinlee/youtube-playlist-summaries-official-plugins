@@ -89,27 +89,40 @@ describe('renderDeepDiveHtml', () => {
     expect(ko).toContain('본문입니다.');
   });
 
-  it('keeps light-mode colors identical via CSS vars (no regression)', () => {
-    // EVERY light palette value must equal the previously-hardcoded hex (exhaustive — H4).
-    const LIGHT_EXPECTED: Record<string, string> = {
-      page: '#f3f4f6', card: '#fff', ink: '#1e1e22', h1: '#111', h2: '#5b46d6', h3: '#2a2540',
-      h4: '#3a3550', link: '#5b46d6', hr: '#e6e6ea', strong: '#111', codebg: '#f5f4fb',
-      preborder: '#e6e6ea', quote: '#6b7280', shadow: '0 1px 3px rgba(0,0,0,.07)',
-    };
-    for (const [k, v] of Object.entries(LIGHT_EXPECTED)) {
-      expect(html).toContain(`--${k}:${v}`);
-    }
+  it('adopts magazine light palette (cream card, gold accent, ghost numeral vars)', () => {
+    // Positive: key magazine-skin vars must be present in the light palette.
+    expect(html).toContain('--card:#fbf9f6');   // cream card
+    expect(html).toContain('--gold:#b07700');    // gold accent
+    expect(html).toContain('--ghost:#f0e7d6');   // ghost numeral background color
+    expect(html).toContain('--rule:#ece7df');    // section divider rule
+
+    // Negative: ALL four removed vars must be absent from the emitted CSS.
+    expect(html).not.toContain('--h1:');
+    expect(html).not.toContain('--h2:');
+    expect(html).not.toContain('--hr:');
+    expect(html).not.toContain('--strong:');
+
     expect(html).toContain('background:var(--page)');
     expect(html).toContain('color:var(--ink)');
   });
 
-  it('ships the cool/purple dark palette (all of it) + system-dark media query', () => {
+  it('emits ghost-numeral CSS (counter-reset:sec, counter(sec)) and gold-lead rule', () => {
+    expect(html).toContain('counter-reset:sec');
+    expect(html).toContain('counter(sec)');
+    // h2 + p adjacent-sibling is the gold "lead" rule.
+    expect(html).toContain('.dd h2 + p');
+    // .dd h1 must be styled as the serif title (no .doc-title class — renderer emits plain <h1>).
+    expect(html).toContain('.dd h1');
+  });
+
+  it('ships the magazine dark palette + system-dark media query', () => {
     // Exhaustive + anchored to the explicit [data-theme="dark"] block. Key order MUST match the
     // DARK palette object's insertion order in render-deep-dive.ts.
     const DARK_EXPECTED: Record<string, string> = {
-      page: '#0f1115', card: '#16181d', ink: '#d8dbe0', h1: '#f2f3f5', h2: '#a99bf0', h3: '#cfc9ec',
-      h4: '#b9b4dc', link: '#a99bf0', hr: '#2a2d34', strong: '#f2f3f5', codebg: '#20222a',
-      preborder: '#2a2d34', quote: '#9aa0ab', shadow: '0 1px 3px rgba(0,0,0,.5)',
+      page: '#1a1714', card: '#221d18', ink: '#e8e2d6', rule: '#332c24',
+      ghost: '#2e2820', gold: '#e6b54d', goldline: '#e0a800', li: '#cfc8ba', foot: '#8a8174',
+      shadow: '0 1px 3px rgba(0,0,0,.5)', link: '#e6b54d', h3: '#d8cdb8', h4: '#c4b7a0',
+      codebg: '#2a241c', preborder: '#332c24', quote: '#9a9082',
     };
     const darkDecls = Object.entries(DARK_EXPECTED).map(([k, v]) => `--${k}:${v}`).join(';');
     expect(html).toContain(`[data-theme="dark"]{${darkDecls}}`);
