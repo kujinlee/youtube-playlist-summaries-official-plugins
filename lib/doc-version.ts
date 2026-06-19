@@ -4,8 +4,8 @@ export interface DocVersion {
   minor: number;
 }
 
-/** The version current code produces. major 2 = ▶ timestamps (the first major bump). Bump minor for style/template-only changes. */
-export const CURRENT_DOC_VERSION: DocVersion = { major: 2, minor: 0 };
+/** The version current code produces. major 3 = fuller magazine bullets + divider-normalized .md (major 2 = ▶ timestamps). Bump minor for style/template-only changes. */
+export const CURRENT_DOC_VERSION: DocVersion = { major: 3, minor: 0 };
 
 /** True when `a` is an older doc version than `b` (major dominates, then minor). */
 export function isOlder(a: DocVersion, b: DocVersion): boolean {

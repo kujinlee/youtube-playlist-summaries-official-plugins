@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { ensureHtmlDoc } from '../../../lib/html-doc/ensure';
 import * as pipeline from '../../../lib/pipeline';
 import * as generate from '../../../lib/html-doc/generate';
@@ -38,12 +40,12 @@ describe('ensureHtmlDoc', () => {
     expect(rerender.reRenderSummaryHtml).not.toHaveBeenCalled();
     const patches = (indexStore.updateVideoFields as jest.Mock).mock.calls.map((c) => c[2]);
     expect(patches).toEqual(expect.arrayContaining([expect.objectContaining({ overallScore: 4 })]));
-    expect(patches).toEqual(expect.arrayContaining([expect.objectContaining({ docVersion: { major: 2, minor: 0 } })]));
+    expect(patches).toEqual(expect.arrayContaining([expect.objectContaining({ docVersion: { major: 3, minor: 0 } })]));
     expect(patches.every((p) => !('personalScore' in p))).toBe(true);
   });
 
   it('current major but no HTML → full generate (no re-summarize), stamp', async () => {
-    withVideo({ docVersion: { major: 2, minor: 0 }, summaryHtml: null });
+    withVideo({ docVersion: { major: 3, minor: 0 }, summaryHtml: null });
     await ensureHtmlDoc('vid11111111', '/out', () => {});
     expect(pipeline.writeSummaryDoc).not.toHaveBeenCalled();
     expect(generate.runHtmlDoc).toHaveBeenCalled();
@@ -59,7 +61,7 @@ describe('ensureHtmlDoc', () => {
   });
 
   it('current + HTML present → no work', async () => {
-    withVideo({ docVersion: { major: 2, minor: 0 }, summaryHtml: 'htmls/base.html' });
+    withVideo({ docVersion: { major: 3, minor: 0 }, summaryHtml: 'htmls/base.html' });
     await ensureHtmlDoc('vid11111111', '/out', () => {});
     expect(pipeline.writeSummaryDoc).not.toHaveBeenCalled();
     expect(generate.runHtmlDoc).not.toHaveBeenCalled();
@@ -69,5 +71,20 @@ describe('ensureHtmlDoc', () => {
   it('throws 422-style error when the video has no summaryMd', async () => {
     withVideo({ summaryMd: null });
     await expect(ensureHtmlDoc('vid11111111', '/out', () => {})).rejects.toThrow(/no summary/i);
+  });
+
+  // Relies on the default CURRENT_DOC_VERSION ({3,0}): stored {2,0} is a MAJOR advance → re-summarize
+  // branch (unlike the nearby minor-stale test, which injects current: {2,1} to force the cheap re-render).
+  it('major-stale ({2,0}) with cached model → deletes models/<base>.json so fuller bullets regenerate, calls writeSummaryDoc, does NOT call reRenderSummaryHtml', async () => {
+    withVideo({ docVersion: { major: 2, minor: 0 }, summaryHtml: 'htmls/base.html' });
+    const unlinkSpy = jest.spyOn(fs, 'unlinkSync').mockImplementation(() => undefined);
+    try {
+      await ensureHtmlDoc('vid11111111', '/out', () => {});
+      expect(pipeline.writeSummaryDoc).toHaveBeenCalledWith(expect.objectContaining({ baseName: 'base' }));
+      expect(unlinkSpy).toHaveBeenCalledWith(expect.stringContaining(path.join('models', 'base.json')));
+      expect(rerender.reRenderSummaryHtml).not.toHaveBeenCalled();
+    } finally {
+      unlinkSpy.mockRestore();
+    }
   });
 });
