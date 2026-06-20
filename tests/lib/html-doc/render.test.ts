@@ -174,11 +174,13 @@ describe('renderMagazineHtml — section timestamps', () => {
     ],
   };
 
-  it('renders a clickable .ts anchor that opens in a new tab for sections with a timeRange', () => {
+  it('renders the timestamp as a parenthesized link at the end of the title (no ▶, muted)', () => {
     const html = renderMagazineHtml(withTs, model);
+    // Lives inside the <h2>, after the title, parenthesized — not its own prominent line.
     expect(html).toContain(
-      '<a class="ts" href="https://www.youtube.com/watch?v=vid123&amp;t=135s" target="_blank" rel="noopener noreferrer">▶ 2:15–5:30</a>',
+      '<h2>The Foundation <a class="ts" href="https://www.youtube.com/watch?v=vid123&amp;t=135s" target="_blank" rel="noopener noreferrer">(2:15–5:30)</a></h2>',
     );
+    expect(html).not.toContain('▶');
   });
 
   it('renders no .ts anchor for sections without a timeRange', () => {
@@ -196,7 +198,7 @@ describe('renderMagazineHtml — section timestamps', () => {
       ],
     };
     const html = renderMagazineHtml(evil, model);
-    expect(html).toContain('>▶ A &amp; B</a>');
+    expect(html).toContain('>(A &amp; B)</a>');
     expect(html).toContain('href="https://youtu.be/x?v=1&amp;t=0s"');
   });
 });
