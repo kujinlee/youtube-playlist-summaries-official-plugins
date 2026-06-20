@@ -96,13 +96,14 @@ describe('CorrectionsPanel', () => {
       expect(body).toMatchObject({ outputFolder: OUTPUT_FOLDER, corrections: 'Fix Clawcode' });
     });
 
-    it('calls onSuccess with tldr, takeaways, corrections on success', async () => {
+    it('calls onSuccess with tldr, takeaways, corrections, and summaryHtml:null on success', async () => {
       const { onSuccess } = renderPanel({ initialCorrections: 'Fix Clawcode' });
       fireEvent.click(screen.getByRole('button', { name: /regenerate/i }));
       await waitFor(() => expect(onSuccess).toHaveBeenCalledWith({
         corrections: 'Fix Clawcode',
         tldr: 'New TL;DR.',
         takeaways: ['Point one'],
+        summaryHtml: null,
       }));
     });
 

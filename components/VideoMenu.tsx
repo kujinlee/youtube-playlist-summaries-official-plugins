@@ -2,6 +2,7 @@
 
 import type { Video } from '@/types';
 import AskGeminiMenuItem from './AskGeminiMenuItem';
+import { CURRENT_DOC_VERSION, isOlder } from '@/lib/doc-version';
 
 interface VideoMenuProps {
   video: Video;
@@ -12,6 +13,7 @@ interface VideoMenuProps {
   onEditCorrections: () => void;
   onGenerateHtml: (videoId: string) => void;
   onClose: () => void;
+  busy?: boolean;
 }
 
 function obsidianHref(baseOutputFolder: string, outputFolder: string, file: string): string {
@@ -36,7 +38,7 @@ function obsidianHref(baseOutputFolder: string, outputFolder: string, file: stri
 const itemClass = 'block w-full px-4 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-700';
 const disabledClass = 'block w-full px-4 py-2 text-left text-sm text-zinc-500 cursor-not-allowed';
 
-export default function VideoMenu({ video, outputFolder, baseOutputFolder, onDeepDive, onArchive, onEditCorrections, onGenerateHtml, onClose }: VideoMenuProps) {
+export default function VideoMenu({ video, outputFolder, baseOutputFolder, onDeepDive, onArchive, onEditCorrections, onGenerateHtml, onClose, busy = false }: VideoMenuProps) {
   const hasDeepDive = !!video.deepDiveMd;
   const hasSummaryPdf = !!video.summaryPdf;
   const hasDeepDivePdf = !!video.deepDivePdf;
@@ -44,7 +46,6 @@ export default function VideoMenu({ video, outputFolder, baseOutputFolder, onDee
   const deepDiveFile = video.deepDiveMd?.replace(/\.md$/, '') ?? `${video.id}-deep-dive`;
   const pdfBase = `/api/pdf/${encodeURIComponent(video.id)}?outputFolder=${encodeURIComponent(outputFolder)}`;
   const hasSummary = !!video.summaryMd;
-  const hasSummaryHtml = !!video.summaryHtml;
   const htmlViewHref = `/api/html/${encodeURIComponent(video.id)}?outputFolder=${encodeURIComponent(outputFolder)}&type=summary`;
   const deepDiveHtmlHref = `/api/html/${encodeURIComponent(video.id)}?outputFolder=${encodeURIComponent(outputFolder)}&type=deep-dive`;
 
@@ -84,25 +85,15 @@ export default function VideoMenu({ video, outputFolder, baseOutputFolder, onDee
         )}
       </li>
       <li role="none">
-        {hasSummaryHtml ? (
-          <a href={htmlViewHref} onClick={onClose} target="_blank" rel="noopener noreferrer" className={itemClass}>
-            View HTML doc
-          </a>
-        ) : hasSummary ? (
-          <button type="button" onClick={() => { onGenerateHtml(video.id); onClose(); }} className={itemClass}>
-            Generate HTML doc
-          </button>
-        ) : (
-          <span aria-disabled="true" className={disabledClass}>Generate HTML doc</span>
-        )}
+        {(() => {
+          const current = !!video.summaryHtml && !isOlder(video.docVersion ?? { major: 1, minor: 0 }, CURRENT_DOC_VERSION);
+          if (!hasSummary) return <span aria-disabled="true" className={disabledClass}>HTML doc</span>;
+          if (busy) return <span aria-disabled="true" className={disabledClass}>HTML doc <span aria-hidden="true">⏳</span></span>;
+          return current
+            ? <a href={htmlViewHref} onClick={onClose} target="_blank" rel="noopener noreferrer" className={itemClass}>HTML doc</a>
+            : <button type="button" onClick={() => { onGenerateHtml(video.id); onClose(); }} className={itemClass}>HTML doc</button>;
+        })()}
       </li>
-      {hasSummaryHtml && (
-        <li role="none">
-          <button type="button" onClick={() => { onGenerateHtml(video.id); onClose(); }} className={itemClass}>
-            Regenerate HTML doc
-          </button>
-        </li>
-      )}
       <li role="none">
         <button type="button" onClick={() => { onDeepDive(video.id); onClose(); }} className={itemClass}>
           Deep Dive

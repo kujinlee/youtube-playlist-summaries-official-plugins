@@ -37,6 +37,11 @@ export const VideoMetaSchema = z.object({
 });
 export type VideoMeta = z.infer<typeof VideoMetaSchema>;
 
+export const DocVersionSchema = z.object({
+  major: z.number().int().nonnegative(),
+  minor: z.number().int().nonnegative(),
+});
+
 // --- Video: one entry in playlist-index.json ---
 export const VideoSchema = z.object({
   id: z.string(),
@@ -66,6 +71,7 @@ export const VideoSchema = z.object({
   tldr: z.string().optional(),
   takeaways: z.array(z.string()).optional(),
   corrections: z.string().optional(),
+  docVersion: DocVersionSchema.optional(), // absent ⇒ pre-feature {1,0}; stamped to CURRENT_DOC_VERSION on (re)generation
 });
 export type Video = z.infer<typeof VideoSchema>;
 

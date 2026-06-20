@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Video } from '@/types';
 
-type Patch = Partial<Pick<Video, 'corrections' | 'tldr' | 'takeaways'>>;
+type Patch = Partial<Pick<Video, 'corrections' | 'tldr' | 'takeaways' | 'summaryHtml'>>;
 
 interface CorrectionsPanelProps {
   videoId: string;
@@ -59,6 +59,7 @@ export default function CorrectionsPanel({
         corrections: corrections.trim() || undefined,
         tldr: data.tldr as string | undefined,
         takeaways: data.takeaways as string[] | undefined,
+        summaryHtml: (data.summaryHtml ?? null) as string | null,
       });
       onClose();
     } catch {

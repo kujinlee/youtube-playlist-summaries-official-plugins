@@ -167,4 +167,20 @@ describe('POST /api/videos/[id]/regenerate', () => {
     const body = await res.json();
     expect(body.error).toMatch(/Gemini failed/);
   });
+
+  it('clears summaryHtml in the index update on success', async () => {
+    await post(VIDEO_ID, { outputFolder: OUTPUT_FOLDER });
+    expect(mockUpdateVideoFields).toHaveBeenCalledWith(
+      OUTPUT_FOLDER,
+      VIDEO_ID,
+      expect.objectContaining({ summaryHtml: null }),
+    );
+  });
+
+  it('includes summaryHtml: null in the JSON response on success', async () => {
+    const res = await post(VIDEO_ID, { outputFolder: OUTPUT_FOLDER });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual(expect.objectContaining({ summaryHtml: null }));
+  });
 });

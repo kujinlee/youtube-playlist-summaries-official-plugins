@@ -5,10 +5,71 @@ import { generateSummary } from './gemini';
 import { generatePdf } from './pdf';
 import { assertOutputFolder, assertVideoId, upsertVideo, readIndex, writeIndex } from './index-store';
 import { slugify } from './slugify';
-import type { ProgressEvent, Video, VideoMeta, RatingValue, VideoType, Audience } from '../types';
+import type { ProgressEvent, Video, VideoMeta, RatingValue, VideoType, Audience, GeminiSummaryResponse } from '../types';
+import { CURRENT_DOC_VERSION } from './doc-version';
 
 const VALID_VIDEO_TYPES: VideoType[] = ['Tutorial', 'Analysis', 'Case Study', 'Framework', 'Demo', 'Interview'];
 const VALID_AUDIENCES: Audience[] = ['Beginner', 'Intermediate', 'Advanced'];
+
+export interface SummaryDocInput {
+  videoId: string;
+  title: string;
+  youtubeUrl: string;
+  channel?: string;
+  durationSeconds: number;
+  outputFolder: string;
+  baseName: string;
+}
+export interface SummaryDocResult {
+  language: 'en' | 'ko';
+  ratings: GeminiSummaryResponse['ratings'];
+  overallScore: number;
+  videoType?: VideoType;
+  audience?: Audience;
+  tags?: string[];
+  tldr?: string;
+  takeaways?: string[];
+  mdContent: string;
+  summaryMd: string;
+}
+
+/**
+ * Fetch transcript → generateSummary (emits ▶ timestamps) → build the summary .md → write it at
+ * <baseName>.md. Shared by ingestion (new slug) and re-summarize (existing baseName). Does NOT write
+ * the PDF — the caller owns that (ingestion keeps generating PDFs; re-summarize skips them).
+ */
+export async function writeSummaryDoc(input: SummaryDocInput): Promise<SummaryDocResult> {
+  const { videoId, title, youtubeUrl, channel, durationSeconds, outputFolder, baseName } = input;
+  const segments = await fetchTranscriptSegments(videoId);
+  const transcript = segments.map((s) => s.text).join(' '); // plain text for language detection only
+  const language = detectLanguage(transcript);
+  const { summary, ratings, overallScore, videoType, audience, tags, tldr, takeaways } =
+    await generateSummary(segments, language, videoId);
+
+  const structuralTags = ['video-summary', language];
+  const allTags = [...structuralTags, ...(tags ?? [])];
+  const frontmatterLines = [
+    '---', 'tags:', ...allTags.map((t) => `  - ${t}`),
+    `video_id: "${videoId}"`,
+    ...(channel ? [`channel: "${channel}"`] : []),
+    `lang: ${language.toUpperCase()}`,
+    ...(videoType ? [`type: ${videoType}`] : []),
+    ...(audience ? [`audience: ${audience}`] : []),
+    `score: ${overallScore}`, '---',
+  ];
+  const metaParts = [
+    channel && `**Channel:** ${channel}`,
+    `**Duration:** ${formatDuration(durationSeconds)}`,
+    `**URL:** ${youtubeUrl}`,
+  ].filter(Boolean).join(' | ');
+  const baseContent = [frontmatterLines.join('\n'), '', `# ${title}`, '', metaParts, '', '---', '', summary].join('\n');
+  const mdContent = (tldr && takeaways)
+    ? insertQuickViewCallout(baseContent, tldr, takeaways, tags ?? [])
+    : baseContent;
+
+  await fs.promises.writeFile(path.join(outputFolder, `${baseName}.md`), mdContent, 'utf-8');
+  return { language, ratings, overallScore, videoType, audience, tags, tldr, takeaways, mdContent, summaryMd: `${baseName}.md` };
+}
 
 export function parseFrontmatterField(content: string, key: string): string | null {
   const match = content.match(new RegExp(`^${key}:\\s*"?([^"\\n]*)"?\\s*$`, 'm'));
@@ -242,14 +303,6 @@ export async function runIngestion(
       }
 
       onProgress({ type: 'step', videoId: meta.videoId, title: meta.title, step: 'Fetching transcript…', current, total });
-      const segments = await fetchTranscriptSegments(meta.videoId);
-      const transcript = segments.map((s) => s.text).join(' '); // plain text for language detection only
-
-      const language = detectLanguage(transcript);
-
-      onProgress({ type: 'step', videoId: meta.videoId, title: meta.title, step: 'Generating summary…', current, total });
-      const { summary, ratings, overallScore, videoType, audience, tags, tldr, takeaways } = await generateSummary(segments, language, meta.videoId);
-
       const slug = slugify(meta.title);
       let baseName = slug;
       let counter = 2;
@@ -257,49 +310,14 @@ export async function runIngestion(
         baseName = `${slug}-${counter}`;
         counter++;
       }
-      const mdPath = path.join(outputFolder, `${baseName}.md`);
+      onProgress({ type: 'step', videoId: meta.videoId, title: meta.title, step: 'Generating summary…', current, total });
+      const { language, ratings, overallScore, videoType, audience, tags, tldr, takeaways, mdContent } =
+        await writeSummaryDoc({
+          videoId: meta.videoId, title: meta.title, youtubeUrl: meta.youtubeUrl,
+          channel: meta.channelTitle, durationSeconds: meta.durationSeconds, outputFolder, baseName,
+        });
       fs.mkdirSync(path.join(outputFolder, 'pdfs'), { recursive: true });
       const pdfPath = path.join(outputFolder, 'pdfs', `${baseName}.pdf`);
-
-      const structuralTags = ['video-summary', language];
-      const allTags = [...structuralTags, ...(tags ?? [])];
-
-      const frontmatterLines = [
-        '---',
-        'tags:',
-        ...allTags.map((t) => `  - ${t}`),
-        `video_id: "${meta.videoId}"`,
-        ...(meta.channelTitle ? [`channel: "${meta.channelTitle}"`] : []),
-        `lang: ${language.toUpperCase()}`,
-        ...(videoType ? [`type: ${videoType}`] : []),
-        ...(audience ? [`audience: ${audience}`] : []),
-        `score: ${overallScore}`,
-        '---',
-      ];
-
-      const metaParts = [
-        meta.channelTitle && `**Channel:** ${meta.channelTitle}`,
-        `**Duration:** ${formatDuration(meta.durationSeconds)}`,
-        `**URL:** ${meta.youtubeUrl}`,
-      ].filter(Boolean).join(' | ');
-
-      const baseContent = [
-        frontmatterLines.join('\n'),
-        '',
-        `# ${meta.title}`,
-        '',
-        metaParts,
-        '',
-        '---',
-        '',
-        summary,
-      ].join('\n');
-
-      const mdContent = (tldr && takeaways)
-        ? insertQuickViewCallout(baseContent, tldr, takeaways, tags ?? [])
-        : baseContent;
-
-      await fs.promises.writeFile(mdPath, mdContent, 'utf-8');
 
       const video: Video = {
         id: meta.videoId,
@@ -315,6 +333,7 @@ export async function runIngestion(
         deepDiveMd: null,
         deepDivePdf: null,
         processedAt: new Date().toISOString(),
+        docVersion: CURRENT_DOC_VERSION,
         playlistIndex: current,
         ...(videoType !== undefined && { videoType }),
         ...(audience !== undefined && { audience }),

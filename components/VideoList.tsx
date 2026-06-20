@@ -9,10 +9,11 @@ interface VideoListProps {
   baseOutputFolder: string;
   showArchive: boolean;
   minPersonalScore?: number;
+  busyVideoId?: string | null;
   onDeepDive: (videoId: string) => void;
   onArchive: (videoId: string, action: 'archive' | 'unarchive') => void;
   onGenerateHtml: (videoId: string) => void;
-  onAnnotationChange?: (videoId: string, patch: Partial<Pick<Video, 'personalScore' | 'personalNote' | 'corrections' | 'tldr' | 'takeaways'>>) => void;
+  onAnnotationChange?: (videoId: string, patch: Partial<Pick<Video, 'personalScore' | 'personalNote' | 'corrections' | 'tldr' | 'takeaways' | 'summaryHtml'>>) => void;
   sortColumn?: SortColumn | null;
   sortOrder?: SortOrder;
   onSort?: (col: SortColumn, order: SortOrder) => void;
@@ -47,6 +48,7 @@ export default function VideoList({
   baseOutputFolder,
   showArchive,
   minPersonalScore = 0,
+  busyVideoId = null,
   onDeepDive,
   onArchive,
   onGenerateHtml,
@@ -135,6 +137,7 @@ export default function VideoList({
             outputFolder={outputFolder}
             baseOutputFolder={baseOutputFolder}
             dimUnscored={minPersonalScore > 0 && video.personalScore === undefined}
+            busy={busyVideoId === video.id}
             onDeepDive={onDeepDive}
             onArchive={onArchive}
             onGenerateHtml={onGenerateHtml}

@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { NextResponse } from 'next/server';
 import { assertOutputFolder, assertVideoId } from '../../../../../lib/index-store';
-import { runHtmlDoc } from '../../../../../lib/html-doc/generate';
+import { ensureHtmlDoc } from '../../../../../lib/html-doc/ensure';
 import { createJob, deleteJob, emitJobEvent, getActiveJob, releaseJobLock } from '../../../../../lib/job-registry';
 import type { ProgressEvent } from '../../../../../types';
 
@@ -41,7 +41,7 @@ export async function POST(request: Request, { params }: Params) {
     (t as { unref?: () => void }).unref?.();
   };
 
-  runHtmlDoc(videoId, outputFolder, (event: ProgressEvent) => {
+  ensureHtmlDoc(videoId, outputFolder, (event: ProgressEvent) => {
     emitJobEvent(jobId, event);
     if (event.type === 'done' || event.type === 'error') onTerminal();
   }).catch((err) => {

@@ -1,9 +1,9 @@
 import { POST } from '../../app/api/videos/[id]/html-doc/route';
-import * as generate from '../../lib/html-doc/generate';
+import * as ensure from '../../lib/html-doc/ensure';
 import { _resetJobRegistry } from '../../lib/job-registry';
 
-jest.mock('../../lib/html-doc/generate');
-const mockRun = generate.runHtmlDoc as jest.Mock;
+jest.mock('../../lib/html-doc/ensure');
+const mockEnsure = ensure.ensureHtmlDoc as jest.Mock;
 
 const HOME = (process.env.HOME ?? '/tmp') + '/x';
 function req(body: unknown) {
@@ -24,16 +24,16 @@ it('400s on an outputFolder outside home', async () => {
 });
 
 it('returns a jobId and starts the run', async () => {
-  mockRun.mockResolvedValueOnce(undefined);
+  mockEnsure.mockResolvedValueOnce(undefined);
   const json = await (await POST(req({ outputFolder: HOME }), ctx)).json();
   expect(typeof json.jobId).toBe('string');
-  expect(mockRun).toHaveBeenCalledWith('vid12345', HOME, expect.any(Function));
+  expect(mockEnsure).toHaveBeenCalledWith('vid12345', HOME, expect.any(Function));
 });
 
 it('returns the SAME jobId for a concurrent duplicate submit (no second run)', async () => {
-  mockRun.mockReturnValue(new Promise(() => {})); // never resolves → job stays active
+  mockEnsure.mockReturnValue(new Promise(() => {})); // never resolves → job stays active
   const first = await (await POST(req({ outputFolder: HOME }), ctx)).json();
   const second = await (await POST(req({ outputFolder: HOME }), ctx)).json();
   expect(second.jobId).toBe(first.jobId);
-  expect(mockRun).toHaveBeenCalledTimes(1);
+  expect(mockEnsure).toHaveBeenCalledTimes(1);
 });
