@@ -50,3 +50,6 @@ next-env.d.ts
 
 # Transient scheduled-task lock (per-session runtime artifact)
 .claude/scheduled_tasks.lock
+
+# dev error log (runtime observability artifact — never commit)
+/logs/

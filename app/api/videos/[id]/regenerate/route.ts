@@ -5,6 +5,7 @@ import { assertOutputFolder, assertVideoId, readIndex, updateVideoFields } from 
 import { fixSummary, extractQuickView } from '../../../../../lib/gemini';
 import { stripQuickViewCallout, insertQuickViewCallout } from '../../../../../lib/pipeline';
 import { generatePdf } from '../../../../../lib/pdf';
+import { logError, errorSummary } from '../../../../../lib/dev-logger';
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -83,7 +84,7 @@ export async function POST(request: Request, { params }: Params) {
       summaryHtml: null,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: message }, { status: 500 });
+    logError(`regenerate:${videoId}`, err);
+    return NextResponse.json({ error: errorSummary(err) }, { status: 500 });
   }
 }

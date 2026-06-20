@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import type { GenerativeModel } from '@google/generative-ai';
 import { RatingsSchema, VideoTypeSchema, AudienceSchema } from '../types';
 import type { GeminiSummaryResponse } from '../types';
 import { z } from 'zod';
@@ -28,6 +29,35 @@ function getApiKey(): string {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error('GEMINI_API_KEY is not set');
   return key;
+}
+
+/**
+ * Call Gemini, parse + validate its JSON response, retrying on ANY failure (malformed JSON,
+ * schema-validation, or transient API error) since the model is stochastic. Throws the last
+ * error after all attempts. Logs each retry so failures are visible in dev.
+ */
+export async function generateJson<T>(
+  model: GenerativeModel,
+  prompt: string,
+  schema: { parse: (x: unknown) => T },
+  label: string,
+  retries = 2,
+  baseDelayMs = 400,
+): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const result = await model.generateContent(prompt, { timeout: REQUEST_TIMEOUT_MS });
+      return schema.parse(JSON.parse(result.response.text()));
+    } catch (err) {
+      lastErr = err;
+      if (attempt < retries) {
+        console.warn(`[gemini-retry] ${label}: attempt ${attempt + 1} failed (${err instanceof Error ? err.message : String(err)}); retrying…`);
+        if (baseDelayMs > 0) await new Promise((r) => setTimeout(r, baseDelayMs * 2 ** attempt));
+      }
+    }
+  }
+  throw lastErr;
 }
 
 function computeOverallScore(r: GeminiSummaryResponse['ratings']): number {
@@ -70,8 +100,7 @@ ${indexedTranscript}
 </transcript>`;
 
   try {
-    const result = await model.generateContent(prompt, { timeout: REQUEST_TIMEOUT_MS });
-    const parsed = GeminiResponseSchema.parse(JSON.parse(result.response.text()));
+    const parsed = await generateJson(model, prompt, GeminiResponseSchema, 'summary');
     const { ratings, videoType, audience, tags } = parsed;
     // Resolve [[TS:i]] tokens into ▶ lines (segment index → real timestamp). Degrades to no
     // timestamps if Gemini's indices are invalid — the summary itself is unaffected.
@@ -116,8 +145,7 @@ ${summaryMarkdown}
 </summary>`;
 
   try {
-    const result = await model.generateContent(prompt, { timeout: REQUEST_TIMEOUT_MS });
-    const parsed = QuickViewSchema.parse(JSON.parse(result.response.text()));
+    const parsed = await generateJson(model, prompt, QuickViewSchema, 'quick-view');
     return {
       tldr: trimToWords(parsed.tldr, 25),
       takeaways: parsed.takeaways.map((t) => trimToWords(t, 20)),
@@ -304,8 +332,7 @@ ${numbered}
 </sections>`;
 
   try {
-    const result = await model.generateContent(prompt, { timeout: REQUEST_TIMEOUT_MS });
-    const parsed = MagazineModelSchema.parse(JSON.parse(result.response.text()));
+    const parsed = await generateJson(model, prompt, MagazineModelSchema, 'magazine');
     if (parsed.sections.length !== sections.length) {
       throw new Error(`section count mismatch: got ${parsed.sections.length}, expected ${sections.length}`);
     }

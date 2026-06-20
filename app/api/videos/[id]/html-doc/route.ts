@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { assertOutputFolder, assertVideoId } from '../../../../../lib/index-store';
 import { ensureHtmlDoc } from '../../../../../lib/html-doc/ensure';
 import { createJob, deleteJob, emitJobEvent, getActiveJob, releaseJobLock } from '../../../../../lib/job-registry';
+import { logError, errorSummary } from '../../../../../lib/dev-logger';
 import type { ProgressEvent } from '../../../../../types';
 
 type Params = { params: Promise<{ id: string }> };
@@ -46,8 +47,8 @@ export async function POST(request: Request, { params }: Params) {
     if (event.type === 'done' || event.type === 'error') onTerminal();
   }).catch((err) => {
     if (finished) return;
-    console.error('[html-doc] failed for video', videoId, err);
-    emitJobEvent(jobId, { type: 'error', log: err instanceof Error ? err.message : String(err) });
+    logError(`html-doc:${videoId}`, err);
+    emitJobEvent(jobId, { type: 'error', log: errorSummary(err) });
     onTerminal();
   });
 

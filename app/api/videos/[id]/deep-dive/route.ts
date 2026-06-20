@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { assertOutputFolder, assertVideoId } from '../../../../../lib/index-store';
 import { runDeepDive } from '../../../../../lib/deep-dive';
 import { createJob, deleteJob, emitJobEvent } from '../../../../../lib/job-registry';
+import { logError, errorSummary } from '../../../../../lib/dev-logger';
 import type { ProgressEvent } from '../../../../../types';
 
 type Params = { params: Promise<{ id: string }> };
@@ -34,8 +35,8 @@ export async function POST(request: Request, { params }: Params) {
   }).catch((err) => {
     if (finished) return;
     finished = true;
-    console.error('[deep-dive] failed for video', videoId, err);
-    emitJobEvent(jobId, { type: 'error', log: err instanceof Error ? err.message : String(err) });
+    logError(`deep-dive:${videoId}`, err);
+    emitJobEvent(jobId, { type: 'error', log: errorSummary(err) });
     deleteJob(jobId);
   });
 

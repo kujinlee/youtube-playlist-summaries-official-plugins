@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { assertOutputFolder } from '../../../lib/index-store';
 import { runIngestion } from '../../../lib/pipeline';
 import { createJob, deleteJob, emitJobEvent, isIngestionRunning, getJobSignal } from '../../../lib/job-registry';
+import { logError, errorSummary } from '../../../lib/dev-logger';
 import type { ProgressEvent } from '../../../types';
 
 export async function POST(request: Request) {
@@ -45,7 +46,8 @@ export async function POST(request: Request) {
   }, signal).catch((err) => {
     if (finished) return;
     finished = true;
-    emitJobEvent(jobId, { type: 'error', log: err instanceof Error ? err.message : String(err) });
+    logError(`ingest:${outputFolder}`, err);
+    emitJobEvent(jobId, { type: 'error', log: errorSummary(err) });
     deleteJob(jobId);
   });
 

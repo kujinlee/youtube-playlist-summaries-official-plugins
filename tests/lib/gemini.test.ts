@@ -65,7 +65,9 @@ describe('generateSummary', () => {
 
   it('wraps Gemini API errors with a clear message and preserves cause', async () => {
     const apiError = new Error('API_KEY_INVALID');
-    mockGenerateContent.mockRejectedValueOnce(apiError);
+    // mockRejectedValue (not Once) so all retry attempts fail with the same error,
+    // ensuring the final .cause is the original apiError after retries exhaust.
+    mockGenerateContent.mockRejectedValue(apiError);
 
     const err = await generateSummary(SEGS, 'en', 'vid123').catch((e) => e);
 
