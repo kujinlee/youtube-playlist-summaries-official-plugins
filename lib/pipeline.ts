@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { fetchPlaylistVideos, fetchTranscript, detectLanguage } from './youtube';
+import { fetchPlaylistVideos, fetchTranscriptSegments, detectLanguage } from './youtube';
 import { generateSummary } from './gemini';
 import { generatePdf } from './pdf';
 import { assertOutputFolder, assertVideoId, upsertVideo, readIndex, writeIndex } from './index-store';
@@ -242,12 +242,13 @@ export async function runIngestion(
       }
 
       onProgress({ type: 'step', videoId: meta.videoId, title: meta.title, step: 'Fetching transcript…', current, total });
-      const transcript = await fetchTranscript(meta.videoId);
+      const segments = await fetchTranscriptSegments(meta.videoId);
+      const transcript = segments.map((s) => s.text).join(' '); // plain text for language detection only
 
       const language = detectLanguage(transcript);
 
       onProgress({ type: 'step', videoId: meta.videoId, title: meta.title, step: 'Generating summary…', current, total });
-      const { summary, ratings, overallScore, videoType, audience, tags, tldr, takeaways } = await generateSummary(transcript, language);
+      const { summary, ratings, overallScore, videoType, audience, tags, tldr, takeaways } = await generateSummary(segments, language, meta.videoId);
 
       const slug = slugify(meta.title);
       let baseName = slug;

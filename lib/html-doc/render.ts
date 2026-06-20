@@ -31,6 +31,8 @@ section{position:relative;padding:1.6em 0 1.2em;border-bottom:1px solid var(--ru
 .ghost{font:700 4.5rem/1 Georgia,serif;color:var(--ghost);position:absolute;right:0;top:.1em;pointer-events:none;user-select:none}
 h2{font-family:${SERIF};font-size:1.3rem;margin:.1em 0 .35em}
 .lead{font-size:1.12rem;line-height:1.5;color:var(--gold);font-weight:600;margin:.2em 0 .8em;max-width:90%}
+.ts{display:inline-block;color:var(--gold);font-size:.8rem;font-weight:600;text-decoration:none;margin:.1em 0 .7em}
+.ts:hover{text-decoration:underline}
 ul{padding-left:1.15em;margin:0}
 li{margin:.4em 0;line-height:1.6;color:var(--li)}
 footer{margin-top:2.5em;color:var(--foot);font-size:.8rem}
@@ -62,12 +64,16 @@ export function renderMagazineHtml(parsed: ParsedSummary, model: MagazineModel):
       const m = model.sections[i];
       if (!m) return '';
       const ghost = s.numeral ? `<span class="ghost">${esc(s.numeral)}</span>` : '';
+      const ts = s.timeRange
+        ? `<a class="ts" href="${esc(s.timeRange.url)}" target="_blank" rel="noopener noreferrer">▶ ${esc(s.timeRange.label)}</a>`
+        : '';
       const bullets = m.bullets
         .map((b) => `<li><strong>${esc(b.label)}:</strong> ${esc(b.text)}</li>`)
         .join('');
       return `<section>
       ${ghost}
       <h2>${esc(s.title)}</h2>
+      ${ts}
       <p class="lead">${esc(m.lead)}</p>
       <ul>${bullets}</ul>
     </section>`;

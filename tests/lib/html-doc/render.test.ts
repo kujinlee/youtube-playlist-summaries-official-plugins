@@ -139,3 +139,49 @@ describe('renderMagazineHtml', () => {
     expect(html).not.toMatch(/<html[^>]*data-theme=/);
   });
 });
+
+describe('renderMagazineHtml — section timestamps', () => {
+  const withTs: ParsedSummary = {
+    ...parsed,
+    sections: [
+      {
+        numeral: '1',
+        title: 'The Foundation',
+        prose: 'p',
+        timeRange: {
+          startSec: 135,
+          endSec: 330,
+          label: '2:15–5:30',
+          url: 'https://www.youtube.com/watch?v=vid123&t=135s',
+        },
+      },
+      { numeral: null, title: 'Conclusion', prose: 'p', timeRange: null },
+    ],
+  };
+
+  it('renders a clickable .ts anchor that opens in a new tab for sections with a timeRange', () => {
+    const html = renderMagazineHtml(withTs, model);
+    expect(html).toContain(
+      '<a class="ts" href="https://www.youtube.com/watch?v=vid123&amp;t=135s" target="_blank" rel="noopener noreferrer">▶ 2:15–5:30</a>',
+    );
+  });
+
+  it('renders no .ts anchor for sections without a timeRange', () => {
+    const html = renderMagazineHtml(withTs, model);
+    // Only one anchor total (the first section); the Conclusion has none.
+    expect(html.match(/class="ts"/g) ?? []).toHaveLength(1);
+  });
+
+  it('HTML-escapes the label and url in the timestamp anchor', () => {
+    const evil: ParsedSummary = {
+      ...parsed,
+      sections: [
+        { numeral: '1', title: 'T', prose: 'p', timeRange: { startSec: 0, endSec: 10, label: 'A & B', url: 'https://youtu.be/x?v=1&t=0s' } },
+        { numeral: null, title: 'C', prose: 'p', timeRange: null },
+      ],
+    };
+    const html = renderMagazineHtml(evil, model);
+    expect(html).toContain('>▶ A &amp; B</a>');
+    expect(html).toContain('href="https://youtu.be/x?v=1&amp;t=0s"');
+  });
+});

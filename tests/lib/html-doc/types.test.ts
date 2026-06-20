@@ -36,3 +36,23 @@ describe('MagazineModelSchema', () => {
     ).toThrow();
   });
 });
+
+import type { SectionTimeRange, ParsedSection } from '../../../lib/html-doc/types';
+
+describe('SectionTimeRange / ParsedSection.timeRange', () => {
+  it('accepts a section carrying a time range', () => {
+    const tr: SectionTimeRange = {
+      startSec: 135,
+      endSec: 330,
+      label: '2:15–5:30',
+      url: 'https://www.youtube.com/watch?v=vid123&t=135s',
+    };
+    const section: ParsedSection = { numeral: '1', title: 'A', prose: 'body', timeRange: tr };
+    expect(section.timeRange?.startSec).toBe(135);
+  });
+
+  it('accepts a section with no time range', () => {
+    const section: ParsedSection = { numeral: null, title: 'Conclusion', prose: 'p' };
+    expect(section.timeRange ?? null).toBeNull();
+  });
+});

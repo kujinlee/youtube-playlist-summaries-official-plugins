@@ -1,4 +1,5 @@
-import type { ParsedSummary, ParsedSection } from './types';
+import type { ParsedSummary, ParsedSection, SectionTimeRange } from './types';
+import { parseClockToSeconds } from '../transcript-timestamps';
 
 function frontmatterField(md: string, key: string): string | null {
   const m = md.match(new RegExp(`^${key}:\\s*"?([^"\\n]*)"?\\s*$`, 'm'));
@@ -8,6 +9,34 @@ function frontmatterField(md: string, key: string): string | null {
 /** True when a line opens or closes a fenced code block (``` or ~~~, with optional info string). */
 function isFenceLine(line: string): boolean {
   return /^\s*(```|~~~)/.test(line);
+}
+
+// Matches a `▶ [label](url)` line. A line starting with `▶ ` that does NOT fully match is treated
+// as malformed: still consumed (removed from prose) but yields a null time range.
+const TS_LINE_RE = /^▶\s+\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)\s*$/;
+
+function extractTimeRange(proseLines: string[]): SectionTimeRange | null {
+  // Find the first non-blank prose line; only that line may carry the timestamp.
+  const firstIdx = proseLines.findIndex((l) => l.trim() !== '');
+  if (firstIdx === -1) return null;
+  const line = proseLines[firstIdx];
+  if (!line.trimStart().startsWith('▶')) return null;
+
+  // Consume the ▶ line regardless of whether it is well-formed (don't leak it into prose).
+  proseLines.splice(firstIdx, 1);
+
+  const m = line.match(TS_LINE_RE);
+  if (!m) return null; // malformed: consumed but no range
+  const label = m[1];
+  const url = m[2];
+  const startMatch = url.match(/[?&]t=(\d+)s/);
+  const startSec = startMatch ? parseInt(startMatch[1], 10) : NaN;
+  if (Number.isNaN(startSec)) return null;
+  const endRaw = label.split('–')[1] ?? ''; // en dash U+2013
+  const endSec = parseClockToSeconds(endRaw);
+  // If the label has no/invalid end clock, collapse the range to the start: the start-anchored
+  // link is still useful (render shows the raw label + links to &t=startSec). Never discard it.
+  return { startSec, endSec: Number.isNaN(endSec) ? startSec : endSec, label, url };
 }
 
 function parseSections(body: string): ParsedSection[] {
@@ -25,8 +54,9 @@ function parseSections(body: string): ParsedSection[] {
     const ord = headingLine.match(/^(\d+)\.\s+(.*)$/);
     const numeral = ord ? ord[1] : null;
     const title = ord ? ord[2].trim() : headingLine;
+    const timeRange = extractTimeRange(current.proseLines); // mutates proseLines (removes ▶ line)
     const prose = current.proseLines.join('\n').trim();
-    sections.push({ numeral, title, prose });
+    sections.push({ numeral, title, prose, timeRange });
     current = null;
   };
 

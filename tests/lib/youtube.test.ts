@@ -1,4 +1,4 @@
-import { detectLanguage, fetchPlaylistTitle, fetchPlaylistVideos, fetchTranscript } from '../../lib/youtube';
+import { detectLanguage, fetchPlaylistTitle, fetchPlaylistVideos, fetchTranscript, fetchTranscriptSegments } from '../../lib/youtube';
 import { google } from 'googleapis';
 import { YoutubeTranscript } from 'youtube-transcript';
 
@@ -310,6 +310,46 @@ describe('detectLanguage', () => {
   it('returns en for mixed text below Korean threshold', () => {
     // One Korean word in a long English sentence — well below 10% ratio
     expect(detectLanguage('This is a long English sentence with one Korean word 안녕 at the end')).toBe('en');
+  });
+});
+
+describe('fetchTranscriptSegments', () => {
+  it('returns segments with offset/duration converted from ms to seconds', async () => {
+    (YoutubeTranscript.fetchTranscript as jest.Mock).mockResolvedValue([
+      { text: 'Hello', duration: 5000, offset: 0 },
+      { text: 'world', duration: 3000, offset: 135000 },
+    ]);
+
+    const result = await fetchTranscriptSegments('abc12345678');
+
+    expect(result).toEqual([
+      { text: 'Hello', offset: 0, duration: 5 },
+      { text: 'world', offset: 135, duration: 3 },
+    ]);
+  });
+
+  it('throws with a wrapped message when the transcript fetch fails', async () => {
+    const cause = new Error('Transcript disabled');
+    (YoutubeTranscript.fetchTranscript as jest.Mock).mockRejectedValue(cause);
+
+    const err = await fetchTranscriptSegments('abc12345678').catch((e) => e);
+    expect(err.message).toBe('Failed to fetch transcript for video abc12345678: Transcript disabled');
+    expect(err.cause).toBe(cause);
+  });
+
+  it('returns an empty array when the transcript is empty', async () => {
+    (YoutubeTranscript.fetchTranscript as jest.Mock).mockResolvedValue([]);
+    await expect(fetchTranscriptSegments('abc12345678')).resolves.toEqual([]);
+  });
+
+  it('drops segments with non-finite offset/duration or non-string text (defensive)', async () => {
+    (YoutubeTranscript.fetchTranscript as jest.Mock).mockResolvedValue([
+      { text: 'ok', duration: 5000, offset: 0 },
+      { text: 'bad-dur', duration: NaN, offset: 1000 },
+      { text: 'bad-off', duration: 1000, offset: undefined },
+    ]);
+    const result = await fetchTranscriptSegments('abc12345678');
+    expect(result).toEqual([{ text: 'ok', offset: 0, duration: 5 }]);
   });
 });
 

@@ -16,7 +16,7 @@ import * as pdf from '../../lib/pdf';
 import * as indexStore from '../../lib/index-store';
 
 const mockFetchPlaylistVideos = jest.mocked(youtube.fetchPlaylistVideos);
-const mockFetchTranscript = jest.mocked(youtube.fetchTranscript);
+const mockFetchTranscriptSegments = jest.mocked(youtube.fetchTranscriptSegments);
 const mockDetectLanguage = jest.mocked(youtube.detectLanguage);
 const mockGenerateSummary = jest.mocked(gemini.generateSummary);
 const mockGeneratePdf = jest.mocked(pdf.generatePdf);
@@ -93,7 +93,7 @@ describe('runIngestion', () => {
 
   it('emits start event first and done event last for a successful pipeline', async () => {
     mockFetchPlaylistVideos.mockResolvedValue([makeVideoMeta('vid1'), makeVideoMeta('vid2')]);
-    mockFetchTranscript.mockResolvedValue('transcript');
+    mockFetchTranscriptSegments.mockResolvedValue([{ text: 'transcript', offset: 0, duration: 5 }]);
     mockGenerateSummary.mockResolvedValue(makeSummaryResponse());
 
     const events: ProgressEvent[] = [];
@@ -109,9 +109,9 @@ describe('runIngestion', () => {
 
   it('continues to next video when one video fails', async () => {
     mockFetchPlaylistVideos.mockResolvedValue([makeVideoMeta('vid1'), makeVideoMeta('vid2')]);
-    mockFetchTranscript
+    mockFetchTranscriptSegments
       .mockRejectedValueOnce(new Error('No transcript available'))
-      .mockResolvedValueOnce('transcript');
+      .mockResolvedValueOnce([{ text: 'transcript', offset: 0, duration: 5 }]);
     mockGenerateSummary.mockResolvedValue(makeSummaryResponse());
 
     const events: ProgressEvent[] = [];
@@ -128,7 +128,7 @@ describe('runIngestion', () => {
 
   it('upserts all successfully processed videos to the index', async () => {
     mockFetchPlaylistVideos.mockResolvedValue([makeVideoMeta('vid1'), makeVideoMeta('vid2')]);
-    mockFetchTranscript.mockResolvedValue('transcript');
+    mockFetchTranscriptSegments.mockResolvedValue([{ text: 'transcript', offset: 0, duration: 5 }]);
     mockGenerateSummary.mockResolvedValue(makeSummaryResponse());
 
     await runIngestion(PLAYLIST_URL, outputFolder, () => {});
@@ -142,7 +142,7 @@ describe('runIngestion', () => {
     const ratings = { usefulness: 4, depth: 3, originality: 5, recency: 2, completeness: 1 } as const;
     const overallScore = (4 + 3 + 5 + 2 + 1) / 5; // 3
     mockFetchPlaylistVideos.mockResolvedValue([makeVideoMeta('vid1')]);
-    mockFetchTranscript.mockResolvedValue('transcript');
+    mockFetchTranscriptSegments.mockResolvedValue([{ text: 'transcript', offset: 0, duration: 5 }]);
     mockGenerateSummary.mockResolvedValue({ summary: 'S', ratings, overallScore });
 
     await runIngestion(PLAYLIST_URL, outputFolder, () => {});
@@ -155,7 +155,7 @@ describe('runIngestion', () => {
 
   it('stores videoType and audience from generateSummary in the index entry', async () => {
     mockFetchPlaylistVideos.mockResolvedValue([makeVideoMeta('vid1')]);
-    mockFetchTranscript.mockResolvedValue('transcript');
+    mockFetchTranscriptSegments.mockResolvedValue([{ text: 'transcript', offset: 0, duration: 5 }]);
     mockGenerateSummary.mockResolvedValue(
       makeSummaryResponse({ videoType: 'Tutorial', audience: 'Advanced' }),
     );
@@ -170,7 +170,7 @@ describe('runIngestion', () => {
 
   it('omits videoType and audience from index entry when generateSummary does not return them', async () => {
     mockFetchPlaylistVideos.mockResolvedValue([makeVideoMeta('vid1')]);
-    mockFetchTranscript.mockResolvedValue('transcript');
+    mockFetchTranscriptSegments.mockResolvedValue([{ text: 'transcript', offset: 0, duration: 5 }]);
     mockGenerateSummary.mockResolvedValue(makeSummaryResponse());
 
     await runIngestion(PLAYLIST_URL, outputFolder, () => {});
@@ -195,7 +195,7 @@ describe('runIngestion', () => {
   it('uses slug-only filename (no rank prefix) for the video', async () => {
     const meta = { ...makeVideoMeta('vid1'), title: 'Hello World' };
     mockFetchPlaylistVideos.mockResolvedValue([meta]);
-    mockFetchTranscript.mockResolvedValue('transcript');
+    mockFetchTranscriptSegments.mockResolvedValue([{ text: 'transcript', offset: 0, duration: 5 }]);
     mockGenerateSummary.mockResolvedValue(makeSummaryResponse());
 
     await runIngestion(PLAYLIST_URL, outputFolder, () => {});
@@ -215,7 +215,7 @@ describe('runIngestion', () => {
 
     const meta = { ...makeVideoMeta('vid1'), title: 'Hello World' };
     mockFetchPlaylistVideos.mockResolvedValue([meta]);
-    mockFetchTranscript.mockResolvedValue('transcript');
+    mockFetchTranscriptSegments.mockResolvedValue([{ text: 'transcript', offset: 0, duration: 5 }]);
     mockGenerateSummary.mockResolvedValue(makeSummaryResponse());
 
     await runIngestion(PLAYLIST_URL, outputFolder, () => {});
@@ -232,7 +232,7 @@ describe('runIngestion', () => {
   it('writes markdown file starting with YAML frontmatter (--- tags:)', async () => {
     const meta = { ...makeVideoMeta('vid1'), title: 'Test Video', channelTitle: 'Test Channel' };
     mockFetchPlaylistVideos.mockResolvedValue([meta]);
-    mockFetchTranscript.mockResolvedValue('transcript');
+    mockFetchTranscriptSegments.mockResolvedValue([{ text: 'transcript', offset: 0, duration: 5 }]);
     mockGenerateSummary.mockResolvedValue(
       makeSummaryResponse({ videoType: 'Tutorial', audience: 'Beginner', tags: ['ml', 'python'] }),
     );
@@ -254,7 +254,7 @@ describe('runIngestion', () => {
   it('omits channel line from frontmatter when channelTitle is absent', async () => {
     const meta = makeVideoMeta('vid1');
     mockFetchPlaylistVideos.mockResolvedValue([meta]);
-    mockFetchTranscript.mockResolvedValue('transcript');
+    mockFetchTranscriptSegments.mockResolvedValue([{ text: 'transcript', offset: 0, duration: 5 }]);
     mockGenerateSummary.mockResolvedValue(makeSummaryResponse());
 
     await runIngestion(PLAYLIST_URL, outputFolder, () => {});
@@ -267,7 +267,7 @@ describe('runIngestion', () => {
   it('always includes video-summary structural tag in frontmatter', async () => {
     const meta = makeVideoMeta('vid1');
     mockFetchPlaylistVideos.mockResolvedValue([meta]);
-    mockFetchTranscript.mockResolvedValue('transcript');
+    mockFetchTranscriptSegments.mockResolvedValue([{ text: 'transcript', offset: 0, duration: 5 }]);
     mockGenerateSummary.mockResolvedValue(makeSummaryResponse());
 
     await runIngestion(PLAYLIST_URL, outputFolder, () => {});
@@ -280,7 +280,7 @@ describe('runIngestion', () => {
   it('stores channel and tags from generateSummary in the index entry', async () => {
     const meta = { ...makeVideoMeta('vid1'), channelTitle: 'MyChannel' };
     mockFetchPlaylistVideos.mockResolvedValue([meta]);
-    mockFetchTranscript.mockResolvedValue('transcript');
+    mockFetchTranscriptSegments.mockResolvedValue([{ text: 'transcript', offset: 0, duration: 5 }]);
     mockGenerateSummary.mockResolvedValue(makeSummaryResponse({ tags: ['react', 'hooks'] }));
 
     await runIngestion(PLAYLIST_URL, outputFolder, () => {});
@@ -342,7 +342,7 @@ describe('runIngestion', () => {
 
   it('stamps 1-based playlistIndex on new videos based on playlist order', async () => {
     mockFetchPlaylistVideos.mockResolvedValue([makeVideoMeta('vid1'), makeVideoMeta('vid2'), makeVideoMeta('vid3')]);
-    mockFetchTranscript.mockResolvedValue('transcript');
+    mockFetchTranscriptSegments.mockResolvedValue([{ text: 'transcript', offset: 0, duration: 5 }]);
     mockGenerateSummary.mockResolvedValue(makeSummaryResponse());
 
     await runIngestion(PLAYLIST_URL, outputFolder, () => {});
@@ -406,7 +406,7 @@ describe('runIngestion', () => {
     // The second occurrence must be detected as already-processed within the same run.
     const meta = makeVideoMeta('vid1');
     mockFetchPlaylistVideos.mockResolvedValue([meta, meta]); // same video twice
-    mockFetchTranscript.mockResolvedValue('transcript');
+    mockFetchTranscriptSegments.mockResolvedValue([{ text: 'transcript', offset: 0, duration: 5 }]);
     mockGenerateSummary.mockResolvedValue(makeSummaryResponse());
 
     await runIngestion(PLAYLIST_URL, outputFolder, () => {});
@@ -425,7 +425,7 @@ describe('runIngestion', () => {
       addedToPlaylistAt: '2025-01-03T09:00:00Z',
     };
     mockFetchPlaylistVideos.mockResolvedValue([meta]);
-    mockFetchTranscript.mockResolvedValue('transcript');
+    mockFetchTranscriptSegments.mockResolvedValue([{ text: 'transcript', offset: 0, duration: 5 }]);
     mockGenerateSummary.mockResolvedValue(makeSummaryResponse());
 
     await runIngestion(PLAYLIST_URL, outputFolder, () => {});
@@ -492,7 +492,7 @@ describe('runIngestion', () => {
   it('emits cancelled (not done) and stops processing when AbortSignal fires between videos', async () => {
     const controller = new AbortController();
     mockFetchPlaylistVideos.mockResolvedValue([makeVideoMeta('vid1'), makeVideoMeta('vid2')]);
-    mockFetchTranscript.mockResolvedValue('transcript');
+    mockFetchTranscriptSegments.mockResolvedValue([{ text: 'transcript', offset: 0, duration: 5 }]);
     mockGenerateSummary.mockResolvedValue(makeSummaryResponse());
 
     const events: ProgressEvent[] = [];
@@ -516,7 +516,7 @@ describe('runIngestion', () => {
 
   it('stores tldr and takeaways from generateSummary in the index entry', async () => {
     mockFetchPlaylistVideos.mockResolvedValue([makeVideoMeta('vid1')]);
-    mockFetchTranscript.mockResolvedValue('transcript');
+    mockFetchTranscriptSegments.mockResolvedValue([{ text: 'transcript', offset: 0, duration: 5 }]);
     mockGenerateSummary.mockResolvedValue({
       summary: 'body',
       ratings: { usefulness: 4, depth: 4, originality: 4, recency: 4, completeness: 4 },
@@ -536,9 +536,26 @@ describe('runIngestion', () => {
     );
   });
 
+  it('fetches transcript segments and passes them with videoId to generateSummary', async () => {
+    mockFetchPlaylistVideos.mockResolvedValue([makeVideoMeta('vid1')]);
+    mockFetchTranscriptSegments.mockResolvedValue([{ text: 'hello world', offset: 0, duration: 5 }]);
+    mockDetectLanguage.mockReturnValue('en');
+    mockGenerateSummary.mockResolvedValue(makeSummaryResponse());
+
+    const events: ProgressEvent[] = [];
+    await runIngestion(PLAYLIST_URL, outputFolder, (e) => events.push(e));
+
+    expect(mockFetchTranscriptSegments).toHaveBeenCalledWith('vid1');
+    expect(mockGenerateSummary).toHaveBeenCalledWith(
+      [{ text: 'hello world', offset: 0, duration: 5 }],
+      'en',
+      'vid1',
+    );
+  });
+
   it('writes Quick Reference callout in markdown when tldr is returned', async () => {
     mockFetchPlaylistVideos.mockResolvedValue([makeVideoMeta('vid1')]);
-    mockFetchTranscript.mockResolvedValue('transcript');
+    mockFetchTranscriptSegments.mockResolvedValue([{ text: 'transcript', offset: 0, duration: 5 }]);
     mockGenerateSummary.mockResolvedValue({
       summary: 'body',
       ratings: { usefulness: 4, depth: 4, originality: 4, recency: 4, completeness: 4 },

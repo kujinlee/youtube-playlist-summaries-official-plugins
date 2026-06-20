@@ -1,5 +1,11 @@
 import { generateDeepDive, generateSummary, extractQuickView, fixSummary } from '../../lib/gemini';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import type { TranscriptSegment } from '../../lib/transcript-timestamps';
+
+const SEGS: TranscriptSegment[] = [
+  { text: 'intro', offset: 0, duration: 5 },
+  { text: 'core', offset: 135, duration: 10 },
+];
 
 jest.mock('@google/generative-ai', () => ({
   GoogleGenerativeAI: jest.fn(),
@@ -32,7 +38,7 @@ describe('generateSummary', () => {
       },
     });
 
-    const result = await generateSummary('transcript text here', 'en');
+    const result = await generateSummary(SEGS, 'en', 'vid123');
 
     expect(result.summary).toBe('A great video about machine learning');
     for (const value of Object.values(result.ratings)) {
@@ -52,7 +58,7 @@ describe('generateSummary', () => {
       },
     });
 
-    const result = await generateSummary('transcript', 'en');
+    const result = await generateSummary(SEGS, 'en', 'vid123');
 
     expect(result.overallScore).toBeCloseTo(3.0);
   });
@@ -61,7 +67,7 @@ describe('generateSummary', () => {
     const apiError = new Error('API_KEY_INVALID');
     mockGenerateContent.mockRejectedValueOnce(apiError);
 
-    const err = await generateSummary('transcript', 'en').catch((e) => e);
+    const err = await generateSummary(SEGS, 'en', 'vid123').catch((e) => e);
 
     expect(err.message).toMatch(/Gemini summary failed/);
     expect(err.cause).toBe(apiError);
@@ -70,7 +76,7 @@ describe('generateSummary', () => {
   it('throws when GEMINI_API_KEY is not set', async () => {
     delete process.env.GEMINI_API_KEY;
 
-    await expect(generateSummary('transcript', 'en')).rejects.toThrow('GEMINI_API_KEY is not set');
+    await expect(generateSummary(SEGS, 'en', 'vid123')).rejects.toThrow('GEMINI_API_KEY is not set');
   });
 
   it('includes Korean language instruction in prompt for ko language', async () => {
@@ -83,7 +89,7 @@ describe('generateSummary', () => {
       },
     });
 
-    await generateSummary('transcript', 'ko');
+    await generateSummary(SEGS, 'ko', 'vid123');
 
     const prompt = mockGenerateContent.mock.calls[0][0] as string;
     expect(prompt.toLowerCase()).toMatch(/korean|한국어/);
@@ -94,7 +100,7 @@ describe('generateSummary', () => {
       response: { text: () => 'not valid json at all' },
     });
 
-    await expect(generateSummary('transcript', 'en')).rejects.toThrow('Gemini summary failed');
+    await expect(generateSummary(SEGS, 'en', 'vid123')).rejects.toThrow('Gemini summary failed');
   });
 
   it('throws when model returns out-of-range rating values', async () => {
@@ -107,7 +113,7 @@ describe('generateSummary', () => {
       },
     });
 
-    await expect(generateSummary('transcript', 'en')).rejects.toThrow('Gemini summary failed');
+    await expect(generateSummary(SEGS, 'en', 'vid123')).rejects.toThrow('Gemini summary failed');
   });
 
   it('returns videoType and audience when Gemini includes them', async () => {
@@ -122,7 +128,7 @@ describe('generateSummary', () => {
       },
     });
 
-    const result = await generateSummary('transcript', 'en');
+    const result = await generateSummary(SEGS, 'en', 'vid123');
 
     expect(result.videoType).toBe('Tutorial');
     expect(result.audience).toBe('Advanced');
@@ -138,7 +144,7 @@ describe('generateSummary', () => {
       },
     });
 
-    const result = await generateSummary('transcript', 'en');
+    const result = await generateSummary(SEGS, 'en', 'vid123');
 
     expect(result.videoType).toBeUndefined();
     expect(result.audience).toBeUndefined();
@@ -155,7 +161,7 @@ describe('generateSummary', () => {
       },
     });
 
-    await expect(generateSummary('transcript', 'en')).rejects.toThrow('Gemini summary failed');
+    await expect(generateSummary(SEGS, 'en', 'vid123')).rejects.toThrow('Gemini summary failed');
   });
 
   it('includes videoType and audience in prompt instructions', async () => {
@@ -168,7 +174,7 @@ describe('generateSummary', () => {
       },
     });
 
-    await generateSummary('transcript', 'en');
+    await generateSummary(SEGS, 'en', 'vid123');
 
     const prompt = mockGenerateContent.mock.calls[0][0] as string;
     expect(prompt).toMatch(/videoType/);
@@ -186,7 +192,7 @@ describe('generateSummary', () => {
       },
     });
 
-    await expect(generateSummary('transcript', 'en')).rejects.toThrow('Gemini summary failed');
+    await expect(generateSummary(SEGS, 'en', 'vid123')).rejects.toThrow('Gemini summary failed');
   });
 
   it('returns tags array when Gemini includes them', async () => {
@@ -200,7 +206,7 @@ describe('generateSummary', () => {
       },
     });
 
-    const result = await generateSummary('transcript', 'en');
+    const result = await generateSummary(SEGS, 'en', 'vid123');
 
     expect(result.tags).toEqual(['machine-learning', 'neural-networks', 'backpropagation']);
   });
@@ -215,7 +221,7 @@ describe('generateSummary', () => {
       },
     });
 
-    const result = await generateSummary('transcript', 'en');
+    const result = await generateSummary(SEGS, 'en', 'vid123');
 
     expect(result.tags).toBeUndefined();
   });
@@ -230,7 +236,7 @@ describe('generateSummary', () => {
       },
     });
 
-    await generateSummary('transcript', 'en');
+    await generateSummary(SEGS, 'en', 'vid123');
 
     const prompt = mockGenerateContent.mock.calls[0][0] as string;
     expect(prompt).toMatch(/tags/);
@@ -251,7 +257,7 @@ describe('generateSummary — tldr and takeaways fields', () => {
         }),
       },
     });
-    const result = await generateSummary('transcript', 'en');
+    const result = await generateSummary(SEGS, 'en', 'vid123');
     expect(result.tldr).toBe('This video teaches AI agents.');
     expect(result.takeaways).toEqual(['Agents use tools', 'Memory matters']);
   });
@@ -265,9 +271,53 @@ describe('generateSummary — tldr and takeaways fields', () => {
         }),
       },
     });
-    const result = await generateSummary('transcript', 'en');
+    const result = await generateSummary(SEGS, 'en', 'vid123');
     expect(result.tldr).toBeUndefined();
     expect(result.takeaways).toBeUndefined();
+  });
+});
+
+describe('generateSummary — timestamps', () => {
+  it('sends an indexed transcript and asks for [[TS:i]] tokens', async () => {
+    mockGenerateContent.mockResolvedValueOnce({
+      response: { text: () => JSON.stringify({ summary: '## 1. A\nbody', ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 } }) },
+    });
+
+    await generateSummary(SEGS, 'en', 'vid123');
+
+    const prompt = mockGenerateContent.mock.calls[0][0] as string;
+    expect(prompt).toContain('[0 @0:00] intro');
+    expect(prompt).toContain('[1 @2:15] core');
+    expect(prompt).toContain('[[TS:');
+  });
+
+  it('resolves [[TS:i]] tokens in the returned summary into ▶ lines', async () => {
+    mockGenerateContent.mockResolvedValueOnce({
+      response: { text: () => JSON.stringify({
+        summary: '## 1. A\n[[TS:0]]\n\nbody a\n\n## Conclusion\n[[TS:1]]\n\nend',
+        ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
+      }) },
+    });
+
+    const result = await generateSummary(SEGS, 'en', 'vid123');
+
+    expect(result.summary).toContain('▶ [0:00–2:15](https://www.youtube.com/watch?v=vid123&t=0s)');
+    expect(result.summary).not.toMatch(/\[\[TS:/);
+  });
+
+  it('degrades to no timestamps when Gemini emits an out-of-range index', async () => {
+    mockGenerateContent.mockResolvedValueOnce({
+      response: { text: () => JSON.stringify({
+        summary: '## 1. A\n[[TS:9]]\n\nbody',
+        ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
+      }) },
+    });
+
+    const result = await generateSummary(SEGS, 'en', 'vid123');
+
+    expect(result.summary).not.toMatch(/▶|\[\[TS:/);
+    expect(result.summary).toContain('## 1. A');
+    expect(result.summary).toContain('body');
   });
 });
 
