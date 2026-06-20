@@ -28,7 +28,7 @@ Sequence/bundles below; `#8` is explicitly **someday** (vision, not near-term).
 
 | # | Item | Status |
 |---|------|--------|
-| 9 | **CorrectionsPanel hydration bug** — `<div>` overlay rendered inside `<tbody>` (pre-existing since the corrections feature, `10a21ee`). Fix: portal the overlay to `document.body`. | **pending** |
+| 9 | **CorrectionsPanel hydration bug** — `<div>` overlay rendered inside `<tbody>` (pre-existing since the corrections feature, `10a21ee`). Fix: portal the overlay to `document.body`. | **DONE** (`611a7bc`): `createPortal(<>…</>, document.body)` in `CorrectionsPanel.tsx` + regression test (renders inside a `<tbody>`, asserts the backdrop portals out to `<body>`). |
 | 10 | **Gemini retry-with-backoff** — was a hardening idea; became the real fix for the intermittent re-summarize failures. | **DONE** (`24a56c7`): `generateJson` helper retries malformed-JSON / transient API errors on `generateSummary`/`generateMagazineModel`/`extractQuickView`. Root cause was Gemini intermittently emitting invalid JSON despite JSON mode; unguarded `JSON.parse` killed the whole op. Verified 3/3 on #80. |
 | 11 | **Dev error logger** — record full error chain to a checkable place. | **DONE** (`32a90b5`): `lib/dev-logger.ts` → `logs/dev-errors.log` (full `caused by:` chain + stack) wired into html-doc/deep-dive/regenerate/ingest routes; `errorSummary` surfaces the full chain to the UI. |
 
