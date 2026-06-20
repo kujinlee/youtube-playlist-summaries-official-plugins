@@ -43,7 +43,9 @@ describe('renderMagazineHtml', () => {
   it('renders lead + bullets per section, zipped by index', () => {
     const html = renderMagazineHtml(parsed, model);
     expect(html).toContain('An LLM starts as raw internet text.');
-    expect(html).toContain('<strong>Source:</strong> Common Crawl.');
+    // Label is NOT rendered — only the plain bullet text (B1 design decision).
+    expect(html).toContain('<li>Common Crawl.</li>');
+    expect(html).not.toContain('<strong>Source:</strong>');
     expect(html).toContain('The Foundation');
   });
 
@@ -68,7 +70,9 @@ describe('renderMagazineHtml', () => {
     const html = renderMagazineHtml(parsed, evil);
     expect(html).not.toContain('<script>alert(1)</script>');
     expect(html).toContain('&lt;script&gt;');
+    // Label is not rendered; only the escaped bullet text appears.
     expect(html).toContain('x &amp; y');
+    expect(html).not.toContain('a&lt;b');  // label must not appear at all
   });
 
   it('HTML-escapes parsed meta — title, channel, tldr, takeaways (no injection)', () => {
@@ -117,6 +121,17 @@ describe('renderMagazineHtml', () => {
     expect(html).toContain('color:var(--ink)');
   });
 
+  it('#6 — lead is lighter-weight and slightly smaller (color unchanged)', () => {
+    const html = renderMagazineHtml(parsed, model);
+    // New values: font-weight:400, font-size:1.02rem (was 600 / 1.12rem).
+    expect(html).toContain('.lead{font-size:1.02rem');
+    expect(html).toContain('font-weight:400');
+    // Old values must NOT appear for the lead rule.
+    expect(html).not.toContain('.lead{font-size:1.12rem');
+    // Gold color must still be present.
+    expect(html).toContain('color:var(--gold)');
+  });
+
   it('ships warm Dark A values (all of them) and a system-dark media query', () => {
     const html = renderMagazineHtml(parsed, model);
     // Exhaustive + anchored: the full dark declaration list must appear inside the explicit
@@ -159,11 +174,13 @@ describe('renderMagazineHtml — section timestamps', () => {
     ],
   };
 
-  it('renders a clickable .ts anchor that opens in a new tab for sections with a timeRange', () => {
+  it('renders the timestamp as a parenthesized link at the end of the title (no ▶, muted)', () => {
     const html = renderMagazineHtml(withTs, model);
+    // Lives inside the <h2>, after the title, parenthesized — not its own prominent line.
     expect(html).toContain(
-      '<a class="ts" href="https://www.youtube.com/watch?v=vid123&amp;t=135s" target="_blank" rel="noopener noreferrer">▶ 2:15–5:30</a>',
+      '<h2>The Foundation <a class="ts" href="https://www.youtube.com/watch?v=vid123&amp;t=135s" target="_blank" rel="noopener noreferrer">(2:15–5:30)</a></h2>',
     );
+    expect(html).not.toContain('▶');
   });
 
   it('renders no .ts anchor for sections without a timeRange', () => {
@@ -181,7 +198,7 @@ describe('renderMagazineHtml — section timestamps', () => {
       ],
     };
     const html = renderMagazineHtml(evil, model);
-    expect(html).toContain('>▶ A &amp; B</a>');
+    expect(html).toContain('>(A &amp; B)</a>');
     expect(html).toContain('href="https://youtu.be/x?v=1&amp;t=0s"');
   });
 });

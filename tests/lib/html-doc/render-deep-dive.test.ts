@@ -113,6 +113,13 @@ describe('renderDeepDiveHtml', () => {
     expect(html).toContain('.dd h2 + p');
     // .dd h1 must be styled as the serif title (no .doc-title class — renderer emits plain <h1>).
     expect(html).toContain('.dd h1');
+    // #6 — Lead prominence: lighter weight + slightly smaller (color unchanged).
+    // Anchored to the .dd h2 + p rule — a bare `font-size:1.02rem` would also match .dd h4.
+    expect(html).toContain('.dd h2 + p{font-size:1.02rem');
+    expect(html).toContain('.dd h2 + p{font-size:1.02rem;line-height:1.55;color:var(--gold);font-weight:400');
+    // Old bold/large values must NOT appear for the lead rule.
+    expect(html).not.toContain('.dd h2 + p{font-size:1.12rem');
+    expect(html).not.toContain('.dd h2 + p{font-size:1.12rem;line-height:1.55;color:var(--gold);font-weight:600');
   });
 
   it('ships the magazine dark palette + system-dark media query', () => {

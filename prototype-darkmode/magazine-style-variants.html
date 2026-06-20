@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<!--
+  MOCKUP — Bundle A style refinement. Pick ONE lead style + ONE bullet style.
+  Real magazine CSS + the "Unconventional Applications" section from the screenshot.
+  Toggle light/dark top-right.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Magazine style variants</title>
+<script>(function(){try{var t=localStorage.getItem('html-doc-theme');if(t==='dark'||t==='light')document.documentElement.setAttribute('data-theme',t)}catch(e){}})();</script>
+<style>
+:root{--page:#eef0f3;--card:#fbf9f6;--ink:#2a2622;--meta:#8a8276;--rule:#ece7df;--ghost:#f0e7d6;--gold:#b07700;--goldline:#e0a800;--li:#4a463f;--foot:#9a917f;--shadow:0 1px 3px rgba(0,0,0,.08)}
+[data-theme="dark"]{--page:#1a1714;--card:#221d18;--ink:#e8e2d6;--meta:#9a9082;--rule:#332c24;--ghost:#2e2820;--gold:#e6b54d;--goldline:#e0a800;--li:#cfc8ba;--foot:#8a8174;--shadow:0 1px 3px rgba(0,0,0,.5)}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){--page:#1a1714;--card:#221d18;--ink:#e8e2d6;--meta:#9a9082;--rule:#332c24;--ghost:#2e2820;--gold:#e6b54d;--goldline:#e0a800;--li:#cfc8ba;--foot:#8a8174;--shadow:0 1px 3px rgba(0,0,0,.5)}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",'Apple SD Gothic Neo',Helvetica,Arial,sans-serif}
+.wrap{max-width:54rem;margin:0 auto;padding:2rem 1.5rem 5rem}
+#theme-toggle{position:fixed;top:1rem;right:1rem;width:2.4rem;height:2.4rem;border-radius:50%;border:1px solid rgba(128,128,128,.35);background:var(--card);color:var(--ink);font-size:1.1rem;cursor:pointer;box-shadow:var(--shadow);z-index:10}
+h1.page{font:700 1.4rem/1.3 -apple-system,sans-serif;margin:.2em 0 .1em}
+p.note{color:var(--meta);margin:0 0 2em;font-size:.92rem}
+.grouphd{font:700 .8rem/1 -apple-system,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:var(--gold);margin:2.4em 0 .9em;border-bottom:1px solid var(--rule);padding-bottom:.5em}
+.optlabel{font:700 .85rem/1 ui-monospace,monospace;color:var(--meta);margin:1.4em 0 .5em}
+
+/* magazine card + section (from render.ts) */
+.v4{background:var(--card);padding:1.6rem 2rem;box-shadow:var(--shadow);margin-bottom:.4em}
+section{position:relative;padding:1.2em 0 .6em}
+.ghost{font:700 4rem/1 Georgia,serif;color:var(--ghost);position:absolute;right:0;top:0;pointer-events:none;user-select:none}
+h2{font-family:Georgia,'Times New Roman',serif;font-size:1.3rem;margin:.1em 0 .35em;max-width:88%}
+.ts{display:inline-block;color:var(--gold);font-size:.8rem;font-weight:600;text-decoration:none;margin:.1em 0 .7em}
+ul{padding-left:1.15em;margin:0}
+li{margin:.4em 0;line-height:1.6;color:var(--li)}
+
+/* ---- LEAD VARIANTS ---- */
+.lead{font-size:1.12rem;line-height:1.5;color:var(--gold);margin:.2em 0 .8em;max-width:90%}
+.lead-bold{font-weight:600}                         /* L0 current */
+.lead-regular{font-weight:400}                      /* L1 */
+.lead-italic{font-weight:400;font-style:italic}     /* L2 */
+.lead-small{font-weight:400;font-size:1.02rem}      /* L3 */
+
+/* ---- BULLET VARIANTS ---- */
+li strong{color:var(--ink)}                          /* B0 label / B2 inline-bold */
+.b-italic em{font-style:italic;color:var(--ink);font-weight:600}   /* B3 inline-italic (emphasized) */
+.b-underline u{text-decoration:underline;text-decoration-color:var(--goldline);text-underline-offset:2px}  /* B4 */
+</style>
+</head>
+<body>
+<button id="theme-toggle" type="button" aria-label="Toggle light and dark theme" title="Toggle light/dark">🌙</button>
+<div class="wrap">
+  <h1 class="page">Magazine style variants — pick one lead + one bullet style</h1>
+  <p class="note">Same section, rendered different ways. The current shipped style is <b>L0 + B0</b>.</p>
+
+  <div class="grouphd">Lead style (the gold supplemental line)</div>
+
+  <div class="optlabel">L0 — current: bold gold (competes with the title)</div>
+  <div class="v4"><section>
+    <span class="ghost">4</span>
+    <h2>Unconventional Applications and Curated Knowledge Bundles</h2>
+    <a class="ts">▶ 5:59–11:08</a>
+    <p class="lead lead-bold">Notebook LM supports curated knowledge bundles from partners and enables unconventional uses, like Dungeon Masters querying game lore from manuals.</p>
+    <ul><li><strong>Curated Bundles:</strong> Featured notebooks, curated with partners like The Atlantic and The Economist, demonstrate Notebook LM's potential as a knowledge package.</li></ul>
+  </section></div>
+
+  <div class="optlabel">L1 — regular weight gold (recommended: subordinate to title)</div>
+  <div class="v4"><section>
+    <span class="ghost">4</span>
+    <h2>Unconventional Applications and Curated Knowledge Bundles</h2>
+    <a class="ts">▶ 5:59–11:08</a>
+    <p class="lead lead-regular">Notebook LM supports curated knowledge bundles from partners and enables unconventional uses, like Dungeon Masters querying game lore from manuals.</p>
+    <ul><li><strong>Curated Bundles:</strong> Featured notebooks, curated with partners like The Atlantic and The Economist, demonstrate Notebook LM's potential as a knowledge package.</li></ul>
+  </section></div>
+
+  <div class="optlabel">L2 — regular weight + italic gold</div>
+  <div class="v4"><section>
+    <span class="ghost">4</span>
+    <h2>Unconventional Applications and Curated Knowledge Bundles</h2>
+    <a class="ts">▶ 5:59–11:08</a>
+    <p class="lead lead-italic">Notebook LM supports curated knowledge bundles from partners and enables unconventional uses, like Dungeon Masters querying game lore from manuals.</p>
+    <ul><li><strong>Curated Bundles:</strong> Featured notebooks, curated with partners like The Atlantic and The Economist, demonstrate Notebook LM's potential as a knowledge package.</li></ul>
+  </section></div>
+
+  <div class="optlabel">L3 — regular weight, slightly smaller</div>
+  <div class="v4"><section>
+    <span class="ghost">4</span>
+    <h2>Unconventional Applications and Curated Knowledge Bundles</h2>
+    <a class="ts">▶ 5:59–11:08</a>
+    <p class="lead lead-small">Notebook LM supports curated knowledge bundles from partners and enables unconventional uses, like Dungeon Masters querying game lore from manuals.</p>
+    <ul><li><strong>Curated Bundles:</strong> Featured notebooks, curated with partners like The Atlantic and The Economist, demonstrate Notebook LM's potential as a knowledge package.</li></ul>
+  </section></div>
+
+  <div class="grouphd">Bullet style (lead held at L1 regular-gold for comparison)</div>
+
+  <div class="optlabel">B0 — current: bold "Label:" prefix (redundant with the sentence)</div>
+  <div class="v4"><section>
+    <h2>Unconventional Applications and Curated Knowledge Bundles</h2>
+    <p class="lead lead-regular">Notebook LM supports curated knowledge bundles from partners and enables unconventional uses.</p>
+    <ul>
+      <li><strong>Curated Bundles:</strong> Featured notebooks, curated with partners like The Atlantic and The Economist, demonstrate Notebook LM's potential as a knowledge package.</li>
+      <li><strong>Shakespeare Insights:</strong> The Shakespeare notebook highlights AI's ability to translate archaic language to modern English and perform thematic searches.</li>
+      <li><strong>RPG Players:</strong> Role-playing game players, such as Dungeon Masters, load game manuals and session audio.</li>
+    </ul>
+  </section></div>
+
+  <div class="optlabel">B1 — plain sentence, no emphasis</div>
+  <div class="v4"><section>
+    <h2>Unconventional Applications and Curated Knowledge Bundles</h2>
+    <p class="lead lead-regular">Notebook LM supports curated knowledge bundles from partners and enables unconventional uses.</p>
+    <ul>
+      <li>Featured notebooks, curated with partners like The Atlantic and The Economist, demonstrate Notebook LM's potential as a knowledge package.</li>
+      <li>The Shakespeare notebook highlights AI's ability to translate archaic language to modern English and perform thematic searches.</li>
+      <li>Role-playing game players, such as Dungeon Masters, load game manuals and session audio.</li>
+    </ul>
+  </section></div>
+
+  <div class="optlabel">B2 — key phrase bold inline (recommended)</div>
+  <div class="v4"><section>
+    <h2>Unconventional Applications and Curated Knowledge Bundles</h2>
+    <p class="lead lead-regular">Notebook LM supports curated knowledge bundles from partners and enables unconventional uses.</p>
+    <ul>
+      <li><strong>Featured notebooks</strong> curated with partners like The Atlantic and The Economist demonstrate Notebook LM's potential as a knowledge package.</li>
+      <li>The <strong>Shakespeare notebook</strong> highlights AI's ability to translate archaic language to modern English and perform thematic searches.</li>
+      <li><strong>Role-playing game players</strong>, such as Dungeon Masters, load game manuals and session audio.</li>
+    </ul>
+  </section></div>
+
+  <div class="optlabel">B3 — key phrase italic inline</div>
+  <div class="v4 b-italic"><section>
+    <h2>Unconventional Applications and Curated Knowledge Bundles</h2>
+    <p class="lead lead-regular">Notebook LM supports curated knowledge bundles from partners and enables unconventional uses.</p>
+    <ul>
+      <li><em>Featured notebooks</em> curated with partners like The Atlantic and The Economist demonstrate Notebook LM's potential as a knowledge package.</li>
+      <li>The <em>Shakespeare notebook</em> highlights AI's ability to translate archaic language to modern English and perform thematic searches.</li>
+      <li><em>Role-playing game players</em>, such as Dungeon Masters, load game manuals and session audio.</li>
+    </ul>
+  </section></div>
+
+  <div class="optlabel">B4 — key phrase underlined (gold underline) inline</div>
+  <div class="v4 b-underline"><section>
+    <h2>Unconventional Applications and Curated Knowledge Bundles</h2>
+    <p class="lead lead-regular">Notebook LM supports curated knowledge bundles from partners and enables unconventional uses.</p>
+    <ul>
+      <li><u>Featured notebooks</u> curated with partners like The Atlantic and The Economist demonstrate Notebook LM's potential as a knowledge package.</li>
+      <li>The <u>Shakespeare notebook</u> highlights AI's ability to translate archaic language to modern English and perform thematic searches.</li>
+      <li><u>Role-playing game players</u>, such as Dungeon Masters, load game manuals and session audio.</li>
+    </ul>
+  </section></div>
+
+</div>
+<script>(function(){var root=document.documentElement,btn=document.getElementById('theme-toggle');function sys(){return!!(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)}function eff(){var a=root.getAttribute('data-theme');return a==='dark'||a==='light'?a:(sys()?'dark':'light')}function icon(){btn.textContent=eff()==='dark'?'☀️':'🌙'}btn.addEventListener('click',function(){root.setAttribute('data-theme',eff()==='dark'?'light':'dark');try{localStorage.setItem('html-doc-theme',root.getAttribute('data-theme'))}catch(e){}icon()});icon()})();</script>
+</body>
+</html>

@@ -1,8 +1,8 @@
 import { CURRENT_DOC_VERSION, isOlder, needsResummarize } from '../../lib/doc-version';
 
 describe('doc-version', () => {
-  it('CURRENT_DOC_VERSION is 3.0 (fuller bullets + divider-normalized .md)', () => {
-    expect(CURRENT_DOC_VERSION).toEqual({ major: 3, minor: 0 });
+  it('CURRENT_DOC_VERSION is 3.2 (timestamp moved into the title, style/render change)', () => {
+    expect(CURRENT_DOC_VERSION).toEqual({ major: 3, minor: 2 });
   });
   it('isOlder compares major then minor', () => {
     expect(isOlder({ major: 1, minor: 0 }, { major: 2, minor: 0 })).toBe(true);

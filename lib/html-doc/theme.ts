@@ -1,6 +1,34 @@
 /** A flat set of CSS custom-property values, keyed by variable name (without the leading `--`). */
 export type Palette = Record<string, string>;
 
+/**
+ * Shared magazine palette prefix (keys: page, card, ink).
+ * Both renderers agree on these values and key order.
+ * render.ts inserts `meta` after `ink`; render-deep-dive.ts does not have `meta`.
+ * Split into pre/post to allow byte-identical insertion.
+ */
+export const BASE_PALETTE_LIGHT_PRE: Palette = {
+  page: '#eef0f3', card: '#fbf9f6', ink: '#2a2622',
+};
+/**
+ * Shared magazine palette suffix (keys: rule, ghost, gold, goldline, li, foot, shadow).
+ * Used by both renderers after any renderer-specific mid-keys.
+ */
+export const BASE_PALETTE_LIGHT_POST: Palette = {
+  rule: '#ece7df', ghost: '#f0e7d6', gold: '#b07700', goldline: '#e0a800',
+  li: '#4a463f', foot: '#9a917f', shadow: '0 1px 3px rgba(0,0,0,.08)',
+};
+
+/** Dark counterpart to BASE_PALETTE_LIGHT_PRE. */
+export const BASE_PALETTE_DARK_PRE: Palette = {
+  page: '#1a1714', card: '#221d18', ink: '#e8e2d6',
+};
+/** Dark counterpart to BASE_PALETTE_LIGHT_POST. */
+export const BASE_PALETTE_DARK_POST: Palette = {
+  rule: '#332c24', ghost: '#2e2820', gold: '#e6b54d', goldline: '#e0a800',
+  li: '#cfc8ba', foot: '#8a8174', shadow: '0 1px 3px rgba(0,0,0,.5)',
+};
+
 const STORAGE_KEY = 'html-doc-theme';
 
 /** Serialize a palette into a `--key:value;…` declaration list (no surrounding braces). */

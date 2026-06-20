@@ -1,5 +1,9 @@
 import MarkdownIt from 'markdown-it';
-import { themeStyleBlock, THEME_HEAD_SCRIPT, THEME_TOGGLE_BUTTON, THEME_TOGGLE_SCRIPT, type Palette } from './theme';
+import {
+  themeStyleBlock, THEME_HEAD_SCRIPT, THEME_TOGGLE_BUTTON, THEME_TOGGLE_SCRIPT,
+  BASE_PALETTE_LIGHT_PRE, BASE_PALETTE_LIGHT_POST, BASE_PALETTE_DARK_PRE, BASE_PALETTE_DARK_POST,
+  type Palette,
+} from './theme';
 
 // html:false → raw HTML in the (Gemini-generated) markdown is escaped, not passed through.
 // markdown-it's default validateLink already blocks javascript:/vbscript:/data: (non-image) hrefs.
@@ -18,16 +22,13 @@ function esc(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
+// render-deep-dive.ts has no `meta`; spread the shared pre/post and add the deep-dive-only keys.
 const LIGHT: Palette = {
-  page: '#eef0f3', card: '#fbf9f6', ink: '#2a2622', rule: '#ece7df',
-  ghost: '#f0e7d6', gold: '#b07700', goldline: '#e0a800', li: '#4a463f', foot: '#9a917f',
-  shadow: '0 1px 3px rgba(0,0,0,.08)', link: '#b07700', h3: '#5b463a', h4: '#6b5a4a',
+  ...BASE_PALETTE_LIGHT_PRE, ...BASE_PALETTE_LIGHT_POST, link: '#b07700', h3: '#5b463a', h4: '#6b5a4a',
   codebg: '#f1ebe0', preborder: '#e6ddcf', quote: '#8a8276',
 };
 const DARK: Palette = {
-  page: '#1a1714', card: '#221d18', ink: '#e8e2d6', rule: '#332c24',
-  ghost: '#2e2820', gold: '#e6b54d', goldline: '#e0a800', li: '#cfc8ba', foot: '#8a8174',
-  shadow: '0 1px 3px rgba(0,0,0,.5)', link: '#e6b54d', h3: '#d8cdb8', h4: '#c4b7a0',
+  ...BASE_PALETTE_DARK_PRE, ...BASE_PALETTE_DARK_POST, link: '#e6b54d', h3: '#d8cdb8', h4: '#c4b7a0',
   codebg: '#2a241c', preborder: '#332c24', quote: '#9a9082',
 };
 
@@ -43,7 +44,7 @@ html.theme-ready .dd{transition:background-color .2s,color .2s}
 .dd h2:first-of-type{border-top:0;padding-top:0;margin-top:.4em}
 .dd h2::before{content:counter(sec);position:absolute;right:0;top:.55em;font:700 4.2rem/1 Georgia,serif;
   color:var(--ghost);pointer-events:none;user-select:none}
-.dd h2 + p{font-size:1.12rem;line-height:1.55;color:var(--gold);font-weight:600;margin:.3em 0 .9em;max-width:92%}
+.dd h2 + p{font-size:1.02rem;line-height:1.55;color:var(--gold);font-weight:400;margin:.3em 0 .9em;max-width:92%}
 .dd h3{font-size:1.15rem;margin:1.6em 0 .3em;color:var(--h3)}
 .dd h4{font-size:1.02rem;margin:1.2em 0 .3em;color:var(--h4)}
 .dd p{margin:.75em 0;color:var(--ink)}
