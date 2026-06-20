@@ -7,6 +7,7 @@ import { assertOutputFolder, assertVideoId, upsertVideo, readIndex, writeIndex }
 import { slugify } from './slugify';
 import type { ProgressEvent, Video, VideoMeta, RatingValue, VideoType, Audience, GeminiSummaryResponse } from '../types';
 import { CURRENT_DOC_VERSION } from './doc-version';
+import { padDividers } from './markdown-dividers';
 
 const VALID_VIDEO_TYPES: VideoType[] = ['Tutorial', 'Analysis', 'Case Study', 'Framework', 'Demo', 'Interview'];
 const VALID_AUDIENCES: Audience[] = ['Beginner', 'Intermediate', 'Advanced'];
@@ -43,8 +44,9 @@ export async function writeSummaryDoc(input: SummaryDocInput): Promise<SummaryDo
   const segments = await fetchTranscriptSegments(videoId);
   const transcript = segments.map((s) => s.text).join(' '); // plain text for language detection only
   const language = detectLanguage(transcript);
-  const { summary, ratings, overallScore, videoType, audience, tags, tldr, takeaways } =
+  const { summary: rawSummary, ratings, overallScore, videoType, audience, tags, tldr, takeaways } =
     await generateSummary(segments, language, videoId);
+  const summary = padDividers(rawSummary);
 
   const structuralTags = ['video-summary', language];
   const allTags = [...structuralTags, ...(tags ?? [])];

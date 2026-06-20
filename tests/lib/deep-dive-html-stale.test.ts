@@ -6,9 +6,10 @@ import { runDeepDive } from '../../lib/deep-dive';
 jest.mock('../../lib/gemini', () => ({
   generateDeepDive: jest.fn().mockResolvedValue('# x\n\n### **1. New**\nnew body.'),
   generateDeepDiveFromTranscript: jest.fn(),
+  generateDeepDiveCombined: jest.fn().mockResolvedValue('# x\n\n### **1. New**\nnew body.'),
 }));
 jest.mock('../../lib/pdf', () => ({ generatePdf: jest.fn().mockResolvedValue(undefined) }));
-jest.mock('../../lib/youtube', () => ({ fetchTranscript: jest.fn() }));
+jest.mock('../../lib/youtube', () => ({ fetchTranscript: jest.fn().mockResolvedValue('transcript text') }));
 
 let dir: string;
 const VIDEO_ID = 'vidDD1234';

@@ -17,6 +17,7 @@ import * as pdf from '../../lib/pdf';
 
 const mockGenerateDeepDive = jest.mocked(gemini.generateDeepDive);
 const mockGenerateDeepDiveFromTranscript = jest.mocked(gemini.generateDeepDiveFromTranscript);
+const mockGenerateDeepDiveCombined = jest.mocked(gemini.generateDeepDiveCombined);
 const mockFetchTranscript = jest.mocked(youtube.fetchTranscript);
 const mockReadIndex = jest.mocked(indexStore.readIndex);
 const mockUpdateVideoFields = jest.mocked(indexStore.updateVideoFields);
@@ -72,6 +73,7 @@ describe('runDeepDive', () => {
     mockAssertVideoId.mockImplementation(() => {});
     mockReadIndex.mockReturnValue(makeIndex(outputFolder));
     mockUpdateVideoFields.mockImplementation(() => {});
+    mockGenerateDeepDiveCombined.mockResolvedValue('# Deep Dive (combined)\n\nCombined analysis here.');
     mockGenerateDeepDive.mockResolvedValue('# Deep Dive\n\nDetailed analysis here.');
     mockGenerateDeepDiveFromTranscript.mockResolvedValue('# Deep Dive (transcript)\n\nFallback analysis.');
     mockFetchTranscript.mockResolvedValue('transcript text');
@@ -99,39 +101,127 @@ describe('runDeepDive', () => {
     expect(stepEvents.length).toBeGreaterThan(0);
   });
 
-  it('calls generateDeepDive with youtube URL on happy path and does not fetch transcript', async () => {
+  // ── Routing rows ─────────────────────────────────────────────────────────────
+
+  it('row 1 — transcript + combined succeed → combined used, transcript-only and video NOT called', async () => {
     await runDeepDive(VIDEO_ID, outputFolder, () => {});
 
-    expect(mockGenerateDeepDive).toHaveBeenCalledWith(YOUTUBE_URL, 'en');
-    expect(mockFetchTranscript).not.toHaveBeenCalled();
+    expect(mockFetchTranscript).toHaveBeenCalledWith(VIDEO_ID);
+    expect(mockGenerateDeepDiveCombined).toHaveBeenCalled();
+    expect(mockGenerateDeepDiveFromTranscript).not.toHaveBeenCalled();
+    expect(mockGenerateDeepDive).not.toHaveBeenCalled();
   });
 
-  it('emits first step with current=1, total=3 on url success', async () => {
-    const events: ProgressEvent[] = [];
-    await runDeepDive(VIDEO_ID, outputFolder, (e) => events.push(e));
-
-    const firstStep = events.find((e) => e.type === 'step' && 'step' in e && e.step.includes('Generating deep-dive'));
-    expect(firstStep).toMatchObject({ type: 'step', current: 1, total: 3 });
-  });
-
-  it('on Gemini URL failure, fetches transcript and uses transcript-based deep-dive', async () => {
-    mockGenerateDeepDive.mockRejectedValueOnce(new Error('Gemini deep-dive failed: URL not supported'));
+  it('row 2 — combined fails, transcript-only succeeds → falls back to generateDeepDiveFromTranscript', async () => {
+    mockGenerateDeepDiveCombined.mockRejectedValueOnce(new Error('combined failed'));
 
     await runDeepDive(VIDEO_ID, outputFolder, () => {});
 
     expect(mockFetchTranscript).toHaveBeenCalledWith(VIDEO_ID);
+    expect(mockGenerateDeepDiveCombined).toHaveBeenCalled();
     expect(mockGenerateDeepDiveFromTranscript).toHaveBeenCalledWith('transcript text', 'en');
+    expect(mockGenerateDeepDive).not.toHaveBeenCalled();
   });
 
-  it('emits fallback step with current=2, total=3 when url fails', async () => {
-    mockGenerateDeepDive.mockRejectedValueOnce(new Error('Gemini deep-dive failed: URL not supported'));
+  it('row 3 — combined + transcript-only fail, video-only succeeds → falls back to generateDeepDive', async () => {
+    mockGenerateDeepDiveCombined.mockRejectedValueOnce(new Error('too large'));
+    mockGenerateDeepDiveFromTranscript.mockRejectedValueOnce(new Error('still too large'));
+
+    await runDeepDive(VIDEO_ID, outputFolder, () => {});
+
+    expect(mockGenerateDeepDive).toHaveBeenCalledWith(YOUTUBE_URL, 'en');
+  });
+
+  it('row 4 — all three generators fail → throws with all three error messages', async () => {
+    mockGenerateDeepDiveCombined.mockRejectedValueOnce(new Error('errCombined'));
+    mockGenerateDeepDiveFromTranscript.mockRejectedValueOnce(new Error('errTranscript'));
+    mockGenerateDeepDive.mockRejectedValueOnce(new Error('errVideo'));
+
+    let caught: Error | undefined;
+    try {
+      await runDeepDive(VIDEO_ID, outputFolder, () => {});
+    } catch (e) {
+      caught = e as Error;
+    }
+    expect(caught).toBeDefined();
+    expect(caught!.message).toContain('errCombined');
+    expect(caught!.message).toContain('errTranscript');
+    expect(caught!.message).toContain('errVideo');
+  });
+
+  it('row 5 — no transcript (fetch throws) → video-only used directly, combined not called', async () => {
+    mockFetchTranscript.mockRejectedValueOnce(new Error('no captions'));
+
+    await runDeepDive(VIDEO_ID, outputFolder, () => {});
+
+    expect(mockGenerateDeepDive).toHaveBeenCalledWith(YOUTUBE_URL, 'en');
+    expect(mockGenerateDeepDiveCombined).not.toHaveBeenCalled();
+    expect(mockGenerateDeepDiveFromTranscript).not.toHaveBeenCalled();
+  });
+
+  it('row 6 — no transcript and video-only also fails → throws with both errors', async () => {
+    mockFetchTranscript.mockRejectedValueOnce(new Error('no captions'));
+    mockGenerateDeepDive.mockRejectedValueOnce(new Error('video quota exceeded'));
+
+    let err: unknown;
+    try { await runDeepDive(VIDEO_ID, outputFolder, () => {}); } catch (e) { err = e; }
+    expect(String((err as Error).message)).toContain('no captions');
+    expect(String((err as Error).message)).toContain('video quota exceeded');
+  });
+
+  // ── Progress step assertions ──────────────────────────────────────────────────
+
+  it('emits transcript fetch step with current=1, total=3', async () => {
+    const events: ProgressEvent[] = [];
+    await runDeepDive(VIDEO_ID, outputFolder, (e) => events.push(e));
+
+    const transcriptStep = events.find(
+      (e) => e.type === 'step' && 'step' in e && e.step.includes('transcript'),
+    );
+    expect(transcriptStep).toMatchObject({ type: 'step', current: 1, total: 3 });
+  });
+
+  it('emits generation step with current=2, total=3', async () => {
+    const events: ProgressEvent[] = [];
+    await runDeepDive(VIDEO_ID, outputFolder, (e) => events.push(e));
+
+    const genStep = events.find(
+      (e) => e.type === 'step' && 'step' in e && e.step.includes('Generating'),
+    );
+    expect(genStep).toMatchObject({ type: 'step', current: 2, total: 3 });
+  });
+
+  it('emits PDF step with current=3, total=3', async () => {
+    const events: ProgressEvent[] = [];
+    await runDeepDive(VIDEO_ID, outputFolder, (e) => events.push(e));
+
+    const pdfStep = events.find((e) => e.type === 'step' && 'step' in e && e.step.includes('PDF'));
+    expect(pdfStep).toMatchObject({ type: 'step', current: 3, total: 3 });
+  });
+
+  it('surfaces the chosen mode in a step on the combined happy path', async () => {
+    const events: ProgressEvent[] = [];
+    await runDeepDive(VIDEO_ID, outputFolder, (e) => events.push(e));
+
+    const modeStep = events.find(
+      (e) => e.type === 'step' && 'step' in e && e.step.includes('(combined)'),
+    );
+    expect(modeStep).toBeDefined();
+  });
+
+  it('surfaces the chosen mode in a step on the no-transcript → video path', async () => {
+    mockFetchTranscript.mockRejectedValueOnce(new Error('no captions'));
 
     const events: ProgressEvent[] = [];
     await runDeepDive(VIDEO_ID, outputFolder, (e) => events.push(e));
 
-    const fallbackStep = events.find((e) => e.type === 'step' && 'step' in e && e.step.includes('fallback'));
-    expect(fallbackStep).toMatchObject({ type: 'step', current: 2, total: 3 });
+    const modeStep = events.find(
+      (e) => e.type === 'step' && 'step' in e && e.step.includes('(video)'),
+    );
+    expect(modeStep).toBeDefined();
   });
+
+  // ── Index update ──────────────────────────────────────────────────────────────
 
   it('updates index with deepDiveMd and deepDivePdf after success', async () => {
     await runDeepDive(VIDEO_ID, outputFolder, () => {});
@@ -146,34 +236,8 @@ describe('runDeepDive', () => {
     );
   });
 
-  it('throws when videoId is not found in the index', async () => {
-    mockReadIndex.mockReturnValue({ ...makeIndex(outputFolder), videos: [] });
-
-    await expect(runDeepDive(VIDEO_ID, outputFolder, () => {})).rejects.toThrow(
-      `Video not found in index: ${VIDEO_ID}`,
-    );
-  });
-
-  it('wraps both errors when URL and transcript generation both fail', async () => {
-    mockGenerateDeepDive.mockRejectedValueOnce(new Error('URL not supported'));
-    mockGenerateDeepDiveFromTranscript.mockRejectedValueOnce(new Error('Transcript too long'));
-
-    await expect(runDeepDive(VIDEO_ID, outputFolder, () => {})).rejects.toThrow(
-      'URL not supported',
-    );
-  });
-
-  it('preserves URL error when fetchTranscript fails during fallback', async () => {
-    mockGenerateDeepDive.mockRejectedValueOnce(new Error('URL quota exceeded'));
-    mockFetchTranscript.mockRejectedValueOnce(new Error('No captions available'));
-
-    await expect(runDeepDive(VIDEO_ID, outputFolder, () => {})).rejects.toThrow(
-      'URL quota exceeded',
-    );
-  });
-
-  it('updates index with deepDiveMd and deepDivePdf after fallback success', async () => {
-    mockGenerateDeepDive.mockRejectedValueOnce(new Error('Gemini deep-dive failed: URL not supported'));
+  it('updates index with deepDiveMd and deepDivePdf after transcript-only fallback', async () => {
+    mockGenerateDeepDiveCombined.mockRejectedValueOnce(new Error('combined failed'));
 
     await runDeepDive(VIDEO_ID, outputFolder, () => {});
 
@@ -187,13 +251,17 @@ describe('runDeepDive', () => {
     );
   });
 
-  it('emits PDF step with current=3, total=3', async () => {
-    const events: ProgressEvent[] = [];
-    await runDeepDive(VIDEO_ID, outputFolder, (e) => events.push(e));
+  // ── Guard rails ───────────────────────────────────────────────────────────────
 
-    const pdfStep = events.find((e) => e.type === 'step' && 'step' in e && e.step.includes('PDF'));
-    expect(pdfStep).toMatchObject({ type: 'step', current: 3, total: 3 });
+  it('throws when videoId is not found in the index', async () => {
+    mockReadIndex.mockReturnValue({ ...makeIndex(outputFolder), videos: [] });
+
+    await expect(runDeepDive(VIDEO_ID, outputFolder, () => {})).rejects.toThrow(
+      `Video not found in index: ${VIDEO_ID}`,
+    );
   });
+
+  // ── Written MD file ───────────────────────────────────────────────────────────
 
   it('written MD file has YAML frontmatter with video_id and lang', async () => {
     await runDeepDive(VIDEO_ID, outputFolder, () => {});
@@ -220,7 +288,7 @@ describe('runDeepDive', () => {
   });
 
   it('strips Gemini-generated leading H1 from the body', async () => {
-    mockGenerateDeepDive.mockResolvedValueOnce('# Gemini Generated Title\n\nActual body content.');
+    mockGenerateDeepDiveCombined.mockResolvedValueOnce('# Gemini Generated Title\n\nActual body content.');
 
     await runDeepDive(VIDEO_ID, outputFolder, () => {});
 

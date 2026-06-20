@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { generateDeepDive, generateDeepDiveFromTranscript } from './gemini';
+import { generateDeepDive, generateDeepDiveCombined, generateDeepDiveFromTranscript } from './gemini';
 import { fetchTranscript } from './youtube';
 import { generatePdf } from './pdf';
 import { assertOutputFolder, assertVideoId, readIndex, updateVideoFields } from './index-store';
@@ -30,33 +30,51 @@ export async function runDeepDive(
   }
 
   onProgress({ type: 'start' });
-  // Step numbering: always total=3. URL path uses steps 1 and 3; fallback uses all three.
-  onProgress({ type: 'step', videoId, step: 'Generating deep-dive analysis…', current: 1, total: 3 });
+  // Step 1: transcript fetch; Step 2: generation; Step 3: PDF.
+  onProgress({ type: 'step', videoId, step: 'Fetching transcript…', current: 1, total: 3 });
 
   let deepDiveRaw: string;
-  let mode: 'url' | 'transcript-fallback';
+  let mode: 'combined' | 'transcript' | 'video';
+  const errors: string[] = [];
+  const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-  try {
-    deepDiveRaw = await generateDeepDive(video.youtubeUrl, video.language);
-    mode = 'url';
-  } catch (urlErr) {
-    const urlMsg = urlErr instanceof Error ? urlErr.message : String(urlErr);
-    onProgress({ type: 'step', videoId, step: 'Fetching transcript for fallback…', current: 2, total: 3 });
-    let transcript: string;
+  let transcript: string | null = null;
+  try { transcript = await fetchTranscript(videoId); }
+  catch (e) { errors.push(`transcript fetch: ${msg(e)}`); }
+
+  onProgress({ type: 'step', videoId, step: 'Generating deep-dive analysis…', current: 2, total: 3 });
+
+  if (transcript !== null) {
     try {
-      transcript = await fetchTranscript(videoId);
-    } catch (fetchErr) {
-      const fetchMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
-      throw new Error(`Deep-dive failed. URL error: ${urlMsg}; transcript fetch error: ${fetchMsg}`, { cause: fetchErr });
+      deepDiveRaw = await generateDeepDiveCombined(video.youtubeUrl, transcript, video.language);
+      mode = 'combined';
+    } catch (e1) {
+      errors.push(`combined: ${msg(e1)}`);
+      try {
+        deepDiveRaw = await generateDeepDiveFromTranscript(transcript, video.language);
+        mode = 'transcript';
+      } catch (e2) {
+        errors.push(`transcript-only: ${msg(e2)}`);
+        try {
+          deepDiveRaw = await generateDeepDive(video.youtubeUrl, video.language);
+          mode = 'video';
+        } catch (e3) {
+          errors.push(`video-only: ${msg(e3)}`);
+          throw new Error(`Deep-dive failed on all paths. ${errors.join('; ')}`);
+        }
+      }
     }
+  } else {
     try {
-      deepDiveRaw = await generateDeepDiveFromTranscript(transcript, video.language);
-      mode = 'transcript-fallback';
-    } catch (transcriptErr) {
-      const transcriptMsg = transcriptErr instanceof Error ? transcriptErr.message : String(transcriptErr);
-      throw new Error(`Deep-dive failed on both paths. URL error: ${urlMsg}; Gemini transcript error: ${transcriptMsg}`, { cause: transcriptErr });
+      deepDiveRaw = await generateDeepDive(video.youtubeUrl, video.language);
+      mode = 'video';
+    } catch (e3) {
+      errors.push(`video-only: ${msg(e3)}`);
+      throw new Error(`Deep-dive failed. ${errors.join('; ')}`);
     }
   }
+
+  onProgress({ type: 'step', videoId, step: `Deep-dive generated (${mode})`, current: 2, total: 3 });
 
   // Derive filename from summary filename — keeps human-readable rank-slug naming consistent
   const base = (video.summaryMd ?? videoId).replace(/\.md$/, '');

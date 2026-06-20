@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<!--
+  MOCKUP — Fix 3: deep-dive HTML wearing the summary's "magazine" visual skin.
+  Goal: same publication look as renderMagazineHtml (serif headings, cream card, gold
+  leads, ghost numerals, dark-mode toggle) but the deep-dive keeps its FULL density —
+  real prose, sub-headings, lists, and an ASCII diagram. No content re-distillation.
+
+  Everything here is pure CSS over faithfully-rendered markdown:
+   - ghost numerals  -> CSS counter on h2 (no markup change)
+   - gold "lead"     -> `h2 + p` adjacent-sibling rule (first para after a section head)
+   - section rules   -> top border on each h2 except the first
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deep Dive — NotebookLM and the Future of Knowledge Curation</title>
+<script>(function(){try{var t=localStorage.getItem('html-doc-theme');if(t==='dark'||t==='light')document.documentElement.setAttribute('data-theme',t)}catch(e){}})();</script>
+<style>
+/* ---- magazine palette (shared with renderMagazineHtml), + deep-dive-only vars ---- */
+:root{--page:#eef0f3;--card:#fbf9f6;--ink:#2a2622;--meta:#8a8276;--rule:#ece7df;--ghost:#f0e7d6;--gold:#b07700;--goldline:#e0a800;--li:#4a463f;--foot:#9a917f;--shadow:0 1px 3px rgba(0,0,0,.08);--link:#b07700;--h3:#5b463a;--h4:#6b5a4a;--codebg:#f1ebe0;--preborder:#e6ddcf;--quote:#8a8276}
+[data-theme="light"]{--page:#eef0f3;--card:#fbf9f6;--ink:#2a2622;--meta:#8a8276;--rule:#ece7df;--ghost:#f0e7d6;--gold:#b07700;--goldline:#e0a800;--li:#4a463f;--foot:#9a917f;--shadow:0 1px 3px rgba(0,0,0,.08);--link:#b07700;--h3:#5b463a;--h4:#6b5a4a;--codebg:#f1ebe0;--preborder:#e6ddcf;--quote:#8a8276}
+[data-theme="dark"]{--page:#1a1714;--card:#221d18;--ink:#e8e2d6;--meta:#9a9082;--rule:#332c24;--ghost:#2e2820;--gold:#e6b54d;--goldline:#e0a800;--li:#cfc8ba;--foot:#8a8174;--shadow:0 1px 3px rgba(0,0,0,.5);--link:#e6b54d;--h3:#d8cdb8;--h4:#c4b7a0;--codebg:#2a241c;--preborder:#332c24;--quote:#9a9082}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){--page:#1a1714;--card:#221d18;--ink:#e8e2d6;--meta:#9a9082;--rule:#332c24;--ghost:#2e2820;--gold:#e6b54d;--goldline:#e0a800;--li:#cfc8ba;--foot:#8a8174;--shadow:0 1px 3px rgba(0,0,0,.5);--link:#e6b54d;--h3:#d8cdb8;--h4:#c4b7a0;--codebg:#2a241c;--preborder:#332c24;--quote:#9a9082}}
+html.theme-ready body,html.theme-ready #theme-toggle{transition:background-color .2s,color .2s}
+#theme-toggle{position:fixed;top:1rem;right:1rem;width:2.4rem;height:2.4rem;border-radius:50%;border:1px solid rgba(128,128,128,.35);background:var(--card);color:var(--ink);font-size:1.1rem;line-height:1;cursor:pointer;box-shadow:var(--shadow);display:flex;align-items:center;justify-content:center;z-index:10}
+
+/* ---- structural (magazine look, long-read density) ---- */
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--ink);line-height:1.7;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",'Apple SD Gothic Neo','Malgun Gothic',Helvetica,Arial,sans-serif}
+.dd{max-width:52rem;margin:0 auto;background:var(--card);padding:2.8rem 3rem 4rem;box-shadow:var(--shadow);counter-reset:sec}
+html.theme-ready .dd{transition:background-color .2s,color .2s}
+.doc-title{font-family:Georgia,'Nanum Myeongjo','Apple SD Gothic Neo','Times New Roman',serif;font-size:2rem;line-height:1.2;margin:0 0 .15em;color:var(--ink)}
+.doc-meta{color:var(--meta);font-size:.9rem;margin:0 0 2em}
+
+/* h2 = a deep-dive section. Ghost numeral via counter; gold top rule between sections. */
+.dd h2{counter-increment:sec;position:relative;font-family:Georgia,'Nanum Myeongjo',serif;font-size:1.5rem;
+  margin:2.2em 0 .35em;padding-top:1.5em;border-top:1px solid var(--rule);color:var(--ink)}
+.dd h2:first-of-type{border-top:0;padding-top:0;margin-top:.4em}
+.dd h2::before{content:counter(sec);position:absolute;right:0;top:.55em;font:700 4.2rem/1 Georgia,serif;
+  color:var(--ghost);pointer-events:none;user-select:none}
+/* first paragraph after a section head -> the gold "lead" */
+.dd h2 + p{font-size:1.12rem;line-height:1.55;color:var(--gold);font-weight:600;margin:.3em 0 .9em;max-width:92%}
+
+.dd h3{font-size:1.15rem;margin:1.6em 0 .3em;color:var(--h3)}
+.dd h4{font-size:1.02rem;margin:1.2em 0 .3em;color:var(--h4)}
+.dd p{margin:.75em 0;color:var(--ink)}
+.dd a{color:var(--link)}
+.dd ul,.dd ol{padding-left:1.4em;margin:.5em 0}
+.dd li{margin:.4em 0;color:var(--li);line-height:1.65}
+.dd strong{color:var(--ink);font-weight:700}
+.dd blockquote{border-left:3px solid var(--goldline);margin:1.1em 0;padding:.2em 1.1em;color:var(--quote);font-style:italic}
+.dd code{font-family:'SF Mono',Menlo,Monaco,Consolas,monospace;font-size:.88em;background:var(--codebg);padding:.1em .35em;border-radius:4px}
+.dd pre{background:var(--codebg);border:1px solid var(--preborder);border-radius:8px;padding:1em 1.2em;overflow:auto;line-height:1.4}
+.dd pre code{background:none;padding:0;font-size:.85em;white-space:pre}
+.dd footer{margin-top:2.6em;padding-top:1.2em;border-top:1px solid var(--rule);color:var(--foot);font-size:.8rem}
+@media print{body{background:#fff}.dd{box-shadow:none}#theme-toggle{display:none}
+  :root,:root:not([data-theme]),[data-theme="light"],[data-theme="dark"]{--page:#eef0f3;--card:#fbf9f6;--ink:#2a2622;--meta:#8a8276;--rule:#ece7df;--ghost:#f0e7d6;--gold:#b07700;--li:#4a463f;--foot:#9a917f}}
+</style>
+</head>
+<body>
+<button id="theme-toggle" type="button" aria-label="Toggle light and dark theme" title="Toggle light/dark">🌙</button>
+<article class="dd">
+  <h1 class="doc-title">NotebookLM and the Future of Knowledge Curation</h1>
+  <p class="doc-meta">Deep dive · Google DeepMind · 42:18</p>
+
+  <h2>The "Notebook" as a New Content Format</h2>
+  <p>Johnson's central claim is that the notebook — a curated collection of sources bundled with a conversational AI interface — is emerging as a genuinely new medium, on par with the article or the book rather than a feature bolted onto either.</p>
+  <p>The argument turns on a shift in what is being sold. A book delivers a finished, linear narrative; the author's sources are invisible and inert. A notebook instead delivers the <em>source material itself</em>, wrapped in an interface that lets the reader interrogate it — ask questions, request summaries, trace a claim back to its origin, or explore the corpus non-linearly. The author's role moves from "narrator of conclusions" to "curator of a queryable knowledge base."</p>
+  <p>Johnson grounds this in Google's <strong>"featured notebooks"</strong> pilot, run with publishing partners — <em>The Atlantic</em>, <em>The Economist</em>, and the Royal Society among them — each packaging high-quality sources and artifacts for a specific audience.</p>
+  <ul>
+    <li><strong>Financial analysis</strong> — a notebook bundling the earnings reports of large public companies, where an analyst can ask for a cross-company summary instead of reading each filing.</li>
+    <li><strong>Academic study</strong> — the complete works of Shakespeare paired with a modern-English translation layer, queryable line by line.</li>
+    <li><strong>Niche/hobby use</strong> — managing a Dungeons &amp; Dragons campaign, where the model generates narrative recaps of past sessions on demand.</li>
+  </ul>
+
+  <h2>Why the Interface Changes the Economics</h2>
+  <p>Bundling sources with a query layer collapses the distance between a reader's question and an authoritative answer, and that collapse is what gives the format its commercial pull.</p>
+  <p>In the old model, the cost of going from "I have a question" to "I have a grounded answer" was paid in reading time. The notebook shifts that cost to up-front curation: the publisher does the work of assembling and vetting the corpus once, and every reader thereafter pays only the marginal cost of a query. For high-value, reference-heavy domains — law, finance, medicine, scholarship — that trade is strongly favorable.</p>
+  <blockquote>"You're not buying the conclusions anymore. You're buying access to the questions you didn't know to ask." — paraphrasing Johnson, 18:40</blockquote>
+
+  <h2>The Curation-to-Query Pipeline</h2>
+  <p>Underneath the product is a repeatable pipeline that turns a pile of documents into an interrogable notebook — and understanding it explains both the format's strengths and its failure modes.</p>
+  <pre><code>Curated sources (vetted by publisher)
+  ↓ (ingest + chunk)
+Embedded knowledge base
+  ↓ (reader asks a question)
+Retrieval over the corpus
+  ↓ (grounded generation, with citations)
+Answer + narrative summary
+  ↓ (reader follows a citation)
+Back to the original source</code></pre>
+  <p>The citation loop at the bottom is the part Johnson stresses: because every generated answer can be traced back to a vetted source, the notebook inherits the <em>credibility</em> of its corpus rather than the open-ended unreliability of a general chatbot. The quality of the output is bounded by the quality of the curation — which is precisely why publishers, not the model, are the gatekeepers.</p>
+
+  <footer>Deep dive — generated from the video transcript, with on-screen visuals captured from the recording. Full source note lives in the <code>.md</code>.</footer>
+</article>
+<script>(function(){var root=document.documentElement,btn=document.getElementById('theme-toggle');if(!btn)return;function systemDark(){return!!(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)}function effective(){var a=root.getAttribute('data-theme');return a==='dark'||a==='light'?a:(systemDark()?'dark':'light')}function syncIcon(){btn.textContent=effective()==='dark'?'☀️':'🌙'}btn.addEventListener('click',function(){var next=effective()==='dark'?'light':'dark';root.setAttribute('data-theme',next);try{localStorage.setItem('html-doc-theme',next)}catch(e){}syncIcon()});syncIcon();requestAnimationFrame(function(){root.classList.add('theme-ready')})})();</script>
+</body>
+</html>
