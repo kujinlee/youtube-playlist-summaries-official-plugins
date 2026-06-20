@@ -1,17 +1,18 @@
 import type { ParsedSummary, MagazineModel } from './types';
-import { themeStyleBlock, THEME_HEAD_SCRIPT, THEME_TOGGLE_BUTTON, THEME_TOGGLE_SCRIPT, type Palette } from './theme';
+import {
+  themeStyleBlock, THEME_HEAD_SCRIPT, THEME_TOGGLE_BUTTON, THEME_TOGGLE_SCRIPT,
+  BASE_PALETTE_LIGHT_PRE, BASE_PALETTE_LIGHT_POST, BASE_PALETTE_DARK_PRE, BASE_PALETTE_DARK_POST,
+  type Palette,
+} from './theme';
 
 const SERIF = `Georgia, 'Nanum Myeongjo', 'Apple SD Gothic Neo', 'Times New Roman', serif`;
 
+// render.ts has `meta` between `ink` and `rule`; spread the shared pre/post around it.
 const LIGHT: Palette = {
-  page: '#eef0f3', card: '#fbf9f6', ink: '#2a2622', meta: '#8a8276', rule: '#ece7df',
-  ghost: '#f0e7d6', gold: '#b07700', goldline: '#e0a800', li: '#4a463f', foot: '#9a917f',
-  shadow: '0 1px 3px rgba(0,0,0,.08)',
+  ...BASE_PALETTE_LIGHT_PRE, meta: '#8a8276', ...BASE_PALETTE_LIGHT_POST,
 };
 const DARK: Palette = {
-  page: '#1a1714', card: '#221d18', ink: '#e8e2d6', meta: '#9a9082', rule: '#332c24',
-  ghost: '#2e2820', gold: '#e6b54d', goldline: '#e0a800', li: '#cfc8ba', foot: '#8a8174',
-  shadow: '0 1px 3px rgba(0,0,0,.5)',
+  ...BASE_PALETTE_DARK_PRE, meta: '#9a9082', ...BASE_PALETTE_DARK_POST,
 };
 
 const STRUCTURAL_CSS = `
@@ -30,7 +31,7 @@ html.theme-ready .v4{transition:background-color .2s,color .2s}
 section{position:relative;padding:1.6em 0 1.2em;border-bottom:1px solid var(--rule)}
 .ghost{font:700 4.5rem/1 Georgia,serif;color:var(--ghost);position:absolute;right:0;top:.1em;pointer-events:none;user-select:none}
 h2{font-family:${SERIF};font-size:1.3rem;margin:.1em 0 .35em}
-.lead{font-size:1.12rem;line-height:1.5;color:var(--gold);font-weight:600;margin:.2em 0 .8em;max-width:90%}
+.lead{font-size:1.02rem;line-height:1.5;color:var(--gold);font-weight:400;margin:.2em 0 .8em;max-width:90%}
 .ts{display:inline-block;color:var(--gold);font-size:.8rem;font-weight:600;text-decoration:none;margin:.1em 0 .7em}
 .ts:hover{text-decoration:underline}
 ul{padding-left:1.15em;margin:0}
@@ -68,7 +69,7 @@ export function renderMagazineHtml(parsed: ParsedSummary, model: MagazineModel):
         ? `<a class="ts" href="${esc(s.timeRange.url)}" target="_blank" rel="noopener noreferrer">▶ ${esc(s.timeRange.label)}</a>`
         : '';
       const bullets = m.bullets
-        .map((b) => `<li><strong>${esc(b.label)}:</strong> ${esc(b.text)}</li>`)
+        .map((b) => `<li>${esc(b.text)}</li>`)
         .join('');
       return `<section>
       ${ghost}

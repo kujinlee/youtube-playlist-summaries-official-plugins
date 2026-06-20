@@ -9,8 +9,8 @@ const base = {
 };
 const props = { outputFolder: '/o', baseOutputFolder: '/o', onDeepDive() {}, onArchive() {}, onEditCorrections() {}, onGenerateHtml() {}, onClose() {}, busy: false };
 
-it('shows a single "HTML doc" item — a direct link when current (html + docVersion 3.0)', () => {
-  render(<VideoMenu {...props} video={{ ...base, summaryHtml: 'htmls/base.html', docVersion: { major: 3, minor: 0 } } as any} />);
+it('shows a single "HTML doc" item — a direct link when current (html + docVersion 3.1)', () => {
+  render(<VideoMenu {...props} video={{ ...base, summaryHtml: 'htmls/base.html', docVersion: { major: 3, minor: 1 } } as any} />);
   const el = screen.getByRole('link', { name: /HTML doc/i });
   expect(el).toHaveAttribute('href', expect.stringContaining('/api/html/'));
   expect(screen.queryByText(/Generate HTML doc|Regenerate HTML doc|View HTML doc/)).toBeNull();
@@ -22,6 +22,6 @@ it('renders a button when stale (pre-feature: no docVersion)', () => {
 });
 
 it('disables the item while busy', () => {
-  render(<VideoMenu {...props} busy video={{ ...base, summaryHtml: 'htmls/base.html', docVersion: { major: 3, minor: 0 } } as any} />);
+  render(<VideoMenu {...props} busy video={{ ...base, summaryHtml: 'htmls/base.html', docVersion: { major: 3, minor: 1 } } as any} />);
   expect(screen.getByText(/HTML doc/i).closest('a,button,span')).toHaveAttribute('aria-disabled', 'true');
 });

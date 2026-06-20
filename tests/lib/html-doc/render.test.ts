@@ -43,7 +43,9 @@ describe('renderMagazineHtml', () => {
   it('renders lead + bullets per section, zipped by index', () => {
     const html = renderMagazineHtml(parsed, model);
     expect(html).toContain('An LLM starts as raw internet text.');
-    expect(html).toContain('<strong>Source:</strong> Common Crawl.');
+    // Label is NOT rendered — only the plain bullet text (B1 design decision).
+    expect(html).toContain('<li>Common Crawl.</li>');
+    expect(html).not.toContain('<strong>Source:</strong>');
     expect(html).toContain('The Foundation');
   });
 
@@ -68,7 +70,9 @@ describe('renderMagazineHtml', () => {
     const html = renderMagazineHtml(parsed, evil);
     expect(html).not.toContain('<script>alert(1)</script>');
     expect(html).toContain('&lt;script&gt;');
+    // Label is not rendered; only the escaped bullet text appears.
     expect(html).toContain('x &amp; y');
+    expect(html).not.toContain('a&lt;b');  // label must not appear at all
   });
 
   it('HTML-escapes parsed meta — title, channel, tldr, takeaways (no injection)', () => {
@@ -115,6 +119,17 @@ describe('renderMagazineHtml', () => {
     // Structural rules now reference the vars
     expect(html).toContain('background:var(--page)');
     expect(html).toContain('color:var(--ink)');
+  });
+
+  it('#6 — lead is lighter-weight and slightly smaller (color unchanged)', () => {
+    const html = renderMagazineHtml(parsed, model);
+    // New values: font-weight:400, font-size:1.02rem (was 600 / 1.12rem).
+    expect(html).toContain('.lead{font-size:1.02rem');
+    expect(html).toContain('font-weight:400');
+    // Old values must NOT appear for the lead rule.
+    expect(html).not.toContain('.lead{font-size:1.12rem');
+    // Gold color must still be present.
+    expect(html).toContain('color:var(--gold)');
   });
 
   it('ships warm Dark A values (all of them) and a system-dark media query', () => {
