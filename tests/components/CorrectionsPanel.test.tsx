@@ -53,6 +53,25 @@ describe('CorrectionsPanel', () => {
       expect(screen.getByRole('textbox')).toHaveValue('Fix Clawcode');
     });
 
+    it('portals the overlay to <body> so it is not an invalid <div> child of <tbody>', () => {
+      // Mirrors the real mount site: VideoRow renders this inside VideoList's <table><tbody>.
+      render(
+        <table><tbody data-testid="tbody"><tr><td>
+          <CorrectionsPanel
+            videoId={VIDEO_ID}
+            outputFolder={OUTPUT_FOLDER}
+            initialCorrections={undefined}
+            onClose={jest.fn()}
+            onSuccess={jest.fn()}
+          />
+        </td></tr></tbody></table>,
+      );
+      const backdrop = screen.getByTestId('corrections-backdrop');
+      // Portaled to document.body — NOT nested inside the table (which caused the hydration error).
+      expect(backdrop.closest('tbody')).toBeNull();
+      expect(backdrop.parentElement).toBe(document.body);
+    });
+
     it('textarea is empty when initialCorrections is undefined', () => {
       renderPanel();
       expect(screen.getByRole('textbox')).toHaveValue('');

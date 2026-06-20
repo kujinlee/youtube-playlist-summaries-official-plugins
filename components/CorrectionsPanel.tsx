@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { Video } from '@/types';
 
 type Patch = Partial<Pick<Video, 'corrections' | 'tldr' | 'takeaways' | 'summaryHtml'>>;
@@ -69,7 +70,12 @@ export default function CorrectionsPanel({
     }
   }
 
-  return (
+  // This is a fixed full-screen overlay. It is rendered from inside a <tbody> (VideoRow),
+  // where a bare <div> is invalid DOM (hydration error). Portal it to <body> so it escapes
+  // the table and nests validly.
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
     <>
       {/* Semi-transparent backdrop — no-op while regenerating */}
       <div
@@ -121,6 +127,7 @@ export default function CorrectionsPanel({
           </button>
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }
