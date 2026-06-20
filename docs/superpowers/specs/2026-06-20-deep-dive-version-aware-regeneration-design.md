@@ -74,11 +74,17 @@ ensureDeepDiveHtml(video, outputFolder, emit) → updated index fields
 
 - Executes the Staleness→action table above.
 - **Cascade** (unchanged order): `generateDeepDiveCombined` → `generateDeepDiveFromTranscript` → `generateDeepDive` (video-only).
-- **Timestamps:** the combined / transcript-only generators are fed `buildIndexedTranscript(segments)`
-  (the `[i @m:ss] text` form) and instructed to emit own-line `[[TS:i]]` tokens at section
-  boundaries. `renderDeepDiveHtml` gains a `resolveTranscriptTokens` pass (reusing the summary's
-  resolver verbatim) → `▶ [m:ss](youtube…&t=Xs)`.
-- **Video-only path:** no indexed transcript → no tokens → no `▶` lines; still stamped `{2,0}` (D5).
+- **Timestamps (resolved at generation, mirroring `generateSummary`):** the combined / transcript-only
+  generators are fed `buildIndexedTranscript(segments)` (the `[i @m:ss] text` form) + the segments +
+  `videoId`, instructed to emit own-line `[[TS:i]]` tokens at section boundaries, and call
+  `resolveTranscriptTokens(...)` **internally before returning** — so the markdown they return already
+  contains resolved `▶ [m:ss](youtube…&t=Xs)` lines (never raw tokens). `runDeepDive` writes that
+  resolved markdown to the `.md`. **`renderDeepDiveHtml` is unchanged** — it just renders markdown.
+  This is what keeps the minor-bump re-render network-free: the `.md` on disk already has `▶` lines,
+  so re-rendering needs no transcript fetch.
+- **Video-only path:** the video-only generator gets no segments → emits no tokens → no `▶` lines;
+  still stamped `{2,0}` (D5). `resolveTranscriptTokens` also strips any stray token so none ever
+  reaches the reader.
 - **Stamping discipline:** `deepDiveVersion` + `deepDiveHtml` are written **only on full success**,
   after the HTML is written, and the terminal `done` SSE event is emitted **after** the stamp — so a
   UI refetch never sees a stamped-but-stale state (mirrors the summary rule).
@@ -89,31 +95,35 @@ The deep-dive `.md` at `major: 2` gains own-line section timestamp tokens, resol
 
 **Filename convention:** unchanged — `<slug>-deep-dive.md` in the playlist output folder (existing).
 
-**`.md` body — annotated sample (transcript-grounded path):**
+**`.md` body — annotated sample (transcript-grounded path, AS STORED):**
 
 ```markdown
 ## How the transformer attends to context
 
-[[TS:14]]
+▶ [3:42–6:05](https://www.youtube.com/watch?v=<id>&t=222s)
 
 The model computes attention weights across all positions … (prose)
 
 ## Why positional encoding matters
 
-[[TS:37]]
+▶ [6:05–9:48](https://www.youtube.com/watch?v=<id>&t=365s)
 ```
 
-- `[[TS:i]]` = own-line token referencing transcript segment index `i`; emitted only on the
-  combined / transcript-only paths. On render it becomes `▶ [3:42](https://www.youtube.com/watch?v=<id>&t=222s)`.
-- Video-only path: identical structure **without** the `[[TS:i]]` lines.
+- Gemini emits own-line `[[TS:i]]` tokens; the generator resolves them to the `▶` lines above
+  **before** the `.md` is written (mirroring `generateSummary`). Raw `[[TS:i]]` tokens never appear
+  in the stored `.md`.
+- Video-only path: identical structure **without** the `▶` lines.
 
 **Rendered HTML:** unchanged magazine deep-dive skin (PR #3) plus the resolved `▶` anchors. Path
 stored in `deepDiveHtml` (new).
 
 ## 6. UI / UX
 
-- **Menu** (`VideoMenu.tsx`): "Deep Dive" → **"Deep Dive doc"**, mirroring "HTML doc": **link** when
-  current, **button** when stale/never-generated, **disabled + hourglass** when busy.
+- **Menu** (`VideoMenu.tsx`): the menu today has **two** deep-dive items — "Deep Dive" (regenerate
+  button) and "View Deep Dive HTML" (view link). **Unify them into one version-aware "Deep Dive doc"**
+  item (exactly as the summary unified into "HTML doc"): **link** when current, **button** when
+  stale/never-generated, **disabled + hourglass** when busy. "Open Deep Dive in Obsidian" and "View
+  Deep Dive PDF" remain separate items (mirrors the summary keeping its Obsidian/PDF items).
 - **Hourglass** (`VideoRow.tsx` / `page.tsx`): `busyVideoId` today tracks only the summary job. A row
   now shows the hourglass when **either** the summary or deep-dive job targets it. Each menu item
   disables only while *its own* job runs.
@@ -202,9 +212,12 @@ lib/
   deep-dive/
     version.ts                 (new — DeepDiveVersion, CURRENT, needsRegenerate)
     ensure.ts                  (new — ensureDeepDiveHtml orchestrator)
-  deep-dive.ts                 (cascade fed indexed transcript + token instruction)
+  deep-dive.ts                 (cascade fed segments; passes them to generators)
+  gemini.ts                    (deep-dive generators: indexed transcript + token instruction +
+                                resolveTranscriptTokens internally → return resolved ▶ markdown)
   html-doc/
-    render-deep-dive.ts        (+ resolveTranscriptTokens pass)
+    render-deep-dive.ts        (UNCHANGED — renders markdown that already has ▶ lines)
+    generate-deep-dive.ts      (runDeepDiveHtml + reRenderDeepDiveHtml; eager render writes html + path)
 app/api/videos/[id]/deep-dive/route.ts   (drives ensureDeepDiveHtml; guard + lock + grace)
 app/api/html/[id]/route.ts               (type=deep-dive reads stored deepDiveHtml)
 components/
