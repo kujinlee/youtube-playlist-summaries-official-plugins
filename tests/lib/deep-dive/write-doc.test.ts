@@ -113,6 +113,68 @@ describe('writeDeepDiveDoc', () => {
     expect(content).not.toContain('▶');
   });
 
+  it('3-tier cascade: combined + transcript-only throw → video-only succeeds, .md written, no ▶', async () => {
+    mockGenerateDeepDiveCombined.mockRejectedValueOnce(new Error('too large'));
+    mockGenerateDeepDiveFromTranscript.mockRejectedValueOnce(new Error('still too large'));
+
+    await writeDeepDiveDoc(makeVideo(), outputFolder, () => {});
+
+    expect(mockGenerateDeepDiveCombined).toHaveBeenCalled();
+    expect(mockGenerateDeepDiveFromTranscript).toHaveBeenCalledWith(SEGMENTS, 'en', VIDEO_ID);
+    expect(mockGenerateDeepDive).toHaveBeenCalledWith(YOUTUBE_URL, 'en');
+    const content = fs.readFileSync(path.join(outputFolder, `${SUMMARY_BASE}-deep-dive.md`), 'utf-8');
+    expect(content).toContain('Video-only analysis');
+    expect(content).not.toContain('▶');
+  });
+
+  it('strips a leading Gemini-generated H1 from the written body', async () => {
+    mockGenerateDeepDiveCombined.mockResolvedValueOnce('# Gemini Generated Title\n\nActual body content.');
+
+    await writeDeepDiveDoc(makeVideo(), outputFolder, () => {});
+
+    const content = fs.readFileSync(path.join(outputFolder, `${SUMMARY_BASE}-deep-dive.md`), 'utf-8');
+    expect(content).not.toContain('# Gemini Generated Title');
+    expect(content).toContain('Actual body content.');
+    // the standardized header is still added by the assembly
+    expect(content).toMatch(/^# Test Video \(Deep Dive\)$/m);
+  });
+
+  it('surfaces the chosen mode in a step event on the combined path', async () => {
+    const events: ProgressEvent[] = [];
+    await writeDeepDiveDoc(makeVideo(), outputFolder, (e) => events.push(e));
+
+    const modeStep = events.find(
+      (e) => e.type === 'step' && 'step' in e && e.step.includes('(combined)'),
+    );
+    expect(modeStep).toBeDefined();
+  });
+
+  it('surfaces the chosen mode in a step event on the video-only path', async () => {
+    mockFetchTranscriptSegments.mockRejectedValueOnce(new Error('no captions'));
+
+    const events: ProgressEvent[] = [];
+    await writeDeepDiveDoc(makeVideo(), outputFolder, (e) => events.push(e));
+
+    const modeStep = events.find(
+      (e) => e.type === 'step' && 'step' in e && e.step.includes('(video)'),
+    );
+    expect(modeStep).toBeDefined();
+  });
+
+  it('no transcript AND video-only also fails → throws with both error messages', async () => {
+    mockFetchTranscriptSegments.mockRejectedValueOnce(new Error('no captions'));
+    mockGenerateDeepDive.mockRejectedValueOnce(new Error('video quota exceeded'));
+
+    let caught: Error | undefined;
+    try { await writeDeepDiveDoc(makeVideo(), outputFolder, () => {}); }
+    catch (e) { caught = e as Error; }
+    expect(caught).toBeDefined();
+    expect(caught!.message).toContain('no captions');
+    expect(caught!.message).toContain('video quota exceeded');
+    // .md file must NOT be written on failure
+    expect(fs.existsSync(path.join(outputFolder, `${SUMMARY_BASE}-deep-dive.md`))).toBe(false);
+  });
+
   it('all paths fail → throws with all error messages', async () => {
     mockGenerateDeepDiveCombined.mockRejectedValueOnce(new Error('errCombined'));
     mockGenerateDeepDiveFromTranscript.mockRejectedValueOnce(new Error('errTranscript'));
