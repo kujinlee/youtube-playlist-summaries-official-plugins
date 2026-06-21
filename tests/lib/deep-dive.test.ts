@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import type { ProgressEvent, Video, PlaylistIndex } from '../../types';
+import type { TranscriptSegment } from '../../lib/transcript-timestamps';
 
 jest.mock('../../lib/gemini');
 jest.mock('../../lib/youtube');
@@ -18,7 +19,7 @@ import * as pdf from '../../lib/pdf';
 const mockGenerateDeepDive = jest.mocked(gemini.generateDeepDive);
 const mockGenerateDeepDiveFromTranscript = jest.mocked(gemini.generateDeepDiveFromTranscript);
 const mockGenerateDeepDiveCombined = jest.mocked(gemini.generateDeepDiveCombined);
-const mockFetchTranscript = jest.mocked(youtube.fetchTranscript);
+const mockFetchTranscriptSegments = jest.mocked(youtube.fetchTranscriptSegments);
 const mockReadIndex = jest.mocked(indexStore.readIndex);
 const mockUpdateVideoFields = jest.mocked(indexStore.updateVideoFields);
 const mockAssertOutputFolder = jest.mocked(indexStore.assertOutputFolder);
@@ -27,6 +28,9 @@ const mockGeneratePdf = jest.mocked(pdf.generatePdf);
 
 const VIDEO_ID = 'testVideoId1';
 const YOUTUBE_URL = `https://youtube.com/watch?v=${VIDEO_ID}`;
+const SEGMENTS: TranscriptSegment[] = [
+  { text: 'transcript text', offset: 0, duration: 30 },
+];
 
 function makeTempDir(): string {
   const dir = path.join(os.tmpdir(), `deep-dive-test-${crypto.randomUUID()}`);
@@ -76,7 +80,7 @@ describe('runDeepDive', () => {
     mockGenerateDeepDiveCombined.mockResolvedValue('# Deep Dive (combined)\n\nCombined analysis here.');
     mockGenerateDeepDive.mockResolvedValue('# Deep Dive\n\nDetailed analysis here.');
     mockGenerateDeepDiveFromTranscript.mockResolvedValue('# Deep Dive (transcript)\n\nFallback analysis.');
-    mockFetchTranscript.mockResolvedValue('transcript text');
+    mockFetchTranscriptSegments.mockResolvedValue(SEGMENTS);
     mockGeneratePdf.mockResolvedValue(undefined);
   });
 
@@ -106,7 +110,7 @@ describe('runDeepDive', () => {
   it('row 1 — transcript + combined succeed → combined used, transcript-only and video NOT called', async () => {
     await runDeepDive(VIDEO_ID, outputFolder, () => {});
 
-    expect(mockFetchTranscript).toHaveBeenCalledWith(VIDEO_ID);
+    expect(mockFetchTranscriptSegments).toHaveBeenCalledWith(VIDEO_ID);
     expect(mockGenerateDeepDiveCombined).toHaveBeenCalled();
     expect(mockGenerateDeepDiveFromTranscript).not.toHaveBeenCalled();
     expect(mockGenerateDeepDive).not.toHaveBeenCalled();
@@ -117,9 +121,9 @@ describe('runDeepDive', () => {
 
     await runDeepDive(VIDEO_ID, outputFolder, () => {});
 
-    expect(mockFetchTranscript).toHaveBeenCalledWith(VIDEO_ID);
+    expect(mockFetchTranscriptSegments).toHaveBeenCalledWith(VIDEO_ID);
     expect(mockGenerateDeepDiveCombined).toHaveBeenCalled();
-    expect(mockGenerateDeepDiveFromTranscript).toHaveBeenCalledWith('transcript text', 'en');
+    expect(mockGenerateDeepDiveFromTranscript).toHaveBeenCalledWith(SEGMENTS, 'en', VIDEO_ID);
     expect(mockGenerateDeepDive).not.toHaveBeenCalled();
   });
 
@@ -150,7 +154,7 @@ describe('runDeepDive', () => {
   });
 
   it('row 5 — no transcript (fetch throws) → video-only used directly, combined not called', async () => {
-    mockFetchTranscript.mockRejectedValueOnce(new Error('no captions'));
+    mockFetchTranscriptSegments.mockRejectedValueOnce(new Error('no captions'));
 
     await runDeepDive(VIDEO_ID, outputFolder, () => {});
 
@@ -160,7 +164,7 @@ describe('runDeepDive', () => {
   });
 
   it('row 6 — no transcript and video-only also fails → throws with both errors', async () => {
-    mockFetchTranscript.mockRejectedValueOnce(new Error('no captions'));
+    mockFetchTranscriptSegments.mockRejectedValueOnce(new Error('no captions'));
     mockGenerateDeepDive.mockRejectedValueOnce(new Error('video quota exceeded'));
 
     let err: unknown;
@@ -210,7 +214,7 @@ describe('runDeepDive', () => {
   });
 
   it('surfaces the chosen mode in a step on the no-transcript → video path', async () => {
-    mockFetchTranscript.mockRejectedValueOnce(new Error('no captions'));
+    mockFetchTranscriptSegments.mockRejectedValueOnce(new Error('no captions'));
 
     const events: ProgressEvent[] = [];
     await runDeepDive(VIDEO_ID, outputFolder, (e) => events.push(e));

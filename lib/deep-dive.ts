@@ -1,10 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 import { generateDeepDive, generateDeepDiveCombined, generateDeepDiveFromTranscript } from './gemini';
-import { fetchTranscript } from './youtube';
+import { fetchTranscriptSegments } from './youtube';
 import { generatePdf } from './pdf';
 import { assertOutputFolder, assertVideoId, readIndex, updateVideoFields } from './index-store';
 import type { ProgressEvent } from '../types';
+import type { TranscriptSegment } from './transcript-timestamps';
 
 function formatDuration(secs: number): string {
   const h = Math.floor(secs / 3600);
@@ -38,20 +39,20 @@ export async function runDeepDive(
   const errors: string[] = [];
   const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-  let transcript: string | null = null;
-  try { transcript = await fetchTranscript(videoId); }
+  let segments: TranscriptSegment[] | null = null;
+  try { segments = await fetchTranscriptSegments(videoId); }
   catch (e) { errors.push(`transcript fetch: ${msg(e)}`); }
 
   onProgress({ type: 'step', videoId, step: 'Generating deep-dive analysis…', current: 2, total: 3 });
 
-  if (transcript !== null) {
+  if (segments !== null) {
     try {
-      deepDiveRaw = await generateDeepDiveCombined(video.youtubeUrl, transcript, video.language);
+      deepDiveRaw = await generateDeepDiveCombined(video.youtubeUrl, segments, video.language, videoId);
       mode = 'combined';
     } catch (e1) {
       errors.push(`combined: ${msg(e1)}`);
       try {
-        deepDiveRaw = await generateDeepDiveFromTranscript(transcript, video.language);
+        deepDiveRaw = await generateDeepDiveFromTranscript(segments, video.language, videoId);
         mode = 'transcript';
       } catch (e2) {
         errors.push(`transcript-only: ${msg(e2)}`);

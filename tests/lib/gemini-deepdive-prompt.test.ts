@@ -14,3 +14,14 @@ it('combined mode instructs transcript grounding with video as visual support', 
   expect(p).toMatch(/ground.*transcript/i);
   expect(p).toMatch(/video.*(visual|on-screen)/i);
 });
+
+// M1: withTimestamps flag
+it('withTimestamps=true includes [[TS:<index>]] token instruction', () => {
+  const p = buildDeepDivePrompt('English', 'transcript', true);
+  expect(p).toContain('[[TS:<index>]]');
+});
+
+it('withTimestamps omitted (2-arg form) does NOT include [[TS:<index>]] instruction', () => {
+  const p = buildDeepDivePrompt('English', 'transcript');
+  expect(p).not.toContain('[[TS:<index>]]');
+});
