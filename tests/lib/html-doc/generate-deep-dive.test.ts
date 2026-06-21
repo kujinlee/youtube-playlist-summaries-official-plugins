@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { runDeepDiveHtml } from '../../../lib/html-doc/generate-deep-dive';
+import { runDeepDiveHtml, reRenderDeepDiveHtml } from '../../../lib/html-doc/generate-deep-dive';
 
 let dir: string;
 const VIDEO_ID = 'vidDD1234';
@@ -44,10 +44,11 @@ beforeEach(() => {
 });
 afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
 
-it('renders, atomic-writes htmls/<base>.html, and returns the HTML string', async () => {
-  const html = await runDeepDiveHtml(VIDEO_ID, dir);
+it('renders, atomic-writes htmls/<base>.html, and returns the HTML string and rel path', async () => {
+  const { html, htmlPath } = await runDeepDiveHtml(VIDEO_ID, dir);
   expect(html).toContain('A Title (Deep Dive)');
   expect(html).toContain('Body text.');
+  expect(htmlPath).toBe('htmls/a-title-deep-dive.html');
 
   const out = path.join(dir, 'htmls', 'a-title-deep-dive.html'); // no doubled -deep-dive
   expect(fs.existsSync(out)).toBe(true);
@@ -64,4 +65,25 @@ it('does NOT write the index (no deepDiveHtml field, summaryHtml untouched)', as
 it('throws when the video has no deepDiveMd', async () => {
   writeIndex([{ ...baseVideo(), deepDiveMd: null }]);
   await expect(runDeepDiveHtml(VIDEO_ID, dir)).rejects.toThrow(/deep dive|deepDiveMd/i);
+});
+
+it('reRenderDeepDiveHtml writes html from the .md and returns its rel path', () => {
+  // beforeEach already wrote a-title-deep-dive.md and the index with deepDiveMd set
+  const res = reRenderDeepDiveHtml(VIDEO_ID, dir);
+  expect(res.status).toBe('rerendered');
+  if (res.status !== 'rerendered') return; // narrow type
+  expect(res.htmlPath).toBe('htmls/a-title-deep-dive.html');
+  expect(fs.existsSync(path.join(dir, 'htmls/a-title-deep-dive.html'))).toBe(true);
+});
+
+it('reRenderDeepDiveHtml returns skipped-no-md when the video has no deepDiveMd', () => {
+  writeIndex([{ ...baseVideo(), deepDiveMd: null }]);
+  const res = reRenderDeepDiveHtml(VIDEO_ID, dir);
+  expect(res.status).toBe('skipped-no-md');
+});
+
+it('reRenderDeepDiveHtml returns skipped-not-eligible when the video is absent', () => {
+  writeIndex([]); // no matching video
+  const res = reRenderDeepDiveHtml(VIDEO_ID, dir);
+  expect(res.status).toBe('skipped-not-eligible');
 });

@@ -81,7 +81,7 @@ export async function GET(request: Request, { params }: Params) {
   } catch {
     // Not cached → render now, serve the in-memory bytes (H-2: no write-then-re-read).
     try {
-      const html = await runDeepDiveHtml(videoId, outputFolder);
+      const { html } = await runDeepDiveHtml(videoId, outputFolder);
       return serveHtml(html);
     } catch {
       return new Response(JSON.stringify({ error: 'failed to render deep dive html' }), { status: 500 });
