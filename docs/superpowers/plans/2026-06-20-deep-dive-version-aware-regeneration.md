@@ -293,7 +293,7 @@ Leave `generateDeepDive` (video-only) unchanged.
 
 - [ ] **Step 5: Run the new test + the existing deep-dive gemini tests**
 
-Run: `npx jest gemini-deepdive` — Expected: the new test PASSES. Existing `tests/lib/gemini-deepdive-combined.test.ts` / `gemini-deepdive-prompt.test.ts` will FAIL on the changed signatures — update those call sites to pass `segments`/`videoId` (they currently pass a string). Fix them to the new signature and keep their intent.
+Run: `npx jest gemini-deepdive` — Expected: the new test PASSES. Existing `tests/lib/gemini-deepdive-combined.test.ts` / `gemini-deepdive-prompt.test.ts` will FAIL on the changed signatures — update those call sites to pass `segments`/`videoId` (they currently pass a string). Fix them to the new signature and keep their intent. **(REVIEW M1)** Add an assertion that the timestamp instruction (`[[TS:<index>]]`) IS present when `withTimestamps` is on and ABSENT for the video-only path, so the instruction is regression-covered.
 
 - [ ] **Step 6: Run full gemini suite + typecheck**
 
@@ -406,9 +406,12 @@ export function reRenderDeepDiveHtml(videoId: string, outputFolder: string): Dee
 }
 ```
 
-- [ ] **Step 4: Update the serve route's call site for the new return shape**
+- [ ] **Step 4: Update ALL existing call sites + tests for the new return shape (REVIEW H4)**
 
-`app/api/html/[id]/route.ts:84` currently does `const html = await runDeepDiveHtml(...)`. Change to `const { html } = await runDeepDiveHtml(...)`. (Full serve-route change is Task 6; this keeps it compiling.)
+`runDeepDiveHtml` now returns `{ html, htmlPath }` instead of a string. Update:
+- `app/api/html/[id]/route.ts:84` → `const { html } = await runDeepDiveHtml(...)`.
+- `tests/lib/html-doc/generate-deep-dive.test.ts:48` → `const { html } = await runDeepDiveHtml(VIDEO_ID, dir)` (it currently asserts on the string return). Lines 58/66 call it without using the return, so they only need to keep passing.
+(Full serve-route change is Task 6; this keeps everything compiling + green.)
 
 - [ ] **Step 5: Run tests + typecheck**
 
@@ -501,16 +504,22 @@ export async function writeDeepDiveDoc(
   outputFolder: string,
   onProgress: (e: ProgressEvent) => void,
 ): Promise<{ deepDiveMd: string }> {
-  // 1. onProgress step 'Fetching transcript…'
+  // EVENTS (REVIEW H3): emit ONLY 'step' events here — NEVER 'start' and NEVER 'done'.
+  //   ensureDeepDiveHtml owns the terminal 'start'/'done'. Do NOT copy deep-dive.ts:32 ('start')
+  //   or deep-dive.ts:138 ('done') — copying them causes a double 'start' and a premature 'done'
+  //   that releases the job lock + races the version stamp.
+  // 1. onProgress({type:'step', …, step:'Fetching transcript…'})
   // 2. let segments via fetchTranscriptSegments(video.id) in try/catch → null on failure
   // 3. cascade: segments ? combined(url,segments,lang,id) catch → fromTranscript(segments,lang,id) catch → deepDive(url,lang)
   //            : deepDive(url,lang)   [collect errors[]; throw on all-fail]
-  // 4. strip leading H1, build frontmatter (copy lib/deep-dive.ts:88-123 verbatim), write <base>-deep-dive.md
-  // 5. invalidate htmls/<base>-deep-dive.html cache (copy lines 84-86)
-  // 6. return { deepDiveMd: `${base}-deep-dive.md` }
+  // 4. BASE NAME (REVIEW H1): base = (video.summaryMd ?? video.id).replace(/\.md$/,'')  — NOT deepDiveMd
+  //    (deepDiveMd is null on first generate). Matches lib/deep-dive.ts:80.
+  // 5. strip leading H1, build frontmatter (copy lib/deep-dive.ts:88-123 verbatim), write `${base}-deep-dive.md`
+  // 6. invalidate htmls/`${base}-deep-dive.html` cache (copy lines 84-86)
+  // 7. return { deepDiveMd: `${base}-deep-dive.md` }   // NO PDF (D6)
 }
 ```
-(Reproduce the frontmatter/meta/body assembly from `lib/deep-dive.ts` exactly — do not paraphrase it.)
+(Reproduce the frontmatter/meta/body assembly from `lib/deep-dive.ts` exactly — do not paraphrase it. Drop the PDF block at lines 128-131 and the trailing `done` at line 138.)
 
 - [ ] **Step 4: Run write-doc tests** — `npx jest deep-dive/write-doc` → PASS.
 
@@ -523,6 +532,7 @@ it('minor-stale: cheap re-render, no writeDeepDiveDoc call', async () => { /* st
 it('html missing but md current: renders from md, stamps', async () => {});
 it('already current: no-op, emits done, no writeDeepDiveDoc/render', async () => {});
 it('does NOT stamp when writeDeepDiveDoc throws', async () => {});
+it('does NOT stamp when render throws after a successful .md write', async () => {}); // REVIEW M5 / behavior #10
 it('emits done AFTER the version stamp', async () => { /* assert order via mock call sequence */ });
 ```
 
@@ -611,16 +621,21 @@ it('drives ensureDeepDiveHtml and returns a jobId', async () => {});
 
 - [ ] **Step 3: Rewrite the route** — copy `app/api/videos/[id]/html-doc/route.ts` verbatim, swapping `ensureHtmlDoc`→`ensureDeepDiveHtml`, import path `../../../../../lib/deep-dive/ensure`, and the logError tag `html-doc:`→`deep-dive:`. Keep the `getActiveJob`/`releaseJobLock`/`GRACE_MS` machinery identical.
 
-- [ ] **Step 4: Delete `lib/deep-dive.ts`** and fix any remaining imports (`grep -rn "from.*lib/deep-dive'" --include=*.ts` — should only be the old route, now rewritten).
+- [ ] **Step 4: Migrate the THREE existing `runDeepDive` test suites (REVIEW B1/B2 — these will red-fail the suite if skipped).** `grep -rln "lib/deep-dive'\|runDeepDive\b" tests/` confirms: `tests/lib/deep-dive.test.ts` (cascade truth-table), `tests/lib/deep-dive-html-stale.test.ts`, `tests/api/deep-dive.test.ts`.
+  - `tests/lib/deep-dive.test.ts` → rewrite as `tests/lib/deep-dive/write-doc.test.ts` coverage (Task 4) — port each cascade case (combined / transcript-only / video-only / all-fail) onto `writeDeepDiveDoc`. Delete the old file.
+  - `tests/lib/deep-dive-html-stale.test.ts` → its stale-cache intent is now covered by the orchestrator/serve behavior; port the still-relevant assertion into `tests/lib/deep-dive/ensure.test.ts` or the serve test (Task 6), then delete.
+  - `tests/api/deep-dive.test.ts` → re-mock `lib/deep-dive/ensure` (not `lib/deep-dive`); fold its stream-route + 400-validation cases into `tests/api/deep-dive-post.test.ts`. Delete the old file.
 
-- [ ] **Step 5: Run route tests + full suite + typecheck.** Expected: PASS; no new tsc errors; no dangling import of `runDeepDive`.
+- [ ] **Step 5: Delete `lib/deep-dive.ts`** and confirm NO dangling references: `grep -rn "from.*lib/deep-dive'\|runDeepDive\b" --include=*.ts --include=*.tsx .` must return only `lib/deep-dive/*` (the new module) — **include `tests/`**, not just app code.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Run route tests + full suite + typecheck.** Expected: PASS; no new tsc errors; no dangling import of `runDeepDive`.
+
+- [ ] **Step 7: Commit**
 
 ```bash
 git add app/api/videos/[id]/deep-dive/route.ts tests/api/deep-dive-post.test.ts
-git rm lib/deep-dive.ts
-git commit -m "feat(deep-dive): route drives ensureDeepDiveHtml (guard/lock/grace); drop runDeepDive"
+git rm lib/deep-dive.ts tests/lib/deep-dive.test.ts tests/lib/deep-dive-html-stale.test.ts tests/api/deep-dive.test.ts
+git commit -m "feat(deep-dive): route drives ensureDeepDiveHtml (guard/lock/grace); drop runDeepDive + migrate tests"
 ```
 
 ---

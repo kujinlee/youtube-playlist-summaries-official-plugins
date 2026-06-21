@@ -207,7 +207,7 @@ paths), so the **behaviors-table Codex adversarial review** is mandatory before 
 
 ```
 lib/
-  shared-version.ts            (new — extracted isOlder comparator)   [D9]
+  version.ts                   (new — extracted isOlder comparator)   [D9]
   doc-version.ts               (import isOlder from shared)
   deep-dive/
     version.ts                 (new — DeepDiveVersion, CURRENT, needsRegenerate)
