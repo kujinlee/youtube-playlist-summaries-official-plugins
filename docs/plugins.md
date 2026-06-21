@@ -107,6 +107,13 @@ in the review doc** so the Codex-specific pass can be re-attempted before merge 
 One quick check (frontier model sync via `scripts/codex-frontier-model.py --write-config`, a single
 re-run) is fine; beyond that, fall back. The Claude adversarial review satisfies the gate for proceeding.
 
+**Bounded wait — never passively wait on a background review.** When a Codex review is dispatched in
+the background, do NOT report "waiting on Codex" across turns or trust the completion ping (it can be
+bogus). Within ~2–3 minutes, **read the actual Codex task output file** (`.../tasks/<bgId>.output`).
+Treat as a hang → fall back immediately if: the file shows only `Thread ready` / `Turn started` with
+no findings, it hasn't grown, the run reports a usage limit / auth / HTTP error, or no output exists.
+The default posture is *make progress*, not *wait* — a Claude adversarial review is always available.
+
 ### Domain Terminology Stress-Test (Phase 1)
 
 | When | Use | Requires |
