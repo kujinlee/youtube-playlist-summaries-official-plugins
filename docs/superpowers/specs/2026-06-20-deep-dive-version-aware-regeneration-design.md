@@ -125,8 +125,10 @@ stored in `deepDiveHtml` (new).
   stale/never-generated, **disabled + hourglass** when busy. "Open Deep Dive in Obsidian" and "View
   Deep Dive PDF" remain separate items (mirrors the summary keeping its Obsidian/PDF items).
 - **Hourglass** (`VideoRow.tsx` / `page.tsx`): `busyVideoId` today tracks only the summary job. A row
-  now shows the hourglass when **either** the summary or deep-dive job targets it. Each menu item
-  disables only while *its own* job runs.
+  now shows the hourglass when **either** the summary or deep-dive job targets it. **Cross-disable
+  (decided 2026-06-20):** the single per-row `busy` flag is reused, so while either job runs, *both*
+  the "HTML doc" and "Deep Dive doc" items show ⏳/disabled. A video rarely has both jobs at once, so
+  the UX cost is negligible and this avoids threading a second busy signal through the component chain.
 - **Status bar** (`DeepDiveStatusBar.tsx`): non-blocking bottom bar, enhanced to show a **"View Deep
   Dive doc"** link on `done` (today shows only "✓ Done"), with the same auto-close delay as the
   summary bar.

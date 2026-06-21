@@ -206,6 +206,13 @@ describe('generateDeepDiveFromTranscript with timestamps', () => {
     expect(out).toContain('▶ [0:00–1:00](https://www.youtube.com/watch?v=vid123&t=0s)');
     expect(out).not.toContain('[[TS:');
   });
+
+  it('respects the ko language (REVIEW M3) — prompt says respond in Korean', async () => {
+    const { generateDeepDiveFromTranscript } = await import('../../lib/gemini');
+    await generateDeepDiveFromTranscript(SEGMENTS, 'ko', 'vid123');
+    const prompt = generateContent.mock.calls[0][0] as string;
+    expect(prompt).toContain('Korean (한국어)');
+  });
 });
 ```
 
@@ -646,7 +653,7 @@ git commit -m "feat(deep-dive): route drives ensureDeepDiveHtml (guard/lock/grac
 - Modify: `app/api/html/[id]/route.ts:70-89`
 - Test: `tests/api/html-serve.test.ts` (or extend the existing serve test)
 
-**Behavior:** `type=deep-dive` serves the stored `video.deepDiveHtml` (guarded), falling back to lazy `runDeepDiveHtml` when it's null (old data).
+**Behavior:** `type=deep-dive` serves the stored `video.deepDiveHtml` (guarded), falling back to lazy `runDeepDiveHtml` when it's null (old data). **(REVIEW M4 — accepted)** the fallback does NOT stamp `deepDiveHtml`, so an old, never-regenerated deep-dive re-renders on every view — a conscious graceful-degradation choice (self-heals once the user clicks "Deep Dive doc" to regenerate).
 
 - [ ] **Step 1: Write failing tests:**
 ```ts
