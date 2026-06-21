@@ -380,7 +380,7 @@ test.describe('playlist viewer', () => {
   });
 
   // Behavior 7: archive action greys row
-  test('archive: row gets opacity-50 class when Show Archive is checked', async ({ page }) => {
+  test('archive: archived row cells get opacity-40 when Show Archive is checked', async ({ page }) => {
     const video = makeVideo({ id: 'vid-1' });
     const archivedVideo = makeVideo({ id: 'vid-1', archived: true });
 
@@ -413,9 +413,12 @@ test.describe('playlist viewer', () => {
     await page.getByRole('button', { name: 'Menu' }).click();
     await page.getByRole('button', { name: 'Archive' }).click();
 
-    // Row should have opacity-40 class (greyed) — table row, not list item
-    const row = page.locator('tbody tr').first();
-    await expect(row).toHaveClass(/opacity-40/);
+    // Dimming is applied per-CELL, not on the <tr>: opacity on the row creates a CSS
+    // stacking context that makes the absolutely-positioned VideoMenu unclickable
+    // (see components/VideoRow.tsx `cellDim`). The first <td> is the expand-toggle
+    // (undimmed); assert on a dimmed content cell — the Overall score cell.
+    const scoreCell = page.locator('tbody tr').first().locator('td[aria-label="Overall"]');
+    await expect(scoreCell).toHaveClass(/opacity-40/);
 
     // Verify archive POST body contained correct action and outputFolder
     expect(archiveRequestBody).toMatchObject({ action: 'archive', outputFolder: OUTPUT_FOLDER });
