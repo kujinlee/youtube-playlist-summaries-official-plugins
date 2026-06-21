@@ -97,7 +97,15 @@ auto-derived block — do not hand-edit the slug). When dispatching the Codex re
 pass it explicitly: `codex … -m "$(python3 scripts/codex-frontier-model.py)"`. Either way the
 model is derived from OpenAI's live model list, so it tracks new frontier releases automatically.
 
-**Fallback** (codex not installed): Claude review only; note the gap in the review doc and flag for manual adversarial check before merging.
+**Fallback — Codex unavailable for ANY reason → never block; auto-fall back to a Claude adversarial review.**
+"Unavailable" covers: not installed, **usage/rate limit hit**, auth failure, HTTP 400/5xx, a hung or
+timed-out run (e.g. a `task` that starts a turn but emits no findings), or any other error. The rule
+(set 2026-06-20): **do not wait, pause the phase, or burn time retrying** — immediately run a rigorous
+**Claude** adversarial review in Codex's place (a fresh subagent with full file access and an explicit
+adversarial mandate), save it to the normal `docs/reviews/...-review.md` path, and **note the Codex gap
+in the review doc** so the Codex-specific pass can be re-attempted before merge if/when access returns.
+One quick check (frontier model sync via `scripts/codex-frontier-model.py --write-config`, a single
+re-run) is fine; beyond that, fall back. The Claude adversarial review satisfies the gate for proceeding.
 
 ### Domain Terminology Stress-Test (Phase 1)
 
