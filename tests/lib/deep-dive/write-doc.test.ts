@@ -113,6 +113,22 @@ describe('writeDeepDiveDoc', () => {
     expect(content).not.toContain('▶');
   });
 
+  it('video-only path when transcript is empty ([]): no combined/transcript call, no ▶', async () => {
+    // An empty (but non-null) transcript means there is no content to index — it must take
+    // the video-only path, not waste a combined call on an empty <transcript> and emit a
+    // ▶-less doc via the transcript path.
+    mockFetchTranscriptSegments.mockResolvedValueOnce([]);
+
+    await writeDeepDiveDoc(makeVideo(), outputFolder, () => {});
+
+    expect(mockGenerateDeepDive).toHaveBeenCalledWith(YOUTUBE_URL, 'en');
+    expect(mockGenerateDeepDiveCombined).not.toHaveBeenCalled();
+    expect(mockGenerateDeepDiveFromTranscript).not.toHaveBeenCalled();
+    const content = fs.readFileSync(path.join(outputFolder, `${SUMMARY_BASE}-deep-dive.md`), 'utf-8');
+    expect(content).toContain('Video-only analysis');
+    expect(content).not.toContain('▶');
+  });
+
   it('3-tier cascade: combined + transcript-only throw → video-only succeeds, .md written, no ▶', async () => {
     mockGenerateDeepDiveCombined.mockRejectedValueOnce(new Error('too large'));
     mockGenerateDeepDiveFromTranscript.mockRejectedValueOnce(new Error('still too large'));

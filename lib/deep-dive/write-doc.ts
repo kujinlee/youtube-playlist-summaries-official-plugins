@@ -44,7 +44,10 @@ export async function writeDeepDiveDoc(
 
   onProgress({ type: 'step', videoId, step: 'Generating deep-dive analysis…', current: 2, total: 3 });
 
-  if (segments !== null) {
+  // An empty (but non-null) transcript has no content to index — treat it like a missing
+  // transcript and fall to the video-only path, rather than wasting a combined call on an
+  // empty <transcript> and producing a ▶-less doc via the transcript path.
+  if (segments !== null && segments.length > 0) {
     try {
       deepDiveRaw = await generateDeepDiveCombined(video.youtubeUrl, segments, video.language, videoId);
       mode = 'combined';
