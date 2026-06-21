@@ -7,6 +7,7 @@ interface DeepDiveStatusBarProps {
   videoId: string;
   jobId: string;
   title: string;
+  viewUrl: string;
   onClose: () => void;
 }
 
@@ -17,7 +18,7 @@ type BarState =
 
 const LOG_PANEL_ID = 'deep-dive-log-panel';
 
-export default function DeepDiveStatusBar({ videoId, jobId, title, onClose }: DeepDiveStatusBarProps) {
+export default function DeepDiveStatusBar({ videoId, jobId, title, viewUrl, onClose }: DeepDiveStatusBarProps) {
   const [state, setState] = useState<BarState>({ status: 'running', progress: 0, step: '' });
   const [logsOpen, setLogsOpen] = useState(false);
   const onCloseRef = useRef(onClose);
@@ -50,7 +51,7 @@ export default function DeepDiveStatusBar({ videoId, jobId, title, onClose }: De
         terminal = true;
         setState({ status: 'done' });
         es.close();
-        doneTimer = setTimeout(() => onCloseRef.current(), 3000);
+        doneTimer = setTimeout(() => onCloseRef.current(), 4000);
       } else if (data.type === 'error') {
         terminal = true;
         setState({ status: 'error', message: data.log, log: data.log });
@@ -70,7 +71,7 @@ export default function DeepDiveStatusBar({ videoId, jobId, title, onClose }: De
       es.close();
       if (doneTimer) clearTimeout(doneTimer);
     };
-  }, [videoId, jobId]);
+  }, [videoId, jobId, viewUrl]);
 
   const progress = state.status === 'running' ? state.progress : state.status === 'done' ? 100 : 0;
   const barColor = state.status === 'error' ? 'bg-red-500' : 'bg-blue-500';
@@ -106,7 +107,14 @@ export default function DeepDiveStatusBar({ videoId, jobId, title, onClose }: De
             <span className="text-xs text-zinc-400 flex-shrink-0 max-w-48 truncate">{state.step}</span>
           )}
           {state.status === 'done' && (
-            <span className="text-xs text-green-400 flex-shrink-0">✓ Done</span>
+            <a
+              href={viewUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-amber-400 underline flex-shrink-0"
+            >
+              View Deep Dive doc ↗
+            </a>
           )}
           {state.status === 'error' && (
             <span role="alert" className="text-xs text-red-400 flex-shrink-0 max-w-48 truncate">

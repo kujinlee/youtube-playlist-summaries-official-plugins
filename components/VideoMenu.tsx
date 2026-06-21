@@ -3,6 +3,7 @@
 import type { Video } from '@/types';
 import AskGeminiMenuItem from './AskGeminiMenuItem';
 import { CURRENT_DOC_VERSION, isOlder } from '@/lib/doc-version';
+import { CURRENT_DEEP_DIVE_VERSION } from '@/lib/deep-dive/version';
 
 interface VideoMenuProps {
   video: Video;
@@ -95,9 +96,13 @@ export default function VideoMenu({ video, outputFolder, baseOutputFolder, onDee
         })()}
       </li>
       <li role="none">
-        <button type="button" onClick={() => { onDeepDive(video.id); onClose(); }} className={itemClass}>
-          Deep Dive
-        </button>
+        {(() => {
+          const current = !!video.deepDiveHtml && !isOlder(video.deepDiveVersion ?? { major: 1, minor: 0 }, CURRENT_DEEP_DIVE_VERSION);
+          if (busy) return <span aria-disabled="true" className={disabledClass}>Deep Dive doc <span aria-hidden="true">⏳</span></span>;
+          return current
+            ? <a href={deepDiveHtmlHref} onClick={onClose} target="_blank" rel="noopener noreferrer" className={itemClass}>Deep Dive doc</a>
+            : <button type="button" onClick={() => { onDeepDive(video.id); onClose(); }} className={itemClass}>Deep Dive doc</button>;
+        })()}
       </li>
       <li role="none">
         {hasDeepDive ? (
@@ -131,17 +136,6 @@ export default function VideoMenu({ video, outputFolder, baseOutputFolder, onDee
           >
             View Deep Dive PDF
           </a>
-        )}
-      </li>
-      <li role="none">
-        {hasDeepDive ? (
-          <a href={deepDiveHtmlHref} onClick={onClose} target="_blank" rel="noopener noreferrer" className={itemClass}>
-            View Deep Dive HTML
-          </a>
-        ) : (
-          <span aria-disabled="true" className={disabledClass}>
-            View Deep Dive HTML
-          </span>
         )}
       </li>
       {video.summaryMd && (

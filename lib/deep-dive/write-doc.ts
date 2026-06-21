@@ -1,10 +1,9 @@
 import fs from 'fs';
 import path from 'path';
-import { generateDeepDive, generateDeepDiveCombined, generateDeepDiveFromTranscript } from './gemini';
-import { fetchTranscript } from './youtube';
-import { generatePdf } from './pdf';
-import { assertOutputFolder, assertVideoId, readIndex, updateVideoFields } from './index-store';
-import type { ProgressEvent } from '../types';
+import { generateDeepDive, generateDeepDiveCombined, generateDeepDiveFromTranscript } from '../gemini';
+import { fetchTranscriptSegments } from '../youtube';
+import type { ProgressEvent, Video } from '../../types';
+import type { TranscriptSegment } from '../transcript-timestamps';
 
 function formatDuration(secs: number): string {
   const h = Math.floor(secs / 3600);
@@ -15,22 +14,23 @@ function formatDuration(secs: number): string {
     : `${m}:${String(s).padStart(2, '0')}`;
 }
 
-export async function runDeepDive(
-  videoId: string,
+/**
+ * Run the Gemini deep-dive cascade and write ONLY the deep-dive `.md` file for `video`.
+ *
+ * Mirrors the summary's writeSummaryDoc: it produces the source artifact (the markdown)
+ * and nothing else — it does NOT call updateVideoFields (the orchestrator persists
+ * atomically after the HTML render succeeds) and it does NOT generate a PDF.
+ *
+ * Emits ONLY `step` progress events — never `start`/`done` (those are the orchestrator's).
+ * Throws if every generation path fails (the .md is not written in that case).
+ */
+export async function writeDeepDiveDoc(
+  video: Video,
   outputFolder: string,
   onProgress: (event: ProgressEvent) => void,
-): Promise<void> {
-  assertOutputFolder(outputFolder);
-  assertVideoId(videoId);
+): Promise<{ deepDiveMd: string }> {
+  const videoId = video.id;
 
-  const index = readIndex(outputFolder);
-  const video = index.videos.find((v) => v.id === videoId);
-  if (!video) {
-    throw new Error(`Video not found in index: ${videoId}`);
-  }
-
-  onProgress({ type: 'start' });
-  // Step 1: transcript fetch; Step 2: generation; Step 3: PDF.
   onProgress({ type: 'step', videoId, step: 'Fetching transcript…', current: 1, total: 3 });
 
   let deepDiveRaw: string;
@@ -38,20 +38,20 @@ export async function runDeepDive(
   const errors: string[] = [];
   const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-  let transcript: string | null = null;
-  try { transcript = await fetchTranscript(videoId); }
+  let segments: TranscriptSegment[] | null = null;
+  try { segments = await fetchTranscriptSegments(videoId); }
   catch (e) { errors.push(`transcript fetch: ${msg(e)}`); }
 
   onProgress({ type: 'step', videoId, step: 'Generating deep-dive analysis…', current: 2, total: 3 });
 
-  if (transcript !== null) {
+  if (segments !== null) {
     try {
-      deepDiveRaw = await generateDeepDiveCombined(video.youtubeUrl, transcript, video.language);
+      deepDiveRaw = await generateDeepDiveCombined(video.youtubeUrl, segments, video.language, videoId);
       mode = 'combined';
     } catch (e1) {
       errors.push(`combined: ${msg(e1)}`);
       try {
-        deepDiveRaw = await generateDeepDiveFromTranscript(transcript, video.language);
+        deepDiveRaw = await generateDeepDiveFromTranscript(segments, video.language, videoId);
         mode = 'transcript';
       } catch (e2) {
         errors.push(`transcript-only: ${msg(e2)}`);
@@ -77,9 +77,8 @@ export async function runDeepDive(
   onProgress({ type: 'step', videoId, step: `Deep-dive generated (${mode})`, current: 2, total: 3 });
 
   // Derive filename from summary filename — keeps human-readable rank-slug naming consistent
-  const base = (video.summaryMd ?? videoId).replace(/\.md$/, '');
+  const base = (video.summaryMd ?? video.id).replace(/\.md$/, '');
   const mdFilename = `${base}-deep-dive.md`;
-  const pdfFilename = `pdfs/${base}-deep-dive.pdf`;
 
   // Invalidate any cached deep-dive HTML so the next view regenerates from the new markdown.
   try { fs.unlinkSync(path.join(outputFolder, 'htmls', `${base}-deep-dive.html`)); }
@@ -125,15 +124,5 @@ export async function runDeepDive(
   const mdPath = path.join(outputFolder, mdFilename);
   await fs.promises.writeFile(mdPath, mdContent, 'utf-8');
 
-  await fs.promises.mkdir(path.join(outputFolder, 'pdfs'), { recursive: true });
-  const pdfPath = path.join(outputFolder, pdfFilename);
-  onProgress({ type: 'step', videoId, step: 'Generating PDF…', current: 3, total: 3 });
-  await generatePdf(mdContent, pdfPath);
-
-  updateVideoFields(outputFolder, videoId, {
-    deepDiveMd: mdFilename,
-    deepDivePdf: pdfFilename,
-  });
-
-  onProgress({ type: 'done' });
+  return { deepDiveMd: mdFilename };
 }

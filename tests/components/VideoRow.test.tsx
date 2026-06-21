@@ -360,19 +360,19 @@ describe('VideoRow', () => {
     describe('Deep Dive', () => {
       it('is a button (not a link)', () => {
         openMenu();
-        const btn = screen.getByRole('button', { name: /^deep dive$/i });
+        const btn = screen.getByRole('button', { name: /deep dive doc/i });
         expect(btn.tagName).toBe('BUTTON');
       });
 
       it('is enabled regardless of deepDiveMd value', () => {
         openMenu({ deepDiveMd: null });
-        expect(screen.getByRole('button', { name: /^deep dive$/i })).toBeEnabled();
+        expect(screen.getByRole('button', { name: /deep dive doc/i })).toBeEnabled();
       });
 
       it('calls onDeepDive with video id when clicked', () => {
         const onDeepDive = jest.fn();
         openMenu({}, onDeepDive);
-        fireEvent.click(screen.getByRole('button', { name: /^deep dive$/i }));
+        fireEvent.click(screen.getByRole('button', { name: /deep dive doc/i }));
         expect(onDeepDive).toHaveBeenCalledWith('abc123');
       });
     });
@@ -474,7 +474,7 @@ describe('VideoRow', () => {
         expect(screen.getByRole('link', { name: /watch on youtube/i })).toBeInTheDocument();
         expect(screen.getByRole('link', { name: /open in obsidian/i })).toBeInTheDocument();
         expect(screen.getByRole('link', { name: /view summary pdf/i })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: /^deep dive$/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /deep dive doc/i })).toBeInTheDocument();
         expect(
           screen.getByRole('link', { name: /open deep dive in obsidian/i }),
         ).toBeInTheDocument();

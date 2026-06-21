@@ -67,24 +67,24 @@ export async function GET(request: Request, { params }: Params) {
     }
   }
 
-  // type === 'deep-dive' — lazy generate-on-view, no index field.
+  // type === 'deep-dive'
+  const stored = video.deepDiveHtml;
+  if (stored) {
+    const bad = guard(stored);
+    if (bad) return bad;
+    try {
+      return serveHtml(fs.readFileSync(path.resolve(outputFolder, stored), 'utf-8'));
+    } catch {
+      /* fall through to lazy render */
+    }
+  }
   if (!video.deepDiveMd) {
     return new Response(JSON.stringify({ error: 'deep dive not available' }), { status: 404 });
   }
-  const base = video.deepDiveMd.replace(/\.md$/, '');
-  const rel = `htmls/${base}.html`;
-  const bad = guard(rel);
-  if (bad) return bad;
-
   try {
-    return serveHtml(fs.readFileSync(path.resolve(outputFolder, rel), 'utf-8')); // cached
+    const { html } = await runDeepDiveHtml(videoId, outputFolder);
+    return serveHtml(html);
   } catch {
-    // Not cached → render now, serve the in-memory bytes (H-2: no write-then-re-read).
-    try {
-      const html = await runDeepDiveHtml(videoId, outputFolder);
-      return serveHtml(html);
-    } catch {
-      return new Response(JSON.stringify({ error: 'failed to render deep dive html' }), { status: 500 });
-    }
+    return new Response(JSON.stringify({ error: 'failed to render deep dive html' }), { status: 500 });
   }
 }

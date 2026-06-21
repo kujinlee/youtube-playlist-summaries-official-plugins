@@ -97,7 +97,22 @@ auto-derived block — do not hand-edit the slug). When dispatching the Codex re
 pass it explicitly: `codex … -m "$(python3 scripts/codex-frontier-model.py)"`. Either way the
 model is derived from OpenAI's live model list, so it tracks new frontier releases automatically.
 
-**Fallback** (codex not installed): Claude review only; note the gap in the review doc and flag for manual adversarial check before merging.
+**Fallback — Codex unavailable for ANY reason → never block; auto-fall back to a Claude adversarial review.**
+"Unavailable" covers: not installed, **usage/rate limit hit**, auth failure, HTTP 400/5xx, a hung or
+timed-out run (e.g. a `task` that starts a turn but emits no findings), or any other error. The rule
+(set 2026-06-20): **do not wait, pause the phase, or burn time retrying** — immediately run a rigorous
+**Claude** adversarial review in Codex's place (a fresh subagent with full file access and an explicit
+adversarial mandate), save it to the normal `docs/reviews/...-review.md` path, and **note the Codex gap
+in the review doc** so the Codex-specific pass can be re-attempted before merge if/when access returns.
+One quick check (frontier model sync via `scripts/codex-frontier-model.py --write-config`, a single
+re-run) is fine; beyond that, fall back. The Claude adversarial review satisfies the gate for proceeding.
+
+**Bounded wait — never passively wait on a background review.** When a Codex review is dispatched in
+the background, do NOT report "waiting on Codex" across turns or trust the completion ping (it can be
+bogus). Within ~2–3 minutes, **read the actual Codex task output file** (`.../tasks/<bgId>.output`).
+Treat as a hang → fall back immediately if: the file shows only `Thread ready` / `Turn started` with
+no findings, it hasn't grown, the run reports a usage limit / auth / HTTP error, or no output exists.
+The default posture is *make progress*, not *wait* — a Claude adversarial review is always available.
 
 ### Domain Terminology Stress-Test (Phase 1)
 

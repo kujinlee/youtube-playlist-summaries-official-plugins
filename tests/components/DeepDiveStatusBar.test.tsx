@@ -56,10 +56,11 @@ afterEach(() => {
 const VIDEO_ID = 'abc123';
 const JOB_ID = 'job-xyz';
 const TITLE = 'Test Video Title';
+const DEFAULT_VIEW_URL = `/api/html/${encodeURIComponent(VIDEO_ID)}?outputFolder=${encodeURIComponent('/tmp/out')}&type=deep-dive`;
 
-function renderBar(onClose = jest.fn(), title = TITLE) {
+function renderBar(onClose = jest.fn(), title = TITLE, viewUrl = DEFAULT_VIEW_URL) {
   return render(
-    <DeepDiveStatusBar videoId={VIDEO_ID} jobId={JOB_ID} title={title} onClose={onClose} />,
+    <DeepDiveStatusBar videoId={VIDEO_ID} jobId={JOB_ID} title={title} viewUrl={viewUrl} onClose={onClose} />,
   );
 }
 
@@ -140,10 +141,49 @@ describe('DeepDiveStatusBar — step events', () => {
 });
 
 describe('DeepDiveStatusBar — done state', () => {
-  it('shows a success message on done event', () => {
+  it('shows "View Deep Dive doc" link on done event', () => {
     renderBar();
     sendEvent({ type: 'done' });
-    expect(screen.getByText(/done|✓/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /view deep dive doc/i })).toBeInTheDocument();
+  });
+
+  it('link href contains the passed viewUrl', () => {
+    renderBar();
+    sendEvent({ type: 'done' });
+    const link = screen.getByRole('link', { name: /view deep dive doc/i });
+    expect(link).toHaveAttribute('href', DEFAULT_VIEW_URL);
+  });
+
+  it('link href has type=deep-dive param', () => {
+    renderBar();
+    sendEvent({ type: 'done' });
+    const link = screen.getByRole('link', { name: /view deep dive doc/i });
+    const href = link.getAttribute('href') ?? '';
+    const url = new URL(href, 'http://x');
+    expect(url.searchParams.get('type')).toBe('deep-dive');
+  });
+
+  it('link href has truthy outputFolder param', () => {
+    renderBar();
+    sendEvent({ type: 'done' });
+    const link = screen.getByRole('link', { name: /view deep dive doc/i });
+    const href = link.getAttribute('href') ?? '';
+    const url = new URL(href, 'http://x');
+    expect(url.searchParams.get('outputFolder')).toBeTruthy();
+  });
+
+  it('link opens in a new tab with safe rel', () => {
+    renderBar();
+    sendEvent({ type: 'done' });
+    const link = screen.getByRole('link', { name: /view deep dive doc/i });
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  it('does NOT show old ✓ Done span on done event', () => {
+    renderBar();
+    sendEvent({ type: 'done' });
+    expect(screen.queryByText('✓ Done')).toBeNull();
   });
 
   it('progress bar reaches 100% on done event', () => {
@@ -163,32 +203,32 @@ describe('DeepDiveStatusBar — done state', () => {
     sendEvent({ type: 'done' });
     sendEvent({ type: 'step', step: 'Late step', current: 1, total: 2 });
     expect(screen.queryByText('Late step')).toBeNull();
-    expect(screen.getByText(/✓/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /view deep dive doc/i })).toBeInTheDocument();
   });
 
-  it('calls onClose automatically after 3 seconds on done', () => {
+  it('calls onClose automatically after 4 seconds on done', () => {
     const onClose = jest.fn();
     renderBar(onClose);
     sendEvent({ type: 'done' });
     expect(onClose).not.toHaveBeenCalled();
-    act(() => { jest.advanceTimersByTime(3000); });
+    act(() => { jest.advanceTimersByTime(4000); });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('does NOT auto-dismiss before 3 seconds have elapsed', () => {
+  it('does NOT auto-dismiss before 4 seconds have elapsed', () => {
     const onClose = jest.fn();
     renderBar(onClose);
     sendEvent({ type: 'done' });
-    act(() => { jest.advanceTimersByTime(2999); });
+    act(() => { jest.advanceTimersByTime(3999); });
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it('cancels auto-dismiss timer when component unmounts before 3s', () => {
+  it('cancels auto-dismiss timer when component unmounts before 4s', () => {
     const onClose = jest.fn();
     const { unmount } = renderBar(onClose);
     sendEvent({ type: 'done' });
     unmount();
-    act(() => { jest.advanceTimersByTime(3000); });
+    act(() => { jest.advanceTimersByTime(4000); });
     expect(onClose).not.toHaveBeenCalled();
   });
 });
@@ -272,21 +312,21 @@ describe('DeepDiveStatusBar — SSE lifecycle', () => {
 
   it('opens a new SSE connection and resets state when jobId changes', () => {
     const { rerender } = render(
-      <DeepDiveStatusBar videoId={VIDEO_ID} jobId="job-1" title={TITLE} onClose={jest.fn()} />,
+      <DeepDiveStatusBar videoId={VIDEO_ID} jobId="job-1" title={TITLE} viewUrl={DEFAULT_VIEW_URL} onClose={jest.fn()} />,
     );
     const firstInstance = lastInstance;
     sendEvent({ type: 'done' });
-    expect(screen.getByText(/✓/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /view deep dive doc/i })).toBeInTheDocument();
 
     act(() => {
       rerender(
-        <DeepDiveStatusBar videoId={VIDEO_ID} jobId="job-2" title={TITLE} onClose={jest.fn()} />,
+        <DeepDiveStatusBar videoId={VIDEO_ID} jobId="job-2" title={TITLE} viewUrl={DEFAULT_VIEW_URL} onClose={jest.fn()} />,
       );
     });
 
     expect(firstInstance?.close).toHaveBeenCalled();
     expect(lastInstance).not.toBe(firstInstance);
-    expect(screen.queryByText(/✓/)).toBeNull();
+    expect(screen.queryByRole('link', { name: /view deep dive doc/i })).toBeNull();
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0');
   });
 

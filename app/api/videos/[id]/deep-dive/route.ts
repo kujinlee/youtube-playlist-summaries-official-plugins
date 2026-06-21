@@ -1,12 +1,16 @@
 import crypto from 'crypto';
 import { NextResponse } from 'next/server';
 import { assertOutputFolder, assertVideoId } from '../../../../../lib/index-store';
-import { runDeepDive } from '../../../../../lib/deep-dive';
-import { createJob, deleteJob, emitJobEvent } from '../../../../../lib/job-registry';
+import { ensureDeepDiveHtml } from '../../../../../lib/deep-dive/ensure';
+import { createJob, deleteJob, emitJobEvent, getActiveJob, releaseJobLock } from '../../../../../lib/job-registry';
 import { logError, errorSummary } from '../../../../../lib/dev-logger';
 import type { ProgressEvent } from '../../../../../types';
 
 type Params = { params: Promise<{ id: string }> };
+
+// Keep a finished job subscribable briefly so a just-issued client subscribe can replay the
+// terminal event; then GC it. .unref() so the timer never keeps the process alive (tests/CI).
+const GRACE_MS = 15_000;
 
 export async function POST(request: Request, { params }: Params) {
   const { id: videoId } = await params;
@@ -22,22 +26,30 @@ export async function POST(request: Request, { params }: Params) {
     return NextResponse.json({ error: 'invalid request' }, { status: 400 });
   }
 
+  // Same-video double-submit guard: one live job per (folder, video).
+  const key = `${outputFolder}::${videoId}`;
+  const existing = getActiveJob(key);
+  if (existing) return NextResponse.json({ jobId: existing });
+
   const jobId = crypto.randomUUID();
-  createJob(jobId);
+  createJob(jobId, key);
   let finished = false;
 
-  runDeepDive(videoId, outputFolder, (event: ProgressEvent) => {
+  const onTerminal = () => {
+    finished = true;
+    releaseJobLock(jobId);                       // free the lock now → a later Regenerate is allowed
+    const t = setTimeout(() => deleteJob(jobId), GRACE_MS); // keep buffer for late subscribers
+    (t as { unref?: () => void }).unref?.();
+  };
+
+  ensureDeepDiveHtml(videoId, outputFolder, (event: ProgressEvent) => {
     emitJobEvent(jobId, event);
-    if (event.type === 'done' || event.type === 'error') {
-      finished = true;
-      deleteJob(jobId);
-    }
+    if (event.type === 'done' || event.type === 'error') onTerminal();
   }).catch((err) => {
     if (finished) return;
-    finished = true;
     logError(`deep-dive:${videoId}`, err);
     emitJobEvent(jobId, { type: 'error', log: errorSummary(err) });
-    deleteJob(jobId);
+    onTerminal();
   });
 
   return NextResponse.json({ jobId });
