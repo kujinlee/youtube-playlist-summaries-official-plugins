@@ -217,8 +217,8 @@ test.describe('playlist viewer', () => {
     // Status bar mounts in running state — progressbar visible before SSE done arrives
     await expect(page.getByRole('progressbar')).toBeVisible();
 
-    // Done state: status bar shows ✓ Done
-    await expect(page.getByRole('status', { name: /deep dive progress/i })).toContainText('✓ Done');
+    // Done state: status bar shows "View Deep Dive doc" link (T9 replaced "✓ Done" with a view link)
+    await expect(page.getByRole('status', { name: /deep dive progress/i }).getByRole('link', { name: /view deep dive doc/i })).toBeVisible();
   });
 
   // Behavior 6: status bar shows the triggered video's title
@@ -304,7 +304,9 @@ test.describe('playlist viewer', () => {
     await page.getByRole('button', { name: /deep dive/i }).click();
     await expect(page.getByRole('status', { name: /deep dive progress/i })).toBeVisible();
 
-    await page.getByRole('button', { name: /dismiss/i }).click();
+    // Scope Dismiss to the status bar to avoid matching the backfill banner's "Dismiss backfill" button
+    await page.getByRole('status', { name: /deep dive progress/i })
+      .getByRole('button', { name: 'Dismiss', exact: true }).click();
 
     // Status bar gone
     await expect(page.getByRole('status', { name: /deep dive progress/i })).not.toBeVisible();
@@ -369,11 +371,10 @@ test.describe('playlist viewer', () => {
     await page.getByRole('button', { name: 'Menu' }).click();
     await page.getByRole('button', { name: /deep dive/i }).click();
 
-    // Bar reaches done state
-    await expect(page.getByRole('status', { name: /deep dive progress/i }))
-      .toContainText('✓ Done');
+    // Bar reaches done state — shows "View Deep Dive doc" link (T9 replaced "✓ Done" with a view link)
+    await expect(page.getByRole('status', { name: /deep dive progress/i }).getByRole('link', { name: /view deep dive doc/i })).toBeVisible();
 
-    // Bar disappears on its own within 5s (auto-dismiss timer is 3s)
+    // Bar disappears on its own within 5s (auto-dismiss timer is 4s after T9)
     await expect(page.getByRole('status', { name: /deep dive progress/i }))
       .not.toBeVisible({ timeout: 5000 });
   });
