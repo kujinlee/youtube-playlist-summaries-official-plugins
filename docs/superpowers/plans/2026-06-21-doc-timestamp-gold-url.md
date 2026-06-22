@@ -125,7 +125,7 @@ Add pure, exported helpers used by Task 3. No behavior change to `renderDeepDive
 - Produces (consumed by Task 3):
   - `interface RawSection { heading: string; lines: string[] }`
   - `splitSections(body: string): { preamble: string; sections: RawSection[] }` — fence-aware split at `## ` headings; everything before the first heading is `preamble`.
-  - `extractTimestamp(lines: string[]): { label: string; url: string } | null` — mutates `lines`: removes the leading `▶` line (first non-blank) and returns its label+url, or `null` (consumed-but-malformed, or no `▶`).
+  - `extractTimestamp(lines: string[]): { label: string; url: string } | null` — mutates `lines`: removes the leading `▶` line (first non-blank) and returns its label+url, or `null` (consumed-but-malformed, or no `▶`). **Divergence from `parse.ts` (intentional):** this render helper does NOT require a `?t=` param — a well-formed `▶ [label](https url)` with no `?t=` still yields a link (the link works; YouTube just starts at 0). `parse.ts` rejects when `startSec` is NaN because it needs the seek offset; the renderer does not.
   - `linkifyHeaderUrl(body: string): string` — rewrites the first `**URL:** <https url>` to a markdown link.
   - `takeFirstParagraph(lines: string[]): { para: string; rest: string }` — first prose paragraph (lines to next blank) vs remainder; `para===''` when the first non-blank line is a block construct.
   - `splitFirstSentence(text: string): { first: string; rest: string }` — first sentence vs remainder via terminator heuristic.
@@ -186,6 +186,12 @@ describe('extractTimestamp', () => {
     expect(extractTimestamp(lines)).toBeNull();
     expect(lines).toContain('▶ [1:00–2:00](https://youtu.be/x?t=60s)');
   });
+
+  it('accepts a well-formed ▶ link without a ?t= param (diverges from parse.ts)', () => {
+    const lines = ['▶ [0:00–1:00](https://youtu.be/x)', 'Lead.'];
+    expect(extractTimestamp(lines)).toEqual({ label: '0:00–1:00', url: 'https://youtu.be/x' });
+    expect(lines).toEqual(['Lead.']);
+  });
 });
 
 describe('linkifyHeaderUrl', () => {
@@ -211,6 +217,14 @@ describe('takeFirstParagraph', () => {
     const { para, rest } = takeFirstParagraph(['- bullet', '- bullet2']);
     expect(para).toBe('');
     expect(rest).toContain('- bullet');
+  });
+
+  it('treats a blockquote opener as a block (no lead)', () => {
+    expect(takeFirstParagraph(['> quoted', 'more']).para).toBe('');
+  });
+
+  it('treats a table-row opener as a block (no lead)', () => {
+    expect(takeFirstParagraph(['| a | b |', '| - | - |']).para).toBe('');
   });
 });
 
@@ -388,6 +402,23 @@ In `tests/lib/html-doc/render-deep-dive.test.ts`:
       codebg: '#2a241c', preborder: '#332c24', quote: '#9a9082', meta: '#9a9082',
 ```
 
+(b2) **Add an exhaustive LIGHT palette test** (the deep-dive suite has no light-palette guard today, so a
+misplaced/forgotten `meta` key in the LIGHT object would silently break `.dd .ts`'s `var(--meta)` with no
+red test — B-1). Mirror the DARK structure, anchored to the `:root` block:
+
+```ts
+  it('emits the light palette with meta key in insertion order', () => {
+    const LIGHT_EXPECTED: Record<string, string> = {
+      page: '#eef0f3', card: '#fbf9f6', ink: '#2a2622', rule: '#ece7df',
+      ghost: '#f0e7d6', gold: '#b07700', goldline: '#e0a800', li: '#4a463f', foot: '#9a917f',
+      shadow: '0 1px 3px rgba(0,0,0,.08)', link: '#b07700', h3: '#5b463a', h4: '#6b5a4a',
+      codebg: '#f1ebe0', preborder: '#e6ddcf', quote: '#8a8276', meta: '#8a8276',
+    };
+    const lightDecls = Object.entries(LIGHT_EXPECTED).map(([k, v]) => `--${k}:${v}`).join(';');
+    expect(html).toContain(`:root{${lightDecls}}`);
+  });
+```
+
 (c) Add new behavior tests:
 
 ```ts
@@ -511,6 +542,8 @@ function renderSection(raw: RawSection): string {
 
 ```ts
   // Strip the leading YAML frontmatter block, normalize newlines, linkify the header URL.
+  // linkifyHeaderUrl is a non-global replace, so only the FIRST `**URL:** <url>` is linked — that is
+  // our standardized header line, which always precedes any body content/code fences in the .md.
   let body = mdContent.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').replace(/\r\n/g, '\n');
   body = linkifyHeaderUrl(body);
   const title = body.match(/^#\s+(.+)$/m)?.[1]?.trim() ?? 'Deep Dive';
