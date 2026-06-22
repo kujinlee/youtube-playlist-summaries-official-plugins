@@ -40,12 +40,12 @@ describe('ensureHtmlDoc', () => {
     expect(rerender.reRenderSummaryHtml).not.toHaveBeenCalled();
     const patches = (indexStore.updateVideoFields as jest.Mock).mock.calls.map((c) => c[2]);
     expect(patches).toEqual(expect.arrayContaining([expect.objectContaining({ overallScore: 4 })]));
-    expect(patches).toEqual(expect.arrayContaining([expect.objectContaining({ docVersion: { major: 3, minor: 2 } })]));
+    expect(patches).toEqual(expect.arrayContaining([expect.objectContaining({ docVersion: { major: 3, minor: 3 } })]));
     expect(patches.every((p) => !('personalScore' in p))).toBe(true);
   });
 
   it('current major but no HTML → full generate (no re-summarize), stamp', async () => {
-    withVideo({ docVersion: { major: 3, minor: 2 }, summaryHtml: null });
+    withVideo({ docVersion: { major: 3, minor: 3 }, summaryHtml: null });
     await ensureHtmlDoc('vid11111111', '/out', () => {});
     expect(pipeline.writeSummaryDoc).not.toHaveBeenCalled();
     expect(generate.runHtmlDoc).toHaveBeenCalled();
@@ -61,7 +61,7 @@ describe('ensureHtmlDoc', () => {
   });
 
   it('current + HTML present → no work', async () => {
-    withVideo({ docVersion: { major: 3, minor: 2 }, summaryHtml: 'htmls/base.html' });
+    withVideo({ docVersion: { major: 3, minor: 3 }, summaryHtml: 'htmls/base.html' });
     await ensureHtmlDoc('vid11111111', '/out', () => {});
     expect(pipeline.writeSummaryDoc).not.toHaveBeenCalled();
     expect(generate.runHtmlDoc).not.toHaveBeenCalled();
