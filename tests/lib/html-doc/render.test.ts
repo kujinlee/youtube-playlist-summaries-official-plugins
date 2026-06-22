@@ -155,6 +155,32 @@ describe('renderMagazineHtml', () => {
   });
 });
 
+describe('renderMagazineHtml — meta URL link', () => {
+  it('renders the original-video URL as a clickable full-URL link in the meta line', () => {
+    const html = renderMagazineHtml(parsed, model);
+    expect(html).toContain(
+      '<a href="https://youtu.be/x" target="_blank" rel="noopener noreferrer">https://youtu.be/x</a>',
+    );
+    // styling hooks: muted link in the meta line
+    expect(html).toContain('.doc-meta a{color:inherit;text-decoration:none}');
+    expect(html).toContain('.doc-meta a:hover{text-decoration:underline}');
+  });
+
+  it('omits the meta URL link when url is null (no trailing separator)', () => {
+    const noUrl = { ...parsed, url: null };
+    const html = renderMagazineHtml(noUrl, model);
+    expect(html).not.toContain('<a href');
+    expect(html).toContain('Andrej Karpathy · 3:31:24');
+  });
+
+  it('does not link a non-http(s) url (injection guard)', () => {
+    const evilUrl = { ...parsed, url: 'javascript:alert(1)' };
+    const html = renderMagazineHtml(evilUrl, model);
+    expect(html).not.toContain('href="javascript:');
+    expect(html).not.toContain('<a href');
+  });
+});
+
 describe('renderMagazineHtml — section timestamps', () => {
   const withTs: ParsedSummary = {
     ...parsed,
