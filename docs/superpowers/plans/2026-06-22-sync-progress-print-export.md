@@ -293,7 +293,13 @@ Add `const [syncNote, setSyncNote] = useState('');` near the other state, render
         <p className="px-6 py-1 text-xs text-zinc-400">{syncNote}</p>
       )}
 ```
-Clear it when a new ingest starts (where `setIngest({ status:'running', ... })` first fires on submit, set `setSyncNote('')`).
+Clear it on sync start: in `handleIngest` (≈ `app/page.tsx:162`), add `setSyncNote('');` immediately before the `setIngest({ status: 'running', ... })` call that begins ingestion (H1).
+
+**REQUIRED for `tsc` (B3): update the OTHER three `setIngest({...})` object literals** so they satisfy the now-required `current`/`total`/`title` fields. There are four `setIngest({...})` literals total; besides the `'step'` one above, add `current: 0, total: 0, title: ''` to each of:
+- the sync-start literal at `≈ app/page.tsx:162` (`{ status: 'running', step: '', progress: 0, error: '' }`)
+- the POST-error literal at `≈ :178`
+- the connection-lost literal in `es.onerror` at `≈ :228`
+Verify with `npx tsc --noEmit` that no "missing properties" error remains. (Alternatively make the three fields optional on `IngestState`; the explicit-init approach is preferred to match `IDLE_INGEST`.)
 
 - [ ] **Step 6: Full suite + typecheck**
 
@@ -383,12 +389,16 @@ In `tests/lib/html-doc/theme.test.ts`:
 ```
 (import `PRINT_BUTTON` alongside the existing theme imports.)
 
-In both `tests/lib/html-doc/render.test.ts` and `tests/lib/html-doc/render-deep-dive.test.ts`, add (using each file's existing rendered `html` string):
+**Also update the TWO existing `theme.test.ts` assertions the CSS change will break (B2):**
+- the button-style assertion `expect(css).toContain('#theme-toggle{')` (≈ line 33) → `expect(css).toContain('#theme-toggle,#print-btn{')`
+- the print-hide assertion `expect(css).toContain('#theme-toggle{display:none}')` (≈ line 48) → `expect(css).toContain('#theme-toggle,#print-btn{display:none}')`
+
+In both `tests/lib/html-doc/render.test.ts` and `tests/lib/html-doc/render-deep-dive.test.ts`, add (using each file's existing rendered `html` string). **Use a literal substring, NOT a `[^}]*` regex** — the print rule contains an inner `{…vars…}` palette block, so `[^}]*` would stop at the first `}` before `#print-btn` and never match (B1):
 ```ts
   it('includes a Print button hidden in print', () => {
     expect(html).toContain('id="print-btn"');
     expect(html).toContain('onclick="window.print()"');
-    expect(html).toMatch(/@media print\{[^}]*#print-btn[^}]*display:none/);
+    expect(html).toContain('#theme-toggle,#print-btn{display:none}');
   });
 ```
 
