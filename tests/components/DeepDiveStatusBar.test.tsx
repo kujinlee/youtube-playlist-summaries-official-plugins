@@ -301,6 +301,34 @@ describe('DeepDiveStatusBar — error state', () => {
     act(() => { jest.advanceTimersByTime(10000); });
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  it('calls onError when an error event arrives (so the menu can clear its busy state)', () => {
+    const onError = jest.fn();
+    render(
+      <DeepDiveStatusBar videoId={VIDEO_ID} jobId={JOB_ID} title={TITLE} viewUrl={DEFAULT_VIEW_URL} onClose={jest.fn()} onError={onError} />,
+    );
+    sendEvent({ type: 'error', log: 'Broke' });
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it('calls onError when EventSource onerror fires (connection lost)', () => {
+    const onError = jest.fn();
+    render(
+      <DeepDiveStatusBar videoId={VIDEO_ID} jobId={JOB_ID} title={TITLE} viewUrl={DEFAULT_VIEW_URL} onClose={jest.fn()} onError={onError} />,
+    );
+    act(() => { lastInstance?.emitError(); });
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT call onError on done or step events', () => {
+    const onError = jest.fn();
+    render(
+      <DeepDiveStatusBar videoId={VIDEO_ID} jobId={JOB_ID} title={TITLE} viewUrl={DEFAULT_VIEW_URL} onClose={jest.fn()} onError={onError} />,
+    );
+    sendEvent({ type: 'step', step: 'Working', current: 1, total: 2 });
+    sendEvent({ type: 'done' });
+    expect(onError).not.toHaveBeenCalled();
+  });
 });
 
 describe('DeepDiveStatusBar — SSE lifecycle', () => {

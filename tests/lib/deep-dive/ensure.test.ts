@@ -91,7 +91,8 @@ describe('ensureDeepDiveHtml', () => {
     await ensureDeepDiveHtml(VIDEO_ID, outputFolder, () => {}, CURRENT);
 
     expect(mockWriteDeepDiveDoc).toHaveBeenCalled();
-    expect(mockRunDeepDiveHtml).toHaveBeenCalledWith(VIDEO_ID, outputFolder);
+    // Passes the freshly-written .md so runDeepDiveHtml doesn't read the not-yet-stamped index.
+    expect(mockRunDeepDiveHtml).toHaveBeenCalledWith(VIDEO_ID, outputFolder, MD_FILE);
     expect(mockReRenderDeepDiveHtml).not.toHaveBeenCalled();
 
     const v = storedVideo(outputFolder);
@@ -191,7 +192,7 @@ describe('ensureDeepDiveHtml', () => {
 
     expect(mockReRenderDeepDiveHtml).toHaveBeenCalled();
     expect(mockWriteDeepDiveDoc).toHaveBeenCalled();
-    expect(mockRunDeepDiveHtml).toHaveBeenCalledWith(VIDEO_ID, outputFolder);
+    expect(mockRunDeepDiveHtml).toHaveBeenCalledWith(VIDEO_ID, outputFolder, MD_FILE);
     const v = storedVideo(outputFolder);
     expect(v.deepDiveMd).toBe(MD_FILE);
     expect(v.deepDiveHtml).toBe(HTML_PATH);

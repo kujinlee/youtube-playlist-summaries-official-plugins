@@ -33,7 +33,9 @@ export async function ensureDeepDiveHtml(
   if (!video.deepDiveMd || needsRegenerate(stored, current)) {
     const { deepDiveMd } = await writeDeepDiveDoc(video, outputFolder, onProgress);
     onProgress({ type: 'step', videoId, step: 'Building HTML…', current: 1, total: 1 });
-    const { htmlPath } = await runDeepDiveHtml(videoId, outputFolder);
+    // Pass the just-written .md — the index isn't stamped until the updateVideoFields below,
+    // so a first-ever generation has no deepDiveMd in the index for runDeepDiveHtml to read.
+    const { htmlPath } = await runDeepDiveHtml(videoId, outputFolder, deepDiveMd);
     updateVideoFields(outputFolder, videoId, { deepDiveMd, deepDiveHtml: htmlPath, deepDiveVersion: current });
   } else if (!video.deepDiveHtml) {
     onProgress({ type: 'step', videoId, step: 'Building HTML…', current: 1, total: 1 });
@@ -47,7 +49,7 @@ export async function ensureDeepDiveHtml(
     } else {
       // .md missing → full regenerate (NOT runDeepDiveHtml which would throw)
       const { deepDiveMd } = await writeDeepDiveDoc(video, outputFolder, onProgress);
-      const { htmlPath } = await runDeepDiveHtml(videoId, outputFolder);
+      const { htmlPath } = await runDeepDiveHtml(videoId, outputFolder, deepDiveMd);
       updateVideoFields(outputFolder, videoId, { deepDiveMd, deepDiveHtml: htmlPath, deepDiveVersion: current });
     }
   } else {
