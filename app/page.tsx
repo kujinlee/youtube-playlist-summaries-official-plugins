@@ -33,6 +33,12 @@ export default function Page() {
   const [ingest, setIngest] = useState<IngestState>(IDLE_INGEST);
   const [deepDive, setDeepDive] = useState<{ videoId: string; jobId: string; title: string; viewUrl: string } | null>(null);
   const [htmlJob, setHtmlJob] = useState<{ videoId: string; jobId: string; title: string; viewUrl: string } | null>(null);
+  // The row whose doc job is actively running, driving its ⏳. Set on job start; cleared on
+  // close OR when a status bar reports a terminal error (so a failed job stops showing ⏳ while
+  // its error bar stays open). Derived-from-job-existence would leave ⏳ stuck through the error.
+  // Single scalar: assumes at most one active doc job at a time (one status bar open). If multi-row
+  // concurrency is ever needed, make this a Set and have onError clear only the errored videoId.
+  const [busyVideoId, setBusyVideoId] = useState<string | null>(null);
   const [showBackfill, setShowBackfill] = useState(false);
 
   const ingestESRef = useRef<EventSource | null>(null);
@@ -311,6 +317,7 @@ export default function Page() {
         if (!res.ok || !mountedRef.current) return;
         const data = await res.json();
         setDeepDive({ videoId, jobId: data.jobId, title, viewUrl });
+        setBusyVideoId(videoId);
       } catch {
         // ignore — no status bar opened
       }
@@ -320,6 +327,7 @@ export default function Page() {
 
   const handleDeepDiveClose = useCallback(() => {
     setDeepDive(null);
+    setBusyVideoId(null);
     const { col, order } = sortRef.current;
     fetchVideos(outputFolder, col, order);
   }, [fetchVideos, outputFolder]);
@@ -337,6 +345,7 @@ export default function Page() {
         if (!res.ok || !mountedRef.current) return;
         const data = await res.json();
         setHtmlJob({ videoId, jobId: data.jobId, title, viewUrl });
+        setBusyVideoId(videoId);
       } catch {
         // ignore — no status bar opened
       }
@@ -346,6 +355,7 @@ export default function Page() {
 
   const handleHtmlClose = useCallback(() => {
     setHtmlJob(null);
+    setBusyVideoId(null);
     const { col, order } = sortRef.current;
     fetchVideos(outputFolder, col, order); // refresh so the menu flips to View/Regenerate
   }, [fetchVideos, outputFolder]);
@@ -490,7 +500,7 @@ export default function Page() {
           outputFolder={outputFolder}
           baseOutputFolder={baseOutputFolder}
           showArchive={true}
-          busyVideoId={deepDive?.videoId ?? htmlJob?.videoId ?? null}
+          busyVideoId={busyVideoId}
           onDeepDive={handleDeepDive}
           onArchive={handleArchive}
           onGenerateHtml={handleGenerateHtml}
@@ -509,6 +519,7 @@ export default function Page() {
           title={deepDive.title}
           viewUrl={deepDive.viewUrl}
           onClose={handleDeepDiveClose}
+          onError={() => setBusyVideoId(null)}
         />
       )}
       {htmlJob && (
@@ -518,6 +529,7 @@ export default function Page() {
           title={htmlJob.title}
           viewUrl={htmlJob.viewUrl}
           onClose={handleHtmlClose}
+          onError={() => setBusyVideoId(null)}
         />
       )}
       {showBackfill && (

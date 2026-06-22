@@ -50,6 +50,27 @@ it('shows a connection-lost error when EventSource errors', () => {
   expect(screen.getByRole('alert')).toHaveTextContent(/connection lost/i);
 });
 
+it('calls onError on an error event so the menu can clear its busy state', () => {
+  const onError = jest.fn();
+  render(<HtmlDocStatusBar videoId="v" jobId="j1" title="T" viewUrl={viewUrl} onClose={() => {}} onError={onError} />);
+  act(() => { FakeES.last!.emit({ type: 'error', log: 'transform failed' }); });
+  expect(onError).toHaveBeenCalledTimes(1);
+});
+
+it('calls onError when EventSource errors (connection lost)', () => {
+  const onError = jest.fn();
+  render(<HtmlDocStatusBar videoId="v" jobId="j1" title="T" viewUrl={viewUrl} onClose={() => {}} onError={onError} />);
+  act(() => { FakeES.last!.onerror?.(); });
+  expect(onError).toHaveBeenCalledTimes(1);
+});
+
+it('does NOT call onError on done', () => {
+  const onError = jest.fn();
+  render(<HtmlDocStatusBar videoId="v" jobId="j1" title="T" viewUrl={viewUrl} onClose={() => {}} onError={onError} />);
+  act(() => { FakeES.last!.emit({ type: 'done' }); });
+  expect(onError).not.toHaveBeenCalled();
+});
+
 it('calls onClose when the Dismiss button is clicked', () => {
   const onClose = jest.fn();
   render(<HtmlDocStatusBar videoId="v" jobId="j1" title="T" viewUrl={viewUrl} onClose={onClose} />);

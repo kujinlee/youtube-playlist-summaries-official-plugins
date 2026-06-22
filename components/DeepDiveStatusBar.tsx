@@ -9,6 +9,9 @@ interface DeepDiveStatusBarProps {
   title: string;
   viewUrl: string;
   onClose: () => void;
+  // Fired when the job reaches a terminal error (SSE `error` event or a lost connection).
+  // The page uses it to clear the row's busy ⏳ — an errored job is no longer "regenerating".
+  onError?: () => void;
 }
 
 type BarState =
@@ -18,11 +21,13 @@ type BarState =
 
 const LOG_PANEL_ID = 'deep-dive-log-panel';
 
-export default function DeepDiveStatusBar({ videoId, jobId, title, viewUrl, onClose }: DeepDiveStatusBarProps) {
+export default function DeepDiveStatusBar({ videoId, jobId, title, viewUrl, onClose, onError }: DeepDiveStatusBarProps) {
   const [state, setState] = useState<BarState>({ status: 'running', progress: 0, step: '' });
   const [logsOpen, setLogsOpen] = useState(false);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
 
   useEffect(() => {
     setState({ status: 'running', progress: 0, step: '' });
@@ -56,6 +61,7 @@ export default function DeepDiveStatusBar({ videoId, jobId, title, viewUrl, onCl
         terminal = true;
         setState({ status: 'error', message: data.log, log: data.log });
         es.close();
+        onErrorRef.current?.();
       }
     };
 
@@ -64,6 +70,7 @@ export default function DeepDiveStatusBar({ videoId, jobId, title, viewUrl, onCl
       terminal = true;
       setState({ status: 'error', message: 'Connection lost. Please try again.', log: '' });
       es.close();
+      onErrorRef.current?.();
     };
 
     return () => {

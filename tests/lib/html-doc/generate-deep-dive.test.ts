@@ -67,6 +67,26 @@ it('throws when the video has no deepDiveMd', async () => {
   await expect(runDeepDiveHtml(VIDEO_ID, dir)).rejects.toThrow(/deep dive|deepDiveMd/i);
 });
 
+it('renders from an explicit deepDiveMd override even when the index has none (first-gen path)', async () => {
+  // First-ever deep dive: the .md is on disk but the index has not been stamped yet.
+  // ensureDeepDiveHtml hands runDeepDiveHtml the freshly-written filename so it need not
+  // re-read the not-yet-persisted index field.
+  writeIndex([{ ...baseVideo(), deepDiveMd: null }]);
+  const { html, htmlPath } = await runDeepDiveHtml(VIDEO_ID, dir, 'a-title-deep-dive.md');
+  expect(html).toContain('A Title (Deep Dive)');
+  expect(htmlPath).toBe('htmls/a-title-deep-dive.html');
+  expect(fs.existsSync(path.join(dir, 'htmls/a-title-deep-dive.html'))).toBe(true);
+});
+
+it('rejects a path-traversal deepDiveMd override (containment guard)', async () => {
+  await expect(runDeepDiveHtml(VIDEO_ID, dir, '../../etc/evil-deep-dive.md')).rejects.toThrow(/unsafe deep-dive md/i);
+});
+
+it('rejects a path-traversal deepDiveMd coming from a corrupted index', () => {
+  writeIndex([{ ...baseVideo(), deepDiveMd: '../escape.md' }]);
+  expect(() => reRenderDeepDiveHtml(VIDEO_ID, dir)).toThrow(/unsafe deep-dive md/i);
+});
+
 it('reRenderDeepDiveHtml writes html from the .md and returns its rel path', () => {
   // beforeEach already wrote a-title-deep-dive.md and the index with deepDiveMd set
   const res = reRenderDeepDiveHtml(VIDEO_ID, dir);
