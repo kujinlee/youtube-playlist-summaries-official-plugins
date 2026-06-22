@@ -139,6 +139,12 @@ describe('renderDeepDiveHtml', () => {
     expect(html).not.toMatch(/<html[^>]*data-theme=/);
   });
 
+  it('includes a Print button hidden in print', () => {
+    expect(html).toContain('id="print-btn"');
+    expect(html).toContain('onclick="window.print()"');
+    expect(html).toContain('#theme-toggle,#print-btn{display:none}');
+  });
+
   it('emits the light palette with meta key in insertion order', () => {
     const LIGHT_EXPECTED: Record<string, string> = {
       page: '#eef0f3', card: '#fbf9f6', ink: '#2a2622', rule: '#ece7df',

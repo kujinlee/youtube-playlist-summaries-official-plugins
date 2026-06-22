@@ -341,22 +341,6 @@ describe('VideoRow', () => {
       });
     });
 
-    describe('View Summary PDF', () => {
-      it('is a link pointing to /api/pdf/[id]?outputFolder=...&type=summary when summaryPdf is set', () => {
-        openMenu({ summaryPdf: 'summary.pdf' });
-        const link = screen.getByRole('link', { name: /view summary pdf/i });
-        const expected = `/api/pdf/abc123?outputFolder=${encodeURIComponent(OUTPUT_FOLDER)}&type=summary`;
-        expect(link).toHaveAttribute('href', expected);
-      });
-
-      it('is disabled when summaryPdf is null', () => {
-        openMenu({ summaryPdf: null });
-        const link = screen.getByRole('link', { name: /view summary pdf/i });
-        expect(link).toHaveAttribute('aria-disabled', 'true');
-        expect(link).toHaveAttribute('tabindex', '-1');
-      });
-    });
-
     describe('Deep Dive', () => {
       it('is a button (not a link)', () => {
         openMenu();
@@ -405,34 +389,6 @@ describe('VideoRow', () => {
       });
     });
 
-    describe('View Deep Dive PDF', () => {
-      it('is disabled when deepDivePdf is null', () => {
-        openMenu({ deepDiveMd: 'abc123-deep-dive.md', deepDivePdf: null });
-        const item = screen.getByRole('link', { name: /view deep dive pdf/i });
-        expect(item).toHaveAttribute('aria-disabled', 'true');
-        expect(item).toHaveAttribute('tabindex', '-1');
-      });
-
-      it('is disabled when deepDiveMd is null', () => {
-        openMenu({ deepDiveMd: null, deepDivePdf: null });
-        const item = screen.getByRole('link', { name: /view deep dive pdf/i });
-        expect(item).toHaveAttribute('aria-disabled', 'true');
-      });
-
-      it('is enabled when both deepDiveMd and deepDivePdf are non-null', () => {
-        openMenu({ deepDiveMd: 'abc123-deep-dive.md', deepDivePdf: 'abc123-deep-dive.pdf' });
-        const item = screen.getByRole('link', { name: /view deep dive pdf/i });
-        expect(item).not.toHaveAttribute('aria-disabled', 'true');
-      });
-
-      it('points to /api/pdf/[id]?outputFolder=...&type=deep-dive when enabled', () => {
-        openMenu({ deepDiveMd: 'abc123-deep-dive.md', deepDivePdf: 'abc123-deep-dive.pdf' });
-        const link = screen.getByRole('link', { name: /view deep dive pdf/i });
-        const expected = `/api/pdf/abc123?outputFolder=${encodeURIComponent(OUTPUT_FOLDER)}&type=deep-dive`;
-        expect(link).toHaveAttribute('href', expected);
-      });
-    });
-
     describe('Archive / Unarchive', () => {
       it('shows "Archive" when video.archived is false', () => {
         openMenu({ archived: false });
@@ -468,20 +424,21 @@ describe('VideoRow', () => {
       });
     });
 
-    describe('all 7 menu items present', () => {
-      it('renders all 7 actions', () => {
+    describe('menu items present', () => {
+      it('renders all active menu actions without PDF items', () => {
         openMenu({ deepDiveMd: 'abc123-deep-dive.md', deepDivePdf: 'abc123-deep-dive.pdf' });
         expect(screen.getByRole('link', { name: /watch on youtube/i })).toBeInTheDocument();
         expect(screen.getByRole('link', { name: /open in obsidian/i })).toBeInTheDocument();
-        expect(screen.getByRole('link', { name: /view summary pdf/i })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /deep dive doc/i })).toBeInTheDocument();
         expect(
           screen.getByRole('link', { name: /open deep dive in obsidian/i }),
         ).toBeInTheDocument();
-        expect(screen.getByRole('link', { name: /view deep dive pdf/i })).toBeInTheDocument();
         expect(
           screen.getByRole('button', { name: /^(archive|unarchive)$/i }),
         ).toBeInTheDocument();
+        // PDF items should not be rendered (PDF generation removed)
+        expect(screen.queryByText('View Summary PDF')).not.toBeInTheDocument();
+        expect(screen.queryByText('View Deep Dive PDF')).not.toBeInTheDocument();
       });
     });
   });

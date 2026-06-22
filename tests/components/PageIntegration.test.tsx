@@ -216,7 +216,8 @@ describe('Page — ingest (behaviors 3–6)', () => {
       ingestES.emit({ type: 'step', step: 'Fetching transcripts…', current: 1, total: 5 });
     });
     await waitFor(() => {
-      expect(screen.getByText('Fetching transcripts…')).toBeInTheDocument();
+      // New format: "New video N of M · step"
+      expect(screen.getByText(/New video 1 of 5 · Fetching transcripts…/)).toBeInTheDocument();
     });
   });
 

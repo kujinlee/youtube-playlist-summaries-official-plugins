@@ -41,11 +41,8 @@ const disabledClass = 'block w-full px-4 py-2 text-left text-sm text-zinc-500 cu
 
 export default function VideoMenu({ video, outputFolder, baseOutputFolder, onDeepDive, onArchive, onEditCorrections, onGenerateHtml, onClose, busy = false }: VideoMenuProps) {
   const hasDeepDive = !!video.deepDiveMd;
-  const hasSummaryPdf = !!video.summaryPdf;
-  const hasDeepDivePdf = !!video.deepDivePdf;
   const summaryFile = video.summaryMd?.replace(/\.md$/, '') ?? video.id;
   const deepDiveFile = video.deepDiveMd?.replace(/\.md$/, '') ?? `${video.id}-deep-dive`;
-  const pdfBase = `/api/pdf/${encodeURIComponent(video.id)}?outputFolder=${encodeURIComponent(outputFolder)}`;
   const hasSummary = !!video.summaryMd;
   const htmlViewHref = `/api/html/${encodeURIComponent(video.id)}?outputFolder=${encodeURIComponent(outputFolder)}&type=summary`;
   const deepDiveHtmlHref = `/api/html/${encodeURIComponent(video.id)}?outputFolder=${encodeURIComponent(outputFolder)}&type=deep-dive`;
@@ -67,23 +64,6 @@ export default function VideoMenu({ video, outputFolder, baseOutputFolder, onDee
         <a href={obsidianHref(baseOutputFolder, outputFolder, summaryFile)} onClick={onClose} target="_blank" rel="noopener noreferrer" className={itemClass}>
           Open in Obsidian
         </a>
-      </li>
-      <li role="none">
-        {hasSummaryPdf ? (
-          <a href={`${pdfBase}&type=summary`} onClick={onClose} target="_blank" rel="noopener noreferrer" className={itemClass}>
-            View Summary PDF
-          </a>
-        ) : (
-          <a
-            href="#"
-            aria-disabled="true"
-            tabIndex={-1}
-            onClick={(e) => e.preventDefault()}
-            className={disabledClass}
-          >
-            View Summary PDF
-          </a>
-        )}
       </li>
       <li role="none">
         {(() => {
@@ -118,23 +98,6 @@ export default function VideoMenu({ video, outputFolder, baseOutputFolder, onDee
             className={disabledClass}
           >
             Open Deep Dive in Obsidian
-          </a>
-        )}
-      </li>
-      <li role="none">
-        {hasDeepDivePdf ? (
-          <a href={`${pdfBase}&type=deep-dive`} onClick={onClose} target="_blank" rel="noopener noreferrer" className={itemClass}>
-            View Deep Dive PDF
-          </a>
-        ) : (
-          <a
-            href="#"
-            aria-disabled="true"
-            tabIndex={-1}
-            onClick={(e) => e.preventDefault()}
-            className={disabledClass}
-          >
-            View Deep Dive PDF
           </a>
         )}
       </li>

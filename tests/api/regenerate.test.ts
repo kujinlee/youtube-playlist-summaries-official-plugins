@@ -153,11 +153,9 @@ describe('POST /api/videos/[id]/regenerate', () => {
     );
   });
 
-  it('fires PDF generation for background regeneration', async () => {
+  it('does not fire PDF generation', async () => {
     await post(VIDEO_ID, { outputFolder: OUTPUT_FOLDER });
-    // PDF may be async; allow a tick for the promise to start
-    await Promise.resolve();
-    expect(mockGeneratePdf).toHaveBeenCalled();
+    expect(mockGeneratePdf).not.toHaveBeenCalled();
   });
 
   it('returns 500 when Gemini throws', async () => {

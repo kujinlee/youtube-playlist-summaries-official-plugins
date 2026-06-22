@@ -1,6 +1,6 @@
 import type { ParsedSummary, MagazineModel } from './types';
 import {
-  themeStyleBlock, THEME_HEAD_SCRIPT, THEME_TOGGLE_BUTTON, THEME_TOGGLE_SCRIPT,
+  themeStyleBlock, THEME_HEAD_SCRIPT, THEME_TOGGLE_BUTTON, THEME_TOGGLE_SCRIPT, PRINT_BUTTON,
   BASE_PALETTE_LIGHT_PRE, BASE_PALETTE_LIGHT_POST, BASE_PALETTE_DARK_PRE, BASE_PALETTE_DARK_POST,
   type Palette,
 } from './theme';
@@ -105,7 +105,7 @@ ${THEME_HEAD_SCRIPT}
 <style>${themeStyleBlock(LIGHT, DARK)}${STRUCTURAL_CSS}</style>
 </head>
 <body>
-${THEME_TOGGLE_BUTTON}
+${THEME_TOGGLE_BUTTON}${PRINT_BUTTON}
 <article class="v4">
   <h1 class="doc-title">${esc(parsed.title)}</h1>
   <p class="doc-meta">${metaLine}</p>

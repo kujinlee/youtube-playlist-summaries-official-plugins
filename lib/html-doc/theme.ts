@@ -65,9 +65,10 @@ export function themeStyleBlock(light: Palette, dark: Palette): string {
 [data-theme="light"]{${l}}
 [data-theme="dark"]{${d}}
 @media(prefers-color-scheme:dark){:root:not([data-theme]){${d}}}
-html.theme-ready body,html.theme-ready #theme-toggle{transition:background-color .2s,color .2s}
-#theme-toggle{position:fixed;top:1rem;right:1rem;width:2.4rem;height:2.4rem;border-radius:50%;border:1px solid rgba(128,128,128,.35);background:var(--card);color:var(--ink);font-size:1.1rem;line-height:1;cursor:pointer;box-shadow:var(--shadow);display:flex;align-items:center;justify-content:center;z-index:10}
-@media print{:root,:root:not([data-theme]),[data-theme="light"],[data-theme="dark"]{${l}}#theme-toggle{display:none}}
+html.theme-ready body,html.theme-ready #theme-toggle,html.theme-ready #print-btn{transition:background-color .2s,color .2s}
+#theme-toggle,#print-btn{position:fixed;top:1rem;width:2.4rem;height:2.4rem;border-radius:50%;border:1px solid rgba(128,128,128,.35);background:var(--card);color:var(--ink);font-size:1.1rem;line-height:1;cursor:pointer;box-shadow:var(--shadow);display:flex;align-items:center;justify-content:center;z-index:10}
+#theme-toggle{right:1rem}#print-btn{right:3.6rem}
+@media print{:root,:root:not([data-theme]),[data-theme="light"],[data-theme="dark"]{${l}}#theme-toggle,#print-btn{display:none}}
 `;
 }
 
@@ -83,6 +84,11 @@ export const THEME_HEAD_SCRIPT =
 /** Toggle button markup, injected immediately after `<body>`. Icon is set by the handler. */
 export const THEME_TOGGLE_BUTTON =
   `<button id="theme-toggle" type="button" aria-label="Toggle light and dark theme" title="Toggle light/dark">\u{1F319}</button>`;
+
+/** Print button markup, injected next to the theme toggle. Inline window.print() — safe: these
+ * are self-contained docs we emit directly (markdown-it html:false governs content, not chrome). */
+export const PRINT_BUTTON =
+  `<button id="print-btn" type="button" onclick="window.print()" aria-label="Print" title="Print">\u{1F5A8}\u{FE0F}</button>`;
 
 /**
  * End-of-`<body>` handler. Effective theme = explicit `data-theme`, else system preference.

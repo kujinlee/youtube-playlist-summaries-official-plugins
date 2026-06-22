@@ -4,7 +4,6 @@ import { NextResponse } from 'next/server';
 import { assertOutputFolder, assertVideoId, readIndex, updateVideoFields } from '../../../../../lib/index-store';
 import { fixSummary, extractQuickView } from '../../../../../lib/gemini';
 import { stripQuickViewCallout, insertQuickViewCallout } from '../../../../../lib/pipeline';
-import { generatePdf } from '../../../../../lib/pdf';
 import { logError, errorSummary } from '../../../../../lib/dev-logger';
 
 type Params = { params: Promise<{ id: string }> };
@@ -67,15 +66,6 @@ export async function POST(request: Request, { params }: Params) {
 
     // Update index with refreshed quick-view data; clear stale HTML cache
     updateVideoFields(outputFolder, videoId, { tldr, takeaways, summaryHtml: null });
-
-    // PDF regeneration fires in background — same pattern as backfill.
-    // Failure is non-critical; the .md is already updated.
-    if (video.summaryPdf) {
-      const pdfPath = path.join(outputFolder, video.summaryPdf);
-      generatePdf(updatedContent, pdfPath).catch(() => {
-        // swallow — PDF is a convenience copy; .md is the source of truth
-      });
-    }
 
     return NextResponse.json({
       tldr,

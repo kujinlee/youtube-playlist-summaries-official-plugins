@@ -4,6 +4,7 @@ import {
   THEME_HEAD_SCRIPT,
   THEME_TOGGLE_BUTTON,
   THEME_TOGGLE_SCRIPT,
+  PRINT_BUTTON,
   type Palette,
 } from '../../../lib/html-doc/theme';
 
@@ -30,7 +31,7 @@ describe('themeStyleBlock', () => {
   });
 
   it('styles the fixed toggle button using theme vars', () => {
-    expect(css).toContain('#theme-toggle{');
+    expect(css).toContain('#theme-toggle,#print-btn{');
     expect(css).toContain('position:fixed');
     expect(css).toContain('background:var(--card)');
     expect(css).toContain('color:var(--ink)');
@@ -45,7 +46,7 @@ describe('themeStyleBlock', () => {
     // The print selector MUST include :root:not([data-theme]) — otherwise the system-dark rule
     // (0,2,0) outranks a bare :root (0,1,0) and a never-toggled doc prints dark on a dark OS.
     expect(css).toContain('@media print{:root,:root:not([data-theme]),[data-theme="light"],[data-theme="dark"]{--page:#ffffff');
-    expect(css).toContain('#theme-toggle{display:none}');
+    expect(css).toContain('#theme-toggle,#print-btn{display:none}');
   });
 
   it('does not throw on an empty palette', () => {
@@ -69,6 +70,13 @@ describe('THEME_TOGGLE_BUTTON', () => {
     expect(THEME_TOGGLE_BUTTON).toContain('id="theme-toggle"');
     expect(THEME_TOGGLE_BUTTON).toContain('type="button"');
     expect(THEME_TOGGLE_BUTTON).toContain('aria-label=');
+  });
+});
+
+describe('PRINT_BUTTON', () => {
+  it('exports a print button with a window.print() handler', () => {
+    expect(PRINT_BUTTON).toContain('id="print-btn"');
+    expect(PRINT_BUTTON).toContain('onclick="window.print()"');
   });
 });
 

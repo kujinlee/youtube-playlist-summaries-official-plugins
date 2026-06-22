@@ -17,9 +17,12 @@ interface IngestState {
   step: string;
   progress: number;
   error: string;
+  current: number;
+  total: number;
+  title: string;
 }
 
-const IDLE_INGEST: IngestState = { status: 'idle', step: '', progress: 0, error: '' };
+const IDLE_INGEST: IngestState = { status: 'idle', step: '', progress: 0, error: '', current: 0, total: 0, title: '' };
 
 export default function Page() {
   const [outputFolder, setOutputFolder] = useState('');
@@ -40,6 +43,7 @@ export default function Page() {
   // concurrency is ever needed, make this a Set and have onError clear only the errored videoId.
   const [busyVideoId, setBusyVideoId] = useState<string | null>(null);
   const [showBackfill, setShowBackfill] = useState(false);
+  const [syncNote, setSyncNote] = useState('');
 
   const ingestESRef = useRef<EventSource | null>(null);
   const ingestJobIdRef = useRef<string | null>(null);
@@ -159,7 +163,8 @@ export default function Page() {
       // setOutputFolder adopts the resolved target as the active viewing folder; the
       // persist effect writes the {root, target} pair to settings.
       setOutputFolder(folder);
-      setIngest({ status: 'running', step: '', progress: 0, error: '' });
+      setSyncNote('');
+      setIngest({ status: 'running', step: '', progress: 0, error: '', current: 0, total: 0, title: '' });
 
       let jobId: string;
       try {
@@ -175,7 +180,7 @@ export default function Page() {
         ingestJobIdRef.current = jobId;
       } catch (e) {
         if (mountedRef.current) {
-          setIngest({ status: 'error', step: '', progress: 0, error: String(e) });
+          setIngest({ status: 'error', step: '', progress: 0, error: String(e), current: 0, total: 0, title: '' });
         }
         return;
       }
@@ -199,7 +204,10 @@ export default function Page() {
             data.current != null && data.total != null && data.total > 0
               ? Math.min(100, Math.round((data.current / data.total) * 100))
               : 0;
-          setIngest({ status: 'running', step: data.step, progress, error: '' });
+          setIngest({
+            status: 'running', step: data.step, progress, error: '',
+            current: data.current ?? 0, total: data.total ?? 0, title: data.title ?? '',
+          });
           // Refresh list each time a video is fully saved so it appears incrementally.
           if (data.step === 'Saved') {
             const { col, order } = sortRef.current;
@@ -213,6 +221,9 @@ export default function Page() {
           es.close();
           ingestESRef.current = null;
           ingestJobIdRef.current = null;
+          if (data.type === 'done' && data.total === 0) {
+            setSyncNote('Sync complete — no new videos.');
+          }
           setIngest(IDLE_INGEST);
           const { col, order } = sortRef.current;
           fetchVideos(folder, col, order);
@@ -225,7 +236,7 @@ export default function Page() {
         es.close();
         ingestESRef.current = null;
         ingestJobIdRef.current = null;
-        setIngest({ status: 'error', step: '', progress: 0, error: 'Connection lost.' });
+        setIngest({ status: 'error', step: '', progress: 0, error: 'Connection lost.', current: 0, total: 0, title: '' });
         // Fetch whatever was indexed before the connection dropped so the list stays current.
         const { col, order } = sortRef.current;
         fetchVideos(folder, col, order);
@@ -449,7 +460,13 @@ export default function Page() {
                   Cancel
                 </button>
               </div>
-              {ingest.step && <p className="text-xs text-zinc-400">{ingest.step}</p>}
+              {ingest.total > 0 && (
+                <p className="text-xs text-zinc-400">
+                  New video {ingest.current} of {ingest.total}
+                  {ingest.step ? ` · ${ingest.step}` : ''}
+                </p>
+              )}
+              {ingest.title && <p className="text-xs text-zinc-500 truncate">{ingest.title}</p>}
             </div>
           )}
           {ingest.error && <p role="alert" className="text-xs text-red-400 mt-1">{ingest.error}</p>}
@@ -457,6 +474,10 @@ export default function Page() {
             <p role="alert" className="text-xs text-red-400">Ingestion failed.</p>
           )}
         </section>
+      )}
+
+      {syncNote && ingest.status === 'idle' && (
+        <p className="px-6 py-1 text-xs text-zinc-400">{syncNote}</p>
       )}
 
       {/* Stats bar */}

@@ -153,6 +153,13 @@ describe('renderMagazineHtml', () => {
     expect(html).toContain("setItem('html-doc-theme',next)");
     expect(html).not.toMatch(/<html[^>]*data-theme=/);
   });
+
+  it('includes a Print button hidden in print', () => {
+    const html = renderMagazineHtml(parsed, model);
+    expect(html).toContain('id="print-btn"');
+    expect(html).toContain('onclick="window.print()"');
+    expect(html).toContain('#theme-toggle,#print-btn{display:none}');
+  });
 });
 
 describe('renderMagazineHtml — meta URL link', () => {

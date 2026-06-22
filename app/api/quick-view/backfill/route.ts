@@ -3,7 +3,6 @@ import fs from 'fs';
 import { assertOutputFolder, readIndex, updateVideoFields } from '../../../../lib/index-store';
 import { extractQuickView } from '../../../../lib/gemini';
 import { insertQuickViewCallout } from '../../../../lib/pipeline';
-import { generatePdf } from '../../../../lib/pdf';
 import type { ProgressEvent } from '../../../../types';
 
 // Allow long-running backfills (182 videos × ~10s = ~30 min).
@@ -46,12 +45,6 @@ export async function GET(request: Request) {
 
       let succeeded = 0;
       let failed = 0;
-      let pdfFailed = 0;
-
-      // PDF tasks run independently of the Gemini loop.
-      // They are collected here and awaited after the loop so 'done' is only
-      // emitted once all PDFs have settled.
-      const pdfTasks: Promise<void>[] = [];
 
       for (let i = 0; i < eligible.length; i++) {
         const video = eligible[i]!;
@@ -69,42 +62,25 @@ export async function GET(request: Request) {
 
           await fs.promises.writeFile(mdPath, updatedContent, 'utf-8');
 
-          // Index updated before PDF — a PDF failure leaves consistent state.
+          // Index updated immediately after the .md write.
           updateVideoFields(outputFolder, video.id, { tldr, takeaways });
 
           succeeded++;
           // Emit step as soon as core work (Gemini + index) is done.
-          // PDF generation is independent and must not block this counter.
           emit({ type: 'step', videoId: video.id, title: video.title, step: 'done', current, total });
-
-          // Fire PDF in background — the existing generatePdf mutex serialises
-          // concurrent calls within this worker, so no port collisions occur.
-          if (video.summaryPdf) {
-            const pdfPath = path.join(outputFolder, video.summaryPdf);
-            pdfTasks.push(
-              generatePdf(updatedContent, pdfPath).catch((pdfErr) => {
-                pdfFailed++;
-                const log = pdfErr instanceof Error ? pdfErr.message : String(pdfErr);
-                emit({ type: 'error', videoId: video.id, title: `${video.title} (PDF only)`, log });
-              }),
-            );
-          }
         } catch (err) {
           failed++;
           const log = err instanceof Error ? err.message : String(err);
           emit({ type: 'error', videoId: video.id, title: video.title, log });
         }
 
-        // Rate-limit Gemini calls only — PDF tasks are already non-blocking.
+        // Rate-limit Gemini calls between iterations.
         if (i < eligible.length - 1) {
           await new Promise<void>((resolve) => setTimeout(resolve, 200));
         }
       }
 
-      // Wait for all background PDF tasks before declaring done.
-      await Promise.all(pdfTasks);
-
-      emit({ type: 'done', total, succeeded, failed: failed + pdfFailed });
+      emit({ type: 'done', total, succeeded, failed });
       controller.close();
     },
   });
