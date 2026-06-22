@@ -62,7 +62,12 @@
       "mcp__plugin_playwright_playwright__browser_wait_for",
       "mcp__plugin_playwright_playwright__browser_take_screenshot",
       "mcp__plugin_playwright_playwright__browser_type",
-      "mcp__plugin_playwright_playwright__browser_select_option"
+      "mcp__plugin_playwright_playwright__browser_select_option",
+      "Bash(PORT=3010 npm run dev)",
+      "Bash(echo \"started dev server \\(bg\\), pid $!\")"
     ]
+  },
+  "env": {
+    "CLAUDE_CODE_TMPDIR": "/Users/kujinlee/.claude-tmp"
   }
 }
