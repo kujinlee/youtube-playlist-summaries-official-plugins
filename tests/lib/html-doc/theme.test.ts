@@ -140,12 +140,10 @@ describe('THEME_TOGGLE_SCRIPT (executed)', () => {
     document.body.innerHTML = '<button id="theme-toggle"></button>';
     store = {};
     mockLocalStorage({ getItem: (k: string) => store[k] ?? null, setItem: (k: string, v: string) => { store[k] = v; } });
-    // @ts-expect-error run rAF callback synchronously
     global.requestAnimationFrame = (cb: (t: number) => void) => { cb(0); return 0; };
   });
 
   function setSystemDark(dark: boolean) {
-    // @ts-expect-error minimal matchMedia mock (jsdom does not implement it)
     window.matchMedia = (q: string) => ({ matches: dark, media: q, onchange: null, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; } });
   }
 
