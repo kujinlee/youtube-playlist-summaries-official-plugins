@@ -106,20 +106,17 @@ describe('renderDeepDiveHtml', () => {
     expect(html).toContain('color:var(--ink)');
   });
 
-  it('emits ghost-numeral CSS (counter-reset:sec, counter(sec)) and gold-lead rule', () => {
+  it('emits ghost-numeral CSS and the new lead/lead-accent/ts rules (no old h2+p gold rule)', () => {
     expect(html).toContain('counter-reset:sec');
     expect(html).toContain('counter(sec)');
-    // h2 + p adjacent-sibling is the gold "lead" rule.
-    expect(html).toContain('.dd h2 + p');
-    // .dd h1 must be styled as the serif title (no .doc-title class — renderer emits plain <h1>).
     expect(html).toContain('.dd h1');
-    // #6 — Lead prominence: lighter weight + slightly smaller (color unchanged).
-    // Anchored to the .dd h2 + p rule — a bare `font-size:1.02rem` would also match .dd h4.
-    expect(html).toContain('.dd h2 + p{font-size:1.02rem');
-    expect(html).toContain('.dd h2 + p{font-size:1.02rem;line-height:1.55;color:var(--gold);font-weight:400');
-    // Old bold/large values must NOT appear for the lead rule.
-    expect(html).not.toContain('.dd h2 + p{font-size:1.12rem');
-    expect(html).not.toContain('.dd h2 + p{font-size:1.12rem;line-height:1.55;color:var(--gold);font-weight:600');
+    // New: gold is confined to the lead's first sentence via .lead-accent; lead text is normal ink.
+    expect(html).toContain('.dd .lead{font-size:1.02rem;line-height:1.55;color:var(--ink)');
+    expect(html).toContain('.dd .lead-accent{color:var(--gold);font-weight:400}');
+    expect(html).toContain('.dd .ts{');
+    expect(html).toContain('.dd .ts:hover{text-decoration:underline}');
+    // Old adjacent-sibling gold rule is gone.
+    expect(html).not.toContain('.dd h2 + p');
   });
 
   it('ships the magazine dark palette + system-dark media query', () => {
@@ -129,7 +126,7 @@ describe('renderDeepDiveHtml', () => {
       page: '#1a1714', card: '#221d18', ink: '#e8e2d6', rule: '#332c24',
       ghost: '#2e2820', gold: '#e6b54d', goldline: '#e0a800', li: '#cfc8ba', foot: '#8a8174',
       shadow: '0 1px 3px rgba(0,0,0,.5)', link: '#e6b54d', h3: '#d8cdb8', h4: '#c4b7a0',
-      codebg: '#2a241c', preborder: '#332c24', quote: '#9a9082',
+      codebg: '#2a241c', preborder: '#332c24', quote: '#9a9082', meta: '#9a9082',
     };
     const darkDecls = Object.entries(DARK_EXPECTED).map(([k, v]) => `--${k}:${v}`).join(';');
     expect(html).toContain(`[data-theme="dark"]{${darkDecls}}`);
@@ -140,5 +137,97 @@ describe('renderDeepDiveHtml', () => {
     expect(html).toContain('id="theme-toggle"');
     expect(html).toContain("localStorage.getItem('html-doc-theme')");
     expect(html).not.toMatch(/<html[^>]*data-theme=/);
+  });
+
+  it('emits the light palette with meta key in insertion order', () => {
+    const LIGHT_EXPECTED: Record<string, string> = {
+      page: '#eef0f3', card: '#fbf9f6', ink: '#2a2622', rule: '#ece7df',
+      ghost: '#f0e7d6', gold: '#b07700', goldline: '#e0a800', li: '#4a463f', foot: '#9a917f',
+      shadow: '0 1px 3px rgba(0,0,0,.08)', link: '#b07700', h3: '#5b463a', h4: '#6b5a4a',
+      codebg: '#f1ebe0', preborder: '#e6ddcf', quote: '#8a8276', meta: '#8a8276',
+    };
+    const lightDecls = Object.entries(LIGHT_EXPECTED).map(([k, v]) => `--${k}:${v}`).join(';');
+    expect(html).toContain(`:root{${lightDecls}}`);
+  });
+
+  describe('section restructure', () => {
+    const SEC_MD = `---
+video_id: "v1"
+lang: EN
+---
+
+# T (Deep Dive)
+
+**Channel:** C | **Duration:** 5:00 | **URL:** https://youtu.be/v1
+
+---
+
+## The Genesis
+▶ [1:29–3:33](https://www.youtube.com/watch?v=v1&t=89s)
+Johnson was unconventional. An author of a dozen books joined later.
+
+### Detail
+- point one
+- point two
+
+## No Timestamp Here
+A lone lead sentence with no marker.
+`;
+    const out = renderDeepDiveHtml(SEC_MD, 'v1-deep-dive.md');
+
+    it('moves the ▶ into a trailing muted .ts link on the heading', () => {
+      expect(out).toContain(
+        '<a class="ts" href="https://www.youtube.com/watch?v=v1&amp;t=89s" target="_blank" rel="noopener noreferrer">(1:29–3:33)</a>',
+      );
+      // the ▶ glyph no longer appears in the rendered body
+      expect(out).not.toContain('▶');
+    });
+
+    it('golds only the first sentence of the lead', () => {
+      expect(out).toContain('<span class="lead-accent">Johnson was unconventional.</span>');
+      // second sentence is outside the accent span
+      expect(out).toMatch(/<\/span>\s*An author of a dozen books joined later\./);
+    });
+
+    it('preserves rich content after the lead (h3 + list)', () => {
+      expect(out).toContain('<h3>Detail</h3>');
+      expect(out).toContain('<li>point one</li>');
+    });
+
+    it('renders a section with no ▶ line: heading without a .ts link, lead still accented', () => {
+      expect(out).toContain('<h2>No Timestamp Here</h2>');
+      expect(out).toContain('<span class="lead-accent">A lone lead sentence with no marker.</span>');
+    });
+
+    it('linkifies the header URL', () => {
+      expect(out).toContain('href="https://youtu.be/v1"');
+    });
+
+    it('does not emit a bogus lead paragraph when a section opens with a list', () => {
+      const md = `---
+video_id: "v2"
+lang: EN
+---
+
+# T2 (Deep Dive)
+
+**URL:** https://youtu.be/v2
+
+---
+
+## Bullets First
+- alpha
+- beta
+`;
+      const html = renderDeepDiveHtml(md, 'v2-deep-dive.md');
+      expect(html).toContain('<h2>Bullets First</h2>');
+      expect(html).not.toContain('class="lead"'); // no prose lead → no .lead paragraph
+      expect(html).toContain('<li>alpha</li>');
+    });
+  });
+
+  it('emits .dd .ts with muted color binding', () => {
+    expect(html).toContain('.dd .ts{');
+    expect(html).toContain('color:var(--meta)');
   });
 });

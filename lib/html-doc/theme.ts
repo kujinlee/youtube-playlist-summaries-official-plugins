@@ -4,7 +4,8 @@ export type Palette = Record<string, string>;
 /**
  * Shared magazine palette prefix (keys: page, card, ink).
  * Both renderers agree on these values and key order.
- * render.ts inserts `meta` after `ink`; render-deep-dive.ts does not have `meta`.
+ * render.ts inserts `meta` after `ink` (between PRE and POST); render-deep-dive.ts appends
+ * `meta` after its renderer-specific keys.
  * Split into pre/post to allow byte-identical insertion.
  */
 export const BASE_PALETTE_LIGHT_PRE: Palette = {

@@ -23,6 +23,8 @@ body{margin:0;background:var(--page);color:var(--ink);
 html.theme-ready .v4{transition:background-color .2s,color .2s}
 .doc-title{font-family:${SERIF};font-size:2rem;line-height:1.2;margin:0 0 .15em}
 .doc-meta{color:var(--meta);font-size:.9rem;margin:0 0 1.8em}
+.doc-meta a{color:inherit;text-decoration:none}
+.doc-meta a:hover{text-decoration:underline}
 .callout{margin:0 0 2.4em;border-top:2px solid var(--goldline);border-bottom:2px solid var(--goldline);padding:1em 0}
 .callout .lbl{color:var(--gold);letter-spacing:.12em;text-transform:uppercase;font-size:.7rem;font-weight:700;margin-bottom:.5em}
 .callout p{margin:.2em 0 .8em}
@@ -49,7 +51,14 @@ function esc(s: string): string {
 }
 
 export function renderMagazineHtml(parsed: ParsedSummary, model: MagazineModel): string {
-  const metaLine = [parsed.channel, parsed.duration].filter(Boolean).map((s) => esc(s as string)).join(' · ');
+  const metaParts = [parsed.channel, parsed.duration]
+    .filter(Boolean)
+    .map((s) => esc(s as string));
+  if (parsed.url && /^https?:\/\//.test(parsed.url)) {
+    const u = esc(parsed.url);
+    metaParts.push(`<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`);
+  }
+  const metaLine = metaParts.join(' · ');
 
   const callout =
     parsed.tldr
