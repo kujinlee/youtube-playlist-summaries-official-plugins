@@ -112,18 +112,18 @@ describe('resolveTranscriptTokens', () => {
     expect(out).toContain('```\n[[TS:1]]\n```'); // own-line token INSIDE the fence preserved verbatim
   });
 
-  it('degrades (strips ALL tokens, no ▶ lines) when any index is out of range', () => {
+  it('keeps the valid token, drops the out-of-range one', () => {
     const bad = '## 1. A\n[[TS:0]]\n\n## 2. B\n[[TS:99]]\n\n';
     const out = resolveTranscriptTokens(bad, SEGS, 'vid123');
-    expect(out).not.toMatch(/▶/);
+    expect(out).toContain('▶ [0:00–10:30]');
     expect(out).not.toMatch(/\[\[TS:/);
   });
 
-  it('degrades when indices are not strictly increasing', () => {
+  it('keeps the first document candidate when offsets decrease', () => {
     const bad = '## 1. A\n[[TS:2]]\n\n## 2. B\n[[TS:1]]\n\n';
     const out = resolveTranscriptTokens(bad, SEGS, 'vid123');
-    expect(out).not.toMatch(/▶/);
-    expect(out).not.toMatch(/\[\[TS:/);
+    expect(out).toContain('▶ [5:30–10:30]');
+    expect((out.match(/▶/g) ?? []).length).toBe(1);
   });
 
   it('degrades when videoId is missing or segments are empty', () => {
@@ -140,10 +140,10 @@ describe('resolveTranscriptTokens', () => {
 });
 
 describe('resolveTranscriptTokens — malformed token hardening (Codex)', () => {
-  it('degrades AND strips a malformed non-digit own-line token (no raw token leaks)', () => {
+  it('drops a negative-index token, keeps the valid one', () => {
     const bad = '## 1. A\n[[TS:0]]\n\n## 2. B\n[[TS:-1]]\n\nbody';
     const out = resolveTranscriptTokens(bad, SEGS, 'vid123');
-    expect(out).not.toMatch(/▶/);
+    expect(out).toContain('▶ [0:00–10:30]');
     expect(out).not.toMatch(/\[\[TS:/);
   });
 
@@ -160,21 +160,22 @@ describe('resolveTranscriptTokens — malformed token hardening (Codex)', () => 
     expect(out).not.toMatch(/\[\[TS:/);
   });
 
-  it('degrades when segment offsets are non-monotonic even though indices increase', () => {
+  it('keeps only the token whose offset is below videoDuration', () => {
     const badSegs = [
       { text: 'a', offset: 100, duration: 5 },
       { text: 'b', offset: 90, duration: 5 }, // out of chronological order
     ];
     const md = '## 1. A\n[[TS:0]]\n\n## 2. B\n[[TS:1]]\n\nbody';
+    // videoDuration = floor(90+5) = 95; idx0 (off100) excluded (>=95); idx1 (off90) kept
     const out = resolveTranscriptTokens(md, badSegs, 'vid123');
-    expect(out).not.toMatch(/▶/);
-    expect(out).not.toMatch(/\[\[TS:/);
+    expect(out).toContain('▶ [1:30–1:35]');
+    expect((out.match(/▶/g) ?? []).length).toBe(1);
   });
 
-  it('degrades + scrubs an embedded-] malformed own-line token', () => {
+  it('drops a malformed own-line token, keeps the valid one', () => {
     const bad = '## 1. A\n[[TS:0]]\n\n## 2. B\n[[TS:a]b]]\n\nbody';
     const out = resolveTranscriptTokens(bad, SEGS, 'vid123');
-    expect(out).not.toMatch(/▶/);
+    expect(out).toContain('▶ [0:00–10:30]');
     expect(out).not.toMatch(/\[\[TS:/);
   });
 
@@ -190,5 +191,74 @@ describe('resolveTranscriptTokens — malformed token hardening (Codex)', () => 
     ];
     const out = resolveTranscriptTokens('## 1. A\n[[TS:0]]\n\nbody', badLast, 'vid123');
     expect(out).not.toMatch(/▶|\[\[TS:/);
+  });
+});
+
+describe('resolveTranscriptTokens — lenient selection', () => {
+  it('keeps valid tokens and drops only an out-of-range one (partial)', () => {
+    const md = '## 1. A\n[[TS:0]]\n\n## 2. B\n[[TS:99]]\n\nbody';
+    const out = resolveTranscriptTokens(md, SEGS, 'vid123');
+    expect(out).toContain('▶ [0:00–10:30](https://www.youtube.com/watch?v=vid123&t=0s)'); // only kept → end=duration
+    expect(out).not.toMatch(/\[\[TS:/);
+  });
+
+  it('keeps the longer increasing tail, dropping a spuriously-large early token (LIS)', () => {
+    // offsets in doc order: [600(idx3), 0(idx0), 135(idx1), 330(idx2)] → LIS keeps idx0,1,2
+    const md = '## A\n[[TS:3]]\n\n## B\n[[TS:0]]\n\n## C\n[[TS:1]]\n\n## D\n[[TS:2]]\n\nx';
+    const out = resolveTranscriptTokens(md, SEGS, 'vid123');
+    expect(out).toContain('▶ [0:00–2:15]');   // idx0 → next kept idx1
+    expect(out).toContain('▶ [2:15–5:30]');   // idx1 → idx2
+    expect(out).toContain('▶ [5:30–10:30]');  // idx2 (last kept) → duration
+    expect((out.match(/▶/g) ?? []).length).toBe(3); // idx3 (offset 600) dropped
+  });
+
+  it('candidate-removes an in-range index whose offset is NaN, keeps the sibling', () => {
+    const segs = [{ text: 'a', offset: 0, duration: 5 }, { text: 'b', offset: NaN, duration: 5 }, { text: 'c', offset: 200, duration: 10 }];
+    const md = '## A\n[[TS:0]]\n\n## B\n[[TS:1]]\n\n## C\n[[TS:2]]\n\nx';
+    const out = resolveTranscriptTokens(md, segs, 'vid123');
+    expect((out.match(/▶/g) ?? []).length).toBe(2); // idx1 (NaN offset) dropped; idx0,idx2 kept
+    expect(out).not.toMatch(/\[\[TS:/);
+  });
+
+  it('does not count a malformed token inside a fence (left verbatim)', () => {
+    const md = '## A\n[[TS:0]]\n\n```\n[[TS:99]]\n```\n';
+    const out = resolveTranscriptTokens(md, SEGS, 'vid123');
+    expect(out).toContain('▶ [0:00–10:30]');     // sole own-line token kept, end=duration (fenced not counted)
+    expect(out).toContain('```\n[[TS:99]]\n```'); // fenced token verbatim
+  });
+
+  it('single kept token renders start..videoDuration', () => {
+    const md = '## A\n[[TS:1]]\n\nbody';
+    const out = resolveTranscriptTokens(md, SEGS, 'vid123');
+    expect(out).toContain('▶ [2:15–10:30](https://www.youtube.com/watch?v=vid123&t=135s)');
+  });
+
+  it('all-decreasing offsets → keeps exactly the FIRST document candidate', () => {
+    const md = '## A\n[[TS:3]]\n\n## B\n[[TS:2]]\n\n## C\n[[TS:1]]\n\nx'; // offsets 600,330,135 decreasing
+    const out = resolveTranscriptTokens(md, SEGS, 'vid123');
+    expect((out.match(/▶/g) ?? []).length).toBe(1);
+    expect(out).toContain('▶ [10:00–10:30]'); // idx3 (off600), first doc candidate; end=duration
+  });
+
+  it('duplicate offsets → drops the later-in-document duplicate', () => {
+    const segs = [{ text: 'a', offset: 0, duration: 5 }, { text: 'b', offset: 100, duration: 5 }, { text: 'c', offset: 100, duration: 5 }, { text: 'd', offset: 200, duration: 5 }];
+    const md = '## A\n[[TS:0]]\n\n## B\n[[TS:1]]\n\n## C\n[[TS:2]]\n\n## D\n[[TS:3]]\n\nx';
+    const out = resolveTranscriptTokens(md, segs, 'vid123');
+    expect((out.match(/▶/g) ?? []).length).toBe(3); // idx0,idx1,idx3 kept; idx2 (dup offset 100) dropped
+  });
+
+  it('warns "kept M of N" on a partial result', () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    resolveTranscriptTokens('## A\n[[TS:0]]\n\n## B\n[[TS:99]]\n\nx', SEGS, 'vid123');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('kept 1 of 2'));
+    warn.mockRestore();
+  });
+
+  it('warns "dropped all N" when every token is invalid', () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const out = resolveTranscriptTokens('## A\n[[TS:98]]\n\n## B\n[[TS:99]]\n\nx', SEGS, 'vid123');
+    expect(out).not.toMatch(/▶/);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('dropped all 2'));
+    warn.mockRestore();
   });
 });
