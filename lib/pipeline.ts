@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fetchPlaylistVideos, detectLanguage } from './youtube';
-import { generateSummary } from './gemini';
+import { generateSummary, extractQuickView } from './gemini';
 import { resolveTranscriptSegments } from './transcript-source';
 import { assertOutputFolder, assertVideoId, upsertVideo, readIndex, writeIndex } from './index-store';
 import { slugify } from './slugify';
@@ -65,12 +65,30 @@ export async function writeSummaryDoc(input: SummaryDocInput): Promise<SummaryDo
     `**URL:** ${youtubeUrl}`,
   ].filter(Boolean).join(' | ');
   const baseContent = [frontmatterLines.join('\n'), '', `# ${title}`, '', metaParts, '', '---', '', summary].join('\n');
-  const mdContent = (tldr && takeaways)
-    ? insertQuickViewCallout(baseContent, tldr, takeaways, tags ?? [])
-    : baseContent;
+  let outTldr = tldr;
+  let outTakeaways = takeaways;
+  let mdContent: string;
+  if (tldr && takeaways) {
+    mdContent = insertQuickViewCallout(baseContent, tldr, takeaways, tags ?? []);
+  } else {
+    // generateSummary omitted tldr/takeaways → derive them from the full md so the Quick
+    // Reference callout is never silently skipped (same primitive the backfill route uses).
+    try {
+      const qv = await extractQuickView(baseContent);
+      outTldr = qv.tldr;
+      outTakeaways = qv.takeaways;
+      mdContent = insertQuickViewCallout(baseContent, qv.tldr, qv.takeaways, tags ?? []);
+    } catch {
+      // Extraction failed — write without the callout and clear the partial so the doc
+      // stays eligible for the backfill route (filters on !v.tldr). Never fail the summary.
+      mdContent = baseContent;
+      outTldr = undefined;
+      outTakeaways = undefined;
+    }
+  }
 
   await fs.promises.writeFile(path.join(outputFolder, `${baseName}.md`), mdContent, 'utf-8');
-  return { language, ratings, overallScore, videoType, audience, tags, tldr, takeaways, mdContent, summaryMd: `${baseName}.md` };
+  return { language, ratings, overallScore, videoType, audience, tags, tldr: outTldr, takeaways: outTakeaways, mdContent, summaryMd: `${baseName}.md` };
 }
 
 export function parseFrontmatterField(content: string, key: string): string | null {
