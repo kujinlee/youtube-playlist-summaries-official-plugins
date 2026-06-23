@@ -3,8 +3,8 @@ import type { Version } from '../version';
 /** Deep-dive output version. MAJOR = .md/prompt format (bump ⇒ re-run cascade). MINOR = HTML render/style (bump ⇒ cheap re-render from .md). */
 export type DeepDiveVersion = Version;
 
-/** The version current code produces. major 2 = ▶ section timestamps. minor 1 = timestamp trailing the heading + first-sentence gold + Print button. */
-export const CURRENT_DEEP_DIVE_VERSION: DeepDiveVersion = { major: 2, minor: 1 };
+/** The version current code produces. major 2 = ▶ section timestamps. minor 1 = timestamp trailing the heading + first-sentence gold + Print button. minor 2 = H3 subsection timestamps. */
+export const CURRENT_DEEP_DIVE_VERSION: DeepDiveVersion = { major: 2, minor: 2 };
 
 /** True when reaching `current` from `stored` requires re-running the Gemini cascade (a .md-format / major advance). */
 export function needsRegenerate(stored: DeepDiveVersion, current: DeepDiveVersion): boolean {

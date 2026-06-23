@@ -236,4 +236,52 @@ lang: EN
     expect(html).toContain('.dd .ts{');
     expect(html).toContain('color:var(--meta)');
   });
+
+  describe('H3 subsection timestamps', () => {
+    const FM = `---\nvideo_id: "v1"\nlang: EN\n---\n\n# T (Deep Dive)\n\n**Channel:** C | **Duration:** 5:00 | **URL:** https://youtu.be/v1\n\n---\n\n`;
+    const render = (body: string) => renderDeepDiveHtml(FM + body, 'v1-deep-dive.md');
+
+    it('folds a ### subsection leading ▶ into a trailing muted .ts link', () => {
+      const out = render('## Sec\n▶ [0:00–0:30](https://www.youtube.com/watch?v=v1&t=0s)\nLead.\n\n### Sub A\n▶ [0:36–1:42](https://www.youtube.com/watch?v=v1&t=36s)\nsub body.\n');
+      expect(out).toContain('<h3>Sub A <a class="ts" href="https://www.youtube.com/watch?v=v1&amp;t=36s" target="_blank" rel="noopener noreferrer">(0:36–1:42)</a></h3>');
+      expect(out).not.toContain('▶'); // no literal glyph anywhere
+      expect((out.match(/0:36–1:42/g) ?? []).length).toBe(1); // folded once, not duplicated
+    });
+
+    it('leaves a ### subsection with no ▶ unchanged (plain <h3>, no trailing .ts)', () => {
+      const out = render('## Sec\n▶ [0:00–0:30](https://www.youtube.com/watch?v=v1&t=0s)\nLead.\n\n### Plain Sub\nbody text.\n');
+      // Plain <h3> with NO trailing anchor (the H2 has its own .ts link — assert the H3 shape directly).
+      expect(out).toContain('<h3>Plain Sub</h3>');
+    });
+
+    it('renders a bold ### heading inside a section as <h3><strong>…</strong></h3>', () => {
+      const out = render('## Sec\n▶ [0:00–0:30](https://www.youtube.com/watch?v=v1&t=0s)\nLead.\n\n### **Bold Sub**\n▶ [1:00–2:00](https://www.youtube.com/watch?v=v1&t=60s)\nb.\n');
+      expect(out).toContain('<h3><strong>Bold Sub</strong> <a class="ts"');
+    });
+
+    it('does NOT fold a ### inside a fenced code block', () => {
+      const out = render('## Sec\n▶ [0:00–0:30](https://www.youtube.com/watch?v=v1&t=0s)\nLead.\n\n```\n### Not A Heading\n▶ [9:99–9:99](x)\n```\n');
+      expect(out).toContain('### Not A Heading'); // survives verbatim inside <pre><code>
+      expect(out).not.toContain('<h3>Not A Heading');
+    });
+
+    it('does NOT fold ###x (no space → prose)', () => {
+      const out = render('## Sec\n▶ [0:00–0:30](https://www.youtube.com/watch?v=v1&t=0s)\nLead.\n\n###notaheading text\n');
+      expect(out).not.toContain('<h3>notaheading');
+    });
+
+    it('handles a section whose body starts immediately with ### (no gold lead)', () => {
+      const out = render('## Sec\n▶ [0:00–0:30](https://www.youtube.com/watch?v=v1&t=0s)\n### Sub\n▶ [0:36–1:42](https://www.youtube.com/watch?v=v1&t=36s)\nb.\n');
+      expect(out).toContain('<h3>Sub <a class="ts"');
+      // no gold lead emitted for a section with no prose paragraph before the first ###
+      expect(out).not.toMatch(/<p class="lead">/);
+    });
+
+    it('consumes a malformed ▶ line under a ### (no raw glyph leak, no .ts link)', () => {
+      const out = render('## Sec\n▶ [0:00–0:30](https://www.youtube.com/watch?v=v1&t=0s)\nLead.\n\n### Sub\n▶ not-a-valid-ts-line\nbody.\n');
+      expect(out).toContain('<h3>Sub</h3>'); // no trailing .ts (malformed → null)
+      expect(out).not.toContain('▶');
+      expect(out).not.toContain('not-a-valid-ts-line');
+    });
+  });
 });

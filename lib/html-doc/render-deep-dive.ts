@@ -144,12 +144,47 @@ html.theme-ready .dd{transition:background-color .2s,color .2s}
 @media print{body{background:#fff}.dd{box-shadow:none}#theme-toggle{display:none}}
 `;
 
+function tsAnchor(ts: { label: string; url: string } | null): string {
+  return ts
+    ? ` <a class="ts" href="${esc(ts.url)}" target="_blank" rel="noopener noreferrer">(${esc(ts.label)})</a>`
+    : '';
+}
+
+/**
+ * Render an H2 section's body: fence-aware split into `### ` subsections, folding each
+ * subsection's leading ▶ into a muted .ts link trailing the <h3> (mirrors renderSection's H2).
+ * Content before the first `### ` and all non-subsection prose render via md.render unchanged.
+ */
+function renderSubsections(rest: string): string {
+  const lines = rest.split('\n');
+  const preLines: string[] = [];
+  const subs: { heading: string; lines: string[] }[] = [];
+  let inFence = false;
+  let current: { heading: string; lines: string[] } | null = null;
+  for (const line of lines) {
+    if (/^\s*(```|~~~)/.test(line)) { inFence = !inFence; (current ? current.lines : preLines).push(line); continue; }
+    const h = !inFence ? line.match(/^###\s+(.*)$/) : null;
+    if (h) { if (current) subs.push(current); current = { heading: h[1].trim(), lines: [] }; continue; }
+    (current ? current.lines : preLines).push(line);
+  }
+  if (current) subs.push(current);
+
+  const preHtml = preLines.join('\n').trim() ? md.render(preLines.join('\n')) : '';
+  const subsHtml = subs.map((s) => {
+    const subLines = [...s.lines];
+    const ts = extractTimestamp(subLines);       // mutates subLines (removes leading ▶)
+    const heading = `<h3>${md.renderInline(s.heading)}${tsAnchor(ts)}</h3>`;
+    const bodyHtml = subLines.join('\n').trim() ? md.render(subLines.join('\n')) : '';
+    return `${heading}\n${bodyHtml}`;
+  }).join('\n');
+
+  return [preHtml, subsHtml].filter(Boolean).join('\n');
+}
+
 function renderSection(raw: RawSection): string {
   const lines = [...raw.lines];
   const ts = extractTimestamp(lines); // mutates lines (removes the ▶ line)
-  const tsHtml = ts
-    ? ` <a class="ts" href="${esc(ts.url)}" target="_blank" rel="noopener noreferrer">(${esc(ts.label)})</a>`
-    : '';
+  const tsHtml = tsAnchor(ts);
   const heading = `<h2>${md.renderInline(raw.heading)}${tsHtml}</h2>`;
 
   const { para, rest } = takeFirstParagraph(lines);
@@ -160,7 +195,7 @@ function renderSection(raw: RawSection): string {
     const tailHtml = tail ? ` ${md.renderInline(tail)}` : '';
     leadHtml = `<p class="lead"><span class="lead-accent">${firstHtml}</span>${tailHtml}</p>`;
   }
-  const restHtml = rest.trim() ? md.render(rest) : '';
+  const restHtml = rest.trim() ? renderSubsections(rest) : '';
   return `${heading}\n${leadHtml}${restHtml}`;
 }
 
