@@ -207,7 +207,7 @@ Also update the function's doc-comment (lines 43-56) to describe lenient selecti
 
 - [ ] **Step 6: Confirm the gemini out-of-range case** — `npx jest gemini -t "out-of-range"`. The `gemini.test.ts` "degrades to no timestamps when Gemini emits an out-of-range index" test uses a single `[[TS:9]]` (out of range) → candidate-removed → still 0 ▶, so `not.toMatch(/▶/)` still passes. If it instead now emits ▶, STOP and reconcile (it should not). Optionally rename its intent comment to "all tokens invalid".
 
-- [ ] **Step 7: Full suite + types** — `npm test` then `npx tsc --noEmit`. All green. (Watch for any OTHER test feeding tokenless/partial fixtures through the real resolver that the spec's enumeration missed — if one flips, evaluate against the spec and update or flag.)
+- [ ] **Step 7: Full suite + types** — `npm test` then `npx tsc --noEmit`. All green. Cross-consumer check: besides `gemini.test.ts`, the real resolver also runs in `gemini-deepdive-combined.test.ts`, `gemini-deepdive-prompt.test.ts`, and `gemini-deepdive-timestamps.test.ts` — all use valid strictly-increasing `[[TS:0]],[[TS:1]]` over monotonic segments, so they stay green (confirm, don't discover). Note: the resolver's degrade-`console.warn` wording changes (old "degrading — invalid/missing segment indices" → new "dropped all N…"/"kept M of N…"); no test asserts the old string, and `lib/gemini.ts`'s own `[timestamp-miss]` warn is independent.
 
 - [ ] **Step 8: Commit** — `feat(timestamps): lenient resolver — keep valid tokens via LIS, drop only bad ones`. Use `git commit -F -` with a quoted-EOF heredoc; end the body with:
   ```
