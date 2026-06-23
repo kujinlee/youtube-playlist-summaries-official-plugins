@@ -26,7 +26,7 @@
 
 **Files:**
 - Modify: `lib/gemini.ts` (`generateSummary` 147-195; `generateDeepDiveFromTranscript` 322-343; `generateDeepDiveCombined` 374-404)
-- Test: `tests/lib/gemini.test.ts` (add guard tests + convert 12 existing tests); `tests/lib/gemini-deepdive-timestamps.test.ts` (add 1 guard test); `tests/lib/gemini-deepdive-combined.test.ts` (add 1 warn-only test)
+- Test: `tests/lib/gemini.test.ts` (add guard tests + convert 13 existing tests); `tests/lib/gemini-deepdive-timestamps.test.ts` (add 1 guard test); `tests/lib/gemini-deepdive-combined.test.ts` (add 1 warn-only test)
 
 **Interfaces:**
 - Consumes: existing `generateJson`, `resolveTranscriptTokens`, `buildIndexedTranscript`, `computeOverallScore`, `trimToWords`.
@@ -229,24 +229,23 @@ Expected: all green.
   - When `force`, the re-gen branch runs regardless of version and stamps `current` (the true CURRENT_* value passed by callers).
 - Consumes: existing `needsResummarize`, `needsRegenerate`, `writeSummaryDoc`, `writeDeepDiveDoc`, `runHtmlDoc`, `runDeepDiveHtml`.
 
-- [ ] **Step 1: Write failing tests — summary** (append to `tests/lib/html-doc/ensure.test.ts`)
+- [ ] **Step 1: Write failing tests — summary** (append to `tests/lib/html-doc/ensure.test.ts`). FIRST add the missing import at the top of the file (it is NOT currently imported): `import { CURRENT_DOC_VERSION } from '../../../lib/doc-version';`. Note: the suite's seeded video id is `'vid11111111'`, the folder is `'/out'`, and `patches` is a **per-test local const** (not a shared helper) — define it locally exactly as the existing tests do (`(indexStore.updateVideoFields as jest.Mock).mock.calls.map((c) => c[2])`).
 
 ```ts
 it('force=true on a current doc → re-summarizes and stamps current (not inflated)', async () => {
   withVideo({ docVersion: { major: 3, minor: 3 }, summaryHtml: 'htmls/base.html' });
-  await ensureHtmlDoc('v1', 'out', () => {}, CURRENT_DOC_VERSION, true);
+  await ensureHtmlDoc('vid11111111', '/out', () => {}, CURRENT_DOC_VERSION, true);
   expect(pipeline.writeSummaryDoc).toHaveBeenCalledWith(expect.objectContaining({ baseName: 'base' }));
+  const patches = (indexStore.updateVideoFields as jest.Mock).mock.calls.map((c) => c[2]);
   expect(patches).toEqual(expect.arrayContaining([expect.objectContaining({ docVersion: { major: 3, minor: 3 } })]));
 });
 
 it('force=false on a current doc → no-op (regression guard)', async () => {
   withVideo({ docVersion: { major: 3, minor: 3 }, summaryHtml: 'htmls/base.html' });
-  await ensureHtmlDoc('v1', 'out', () => {}, CURRENT_DOC_VERSION, false);
+  await ensureHtmlDoc('vid11111111', '/out', () => {}, CURRENT_DOC_VERSION, false);
   expect(pipeline.writeSummaryDoc).not.toHaveBeenCalled();
 });
 ```
-
-(Use the file's existing `withVideo`/`patches`/`CURRENT_DOC_VERSION` helpers and the actual videoId/outputFolder the suite uses — read the top of the file before writing.)
 
 - [ ] **Step 2: Run — confirm RED** (`npx jest html-doc/ensure -t force`).
 
@@ -328,8 +327,10 @@ import os from 'os';
 import path from 'path';
 import { auditTimestamps, hasLeadingTimestamp } from '../../lib/timestamp-audit';
 
+// MUST root the temp dir under $HOME — auditTimestamps → readIndex → assertOutputFolder
+// rejects any folder outside the home directory (mirrors tests/lib/deep-dive/ensure.test.ts).
 function seed(videos: any[], files: Record<string, string>) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit-'));
+  const dir = fs.mkdtempSync(path.join(os.homedir(), '.audit-test-'));
   fs.writeFileSync(path.join(dir, 'playlist-index.json'), JSON.stringify({ videos }));
   for (const [rel, body] of Object.entries(files)) {
     fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
@@ -351,7 +352,9 @@ it('counts only line-leading ▶ and classifies stuck vs would-regen', () => {
       'a.md': '## 1\n▶ [0:00](u)\n\nbody',
       'b.md': '## 1\n\nbody',
       'c.md': '## 1\n\nbody',
-      'd.md': 'see ▶ inline here\n```\n▶ fenced\n```',                              // no LINE-LEADING ▶
+      // No LINE-LEADING ▶: one inline, one indented inside a fence. (/^▶/m has NO fence
+      // awareness — a ▶ at column 0 of ANY line, fenced or not, matches; so the fenced ▶ is indented.)
+      'd.md': 'see ▶ inline here\n```\n  ▶ indented in fence\n```',
     },
   );
   const r = auditTimestamps(dir);
@@ -543,7 +546,7 @@ it('a throwing ensure is skipped and the batch continues', async () => {
 });
 ```
 
-(Note the `ensureHtmlDoc` call passes `undefined` for `current` so the default `CURRENT_DOC_VERSION` applies; `true` is `force`.)
+(Note the `ensureHtmlDoc` call passes `undefined` for `current` so the default `CURRENT_DOC_VERSION` applies; `true` is `force`. `readIndex` is intentionally NOT mocked — `tsCount` (Step 3) catches its throw on the synthetic folder `'f'` and returns 0, so the run-path tests reach the mocked `ensure*` calls and assert on them, not on before/after deltas.)
 
 - [ ] **Step 2: Run — confirm RED** (`npx jest timestamp-repair`).
 
@@ -566,12 +569,18 @@ export interface RepairResult { dryRun: boolean; planned: RepairItem[]; repaired
 
 const noop = (_e: ProgressEvent): void => {};
 
+// before/after ▶ counts are informational logging only — a read failure must NEVER abort the
+// batch (and in unit tests, where ensure* is mocked, readIndex on a synthetic folder will throw).
 function tsCount(folder: string, id: string, kind: 'summary' | 'deep-dive'): number {
-  const v = readIndex(folder).videos.find((x) => x.id === id);
-  const rel = kind === 'summary' ? v?.summaryMd : v?.deepDiveMd;
-  if (!rel) return 0;
-  const abs = path.join(folder, rel);
-  return fs.existsSync(abs) ? countLeadingTimestamps(fs.readFileSync(abs, 'utf8')) : 0;
+  try {
+    const v = readIndex(folder).videos.find((x) => x.id === id);
+    const rel = kind === 'summary' ? v?.summaryMd : v?.deepDiveMd;
+    if (!rel) return 0;
+    const abs = path.join(folder, rel);
+    return fs.existsSync(abs) ? countLeadingTimestamps(fs.readFileSync(abs, 'utf8')) : 0;
+  } catch {
+    return 0;
+  }
 }
 
 export async function repairTimestamps(folder: string, opts: RepairOptions): Promise<RepairResult> {

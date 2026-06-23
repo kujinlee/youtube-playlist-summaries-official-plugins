@@ -50,7 +50,7 @@ Per-generator scope:
 Logic lives in **`lib/timestamp-audit.ts`** (`auditTimestamps(folder): AuditReport`), tested under `tests/lib/`. **`scripts/audit-timestamps.ts`** is a thin `ts-node` wrapper (arg-parse + console + exit code), mirroring how `scripts/rerender-html.ts` delegates to `reRenderAll`. Read-only, no Gemini.
 
 - **Input set:** read the index; classify each video by its index entry. Summaries = videos with `summaryMd`; deep-dives = videos with `deepDiveMd`. (Split via the index, not a `-deep-dive.md` filename scan.)
-- **▶ detection (M3):** read the `.md` on disk and test **line-leading** `▶` (`/^▶/m`), not bare `includes('▶')` — matches the renderer and avoids fenced-prose false positives.
+- **▶ detection (M3):** read the `.md` on disk and test **line-leading** `▶` (`/^▶/m`), not bare `includes('▶')` — matches the renderer's leading-marker convention and rejects inline-prose `▶`. (Caveat: `/^▶/m` is not fence-aware — a `▶` at column 0 of a fenced line would still match; acceptable, as authored summary/deep-dive bodies never begin a fenced line with `▶`.)
 - **Version source (H2):** stored version from `video.docVersion ?? {major:1,minor:0}` (summaries) / `video.deepDiveVersion ?? {major:1,minor:0}` (deep-dives) — absent is treated as PRE_FEATURE, mirroring `ensure.ts`.
 - **Categories per kind:** `total`, `withTs`, `noTsWouldRegen` (no ▶ AND stored.major < current.major), `noTsStuck` (no ▶ AND stored.major == current.major), `mdMissing` (index points to a `.md` not on disk — distinct, not counted "with ▶").
 - **Stuck thresholds:** summary current major = `CURRENT_DOC_VERSION.major` (3); deep-dive current major = `CURRENT_DEEP_DIVE_VERSION.major` (2).
