@@ -34,4 +34,15 @@ describe('generateDeepDiveFromTranscript with timestamps', () => {
     const prompt = (generateContent.mock.calls as any)[0][0] as string;
     expect(prompt).toContain('Korean (한국어)');
   });
+
+  it('retries once when attempt 1 lacks ▶, then resolves on attempt 2', async () => {
+    // Cast to jest.Mock to allow overriding the inferred literal return type with different text fixtures.
+    (generateContent as jest.Mock)
+      .mockResolvedValueOnce({ response: { text: () => '## A\n\nbody\n\n## B\n\nmore' } })
+      .mockResolvedValueOnce({ response: { text: () => '## A\n\n[[TS:0]]\n\nbody\n\n## B\n\n[[TS:1]]\n\nmore' } });
+    const { generateDeepDiveFromTranscript } = await import('../../lib/gemini');
+    const out = await generateDeepDiveFromTranscript(SEGMENTS, 'en', 'vid123');
+    expect(generateContent).toHaveBeenCalledTimes(2);
+    expect(out).toContain('▶');
+  });
 });

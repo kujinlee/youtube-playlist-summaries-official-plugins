@@ -144,6 +144,16 @@ function computeOverallScore(r: GeminiSummaryResponse['ratings']): number {
   return (r.usefulness + r.depth + r.originality + r.recency + r.completeness) / 5;
 }
 
+/** True if the resolved text carries at least one ▶ timestamp line (all-or-nothing — see resolveTranscriptTokens). */
+function hasTimestamp(s: string): boolean {
+  return s.includes('▶');
+}
+
+/** Neutral observability warn for a generation that had segments but produced no ▶ (the miss may be deterministic). */
+function warnTimestampMiss(videoId: string, segmentCount: number, attempts: number): void {
+  console.warn(`[timestamp-miss] ${videoId}: ${segmentCount} segments but 0 timestamps after ${attempts} attempt(s)`);
+}
+
 export async function generateSummary(
   segments: TranscriptSegment[],
   language: 'en' | 'ko',
@@ -179,15 +189,23 @@ The transcript is given as an indexed list, one segment per line as [<index> @<t
 ${indexedTranscript}
 </transcript>`;
 
-  try {
+  const attempt = async (): Promise<GeminiSummaryResponse> => {
     const parsed = await generateJson(model, prompt, GeminiResponseSchema, 'summary');
     const { ratings, videoType, audience, tags } = parsed;
-    // Resolve [[TS:i]] tokens into ▶ lines (segment index → real timestamp). Degrades to no
-    // timestamps if Gemini's indices are invalid — the summary itself is unaffected.
     const summary = resolveTranscriptTokens(parsed.summary, segments, videoId);
     const tldr = parsed.tldr ? trimToWords(parsed.tldr, 25) : undefined;
     const takeaways = parsed.takeaways?.map((t) => trimToWords(t, 20));
     return { summary, ratings, overallScore: computeOverallScore(ratings), videoType, audience, tags, tldr, takeaways };
+  };
+  try {
+    let result = await attempt();
+    // Guard: segments existed but no ▶ resolved → one re-roll (the miss is often stochastic). A throw
+    // from attempt() propagates (error path unchanged); only the success-but-zero-▶ case retries.
+    if (segments.length > 0 && !hasTimestamp(result.summary)) {
+      result = await attempt();
+      if (!hasTimestamp(result.summary)) warnTimestampMiss(videoId, segments.length, 2);
+    }
+    return result;
   } catch (err) {
     const cause = err instanceof Error ? err.message : String(err);
     throw new Error(`Gemini summary failed: ${cause}`, { cause: err });
@@ -333,9 +351,17 @@ export async function generateDeepDiveFromTranscript(
     buildDeepDivePrompt(lang, 'transcript', true) +
     buildIndexedTranscriptBlock(indexed);
 
-  try {
+  const attempt = async (): Promise<string> => {
     const result = await model.generateContent(prompt, { timeout: REQUEST_TIMEOUT_MS });
     return resolveTranscriptTokens(result.response.text(), segments, videoId);
+  };
+  try {
+    let out = await attempt();
+    if (segments.length > 0 && !hasTimestamp(out)) {
+      out = await attempt();
+      if (!hasTimestamp(out)) warnTimestampMiss(videoId, segments.length, 2);
+    }
+    return out;
   } catch (err) {
     const cause = err instanceof Error ? err.message : String(err);
     throw new Error(`Gemini deep-dive (transcript) failed: ${cause}`, { cause: err });
@@ -396,7 +422,9 @@ export async function generateDeepDiveCombined(
   };
   try {
     const result = await model.generateContent(request, { timeout: REQUEST_TIMEOUT_MS });
-    return resolveTranscriptTokens(result.response.text(), segments, videoId);
+    const out = resolveTranscriptTokens(result.response.text(), segments, videoId);
+    if (segments.length > 0 && !hasTimestamp(out)) warnTimestampMiss(videoId, segments.length, 1);
+    return out;
   } catch (err) {
     const cause = err instanceof Error ? err.message : String(err);
     throw new Error(`Gemini deep-dive (combined) failed: ${cause}`, { cause: err });

@@ -16,7 +16,7 @@ const mockGenerateContent = jest.fn();
 const mockGetGenerativeModel = jest.fn();
 
 beforeEach(() => {
-  jest.clearAllMocks();
+  jest.resetAllMocks();
   mockGetGenerativeModel.mockReturnValue({ generateContent: mockGenerateContent });
   (GoogleGenerativeAI as jest.Mock).mockImplementation(() => ({
     getGenerativeModel: mockGetGenerativeModel,
@@ -30,7 +30,7 @@ afterEach(() => {
 
 describe('generateSummary', () => {
   it('returns summary text and ratings with values in range 1–5', async () => {
-    mockGenerateContent.mockResolvedValueOnce({
+    mockGenerateContent.mockResolvedValue({
       response: {
         text: () => JSON.stringify({
           summary: 'A great video about machine learning',
@@ -50,7 +50,7 @@ describe('generateSummary', () => {
 
   it('computes overallScore as arithmetic mean of 5 ratings', async () => {
     // (2+4+2+4+3)/5 = 3.0
-    mockGenerateContent.mockResolvedValueOnce({
+    mockGenerateContent.mockResolvedValue({
       response: {
         text: () => JSON.stringify({
           summary: 'test',
@@ -83,7 +83,7 @@ describe('generateSummary', () => {
   });
 
   it('includes Korean language instruction in prompt for ko language', async () => {
-    mockGenerateContent.mockResolvedValueOnce({
+    mockGenerateContent.mockResolvedValue({
       response: {
         text: () => JSON.stringify({
           summary: '머신러닝에 관한 훌륭한 비디오',
@@ -120,7 +120,7 @@ describe('generateSummary', () => {
   });
 
   it('returns videoType and audience when Gemini includes them', async () => {
-    mockGenerateContent.mockResolvedValueOnce({
+    mockGenerateContent.mockResolvedValue({
       response: {
         text: () => JSON.stringify({
           summary: 'test',
@@ -138,7 +138,7 @@ describe('generateSummary', () => {
   });
 
   it('returns undefined videoType and audience when Gemini omits them', async () => {
-    mockGenerateContent.mockResolvedValueOnce({
+    mockGenerateContent.mockResolvedValue({
       response: {
         text: () => JSON.stringify({
           summary: 'test',
@@ -168,7 +168,7 @@ describe('generateSummary', () => {
   });
 
   it('includes videoType and audience in prompt instructions', async () => {
-    mockGenerateContent.mockResolvedValueOnce({
+    mockGenerateContent.mockResolvedValue({
       response: {
         text: () => JSON.stringify({
           summary: 'test',
@@ -199,7 +199,7 @@ describe('generateSummary', () => {
   });
 
   it('returns tags array when Gemini includes them', async () => {
-    mockGenerateContent.mockResolvedValueOnce({
+    mockGenerateContent.mockResolvedValue({
       response: {
         text: () => JSON.stringify({
           summary: 'test',
@@ -215,7 +215,7 @@ describe('generateSummary', () => {
   });
 
   it('returns undefined tags when Gemini omits them', async () => {
-    mockGenerateContent.mockResolvedValueOnce({
+    mockGenerateContent.mockResolvedValue({
       response: {
         text: () => JSON.stringify({
           summary: 'test',
@@ -230,7 +230,7 @@ describe('generateSummary', () => {
   });
 
   it('includes tags and structured ## section instructions in prompt', async () => {
-    mockGenerateContent.mockResolvedValueOnce({
+    mockGenerateContent.mockResolvedValue({
       response: {
         text: () => JSON.stringify({
           summary: 'test',
@@ -250,7 +250,7 @@ describe('generateSummary', () => {
 
 describe('generateSummary — tldr and takeaways fields', () => {
   it('returns tldr and takeaways when Gemini includes them', async () => {
-    mockGenerateContent.mockResolvedValueOnce({
+    mockGenerateContent.mockResolvedValue({
       response: {
         text: () => JSON.stringify({
           summary: 'body text',
@@ -266,7 +266,7 @@ describe('generateSummary — tldr and takeaways fields', () => {
   });
 
   it('returns undefined tldr and takeaways when Gemini omits them', async () => {
-    mockGenerateContent.mockResolvedValueOnce({
+    mockGenerateContent.mockResolvedValue({
       response: {
         text: () => JSON.stringify({
           summary: 'body text',
@@ -282,7 +282,7 @@ describe('generateSummary — tldr and takeaways fields', () => {
 
 describe('generateSummary — timestamps', () => {
   it('sends an indexed transcript and asks for [[TS:i]] tokens', async () => {
-    mockGenerateContent.mockResolvedValueOnce({
+    mockGenerateContent.mockResolvedValue({
       response: { text: () => JSON.stringify({ summary: '## 1. A\nbody', ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 } }) },
     });
 
@@ -309,7 +309,7 @@ describe('generateSummary — timestamps', () => {
   });
 
   it('degrades to no timestamps when Gemini emits an out-of-range index', async () => {
-    mockGenerateContent.mockResolvedValueOnce({
+    mockGenerateContent.mockResolvedValue({
       response: { text: () => JSON.stringify({
         summary: '## 1. A\n[[TS:9]]\n\nbody',
         ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
@@ -321,6 +321,46 @@ describe('generateSummary — timestamps', () => {
     expect(result.summary).not.toMatch(/▶|\[\[TS:/);
     expect(result.summary).toContain('## 1. A');
     expect(result.summary).toContain('body');
+  });
+});
+
+describe('generateSummary — timestamp guard', () => {
+  const withTs = '## 1. A\n[[TS:0]]\n\nbody\n\n## Conclusion\n[[TS:1]]\n\nend';
+  const noTs = '## 1. A\n\nbody\n\n## Conclusion\n\nend';
+  const ratings = { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 };
+
+  it('retries once when attempt 1 has no ▶ and attempt 2 does (segments present)', async () => {
+    mockGenerateContent
+      .mockResolvedValueOnce({ response: { text: () => JSON.stringify({ summary: noTs, ratings }) } })
+      .mockResolvedValueOnce({ response: { text: () => JSON.stringify({ summary: withTs, ratings }) } });
+
+    const result = await generateSummary(SEGS, 'en', 'vid123');
+
+    expect(mockGenerateContent).toHaveBeenCalledTimes(2);
+    expect(result.summary).toContain('▶');
+  });
+
+  it('warns and returns the last result when both attempts lack ▶ (segments present)', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockGenerateContent.mockResolvedValue({ response: { text: () => JSON.stringify({ summary: noTs, ratings }) } });
+
+    const result = await generateSummary(SEGS, 'en', 'vid123');
+
+    expect(mockGenerateContent).toHaveBeenCalledTimes(2);
+    expect(result.summary).not.toContain('▶');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('[timestamp-miss] vid123'));
+    warn.mockRestore();
+  });
+
+  it('does NOT retry or warn when there are no segments', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockGenerateContent.mockResolvedValue({ response: { text: () => JSON.stringify({ summary: noTs, ratings }) } });
+
+    await generateSummary([], 'en', 'vid123');
+
+    expect(mockGenerateContent).toHaveBeenCalledTimes(1);
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('[timestamp-miss]'));
+    warn.mockRestore();
   });
 });
 

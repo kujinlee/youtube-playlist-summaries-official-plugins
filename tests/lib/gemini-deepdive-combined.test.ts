@@ -70,3 +70,12 @@ it('resolves [[TS:i]] tokens to ▶ lines in returned output', async () => {
   expect(out).toContain('▶ [0:00–0:30](https://www.youtube.com/watch?v=v&t=0s)');
   expect(out).not.toContain('[[TS:');
 });
+
+it('warns but does NOT retry when segments present and no ▶ (expensive video call)', async () => {
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  generateContent.mockResolvedValue({ response: { text: () => '## Deep\nbody' } });
+  await generateDeepDiveCombined('https://y/watch?v=v', SEGMENTS, 'en', 'v');
+  expect(generateContent).toHaveBeenCalledTimes(1);
+  expect(warn).toHaveBeenCalledWith(expect.stringContaining('[timestamp-miss] v'));
+  warn.mockRestore();
+});
