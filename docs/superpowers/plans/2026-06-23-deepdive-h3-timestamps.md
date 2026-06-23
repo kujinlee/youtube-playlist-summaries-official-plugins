@@ -18,9 +18,9 @@
 **Files:**
 - Modify: `lib/html-doc/render-deep-dive.ts` (add `tsAnchor` + `renderSubsections`; change `renderSection`'s `restHtml`)
 - Modify: `lib/deep-dive/version.ts` (`{2,1}→{2,2}` + comment)
-- Test: `tests/lib/html-doc/render-deep-dive.test.ts`; `tests/lib/deep-dive/version.test.ts`
+- Test: `tests/lib/html-doc/render-deep-dive.test.ts`; `tests/lib/deep-dive/version.test.ts`; `tests/components/VideoMenu.test.tsx` (bump the `deepDiveVersion: {2,1}` fixtures → `{2,2}`, primarily the "Deep Dive doc" LINK test ~line 34 which goes stale→`<button>` otherwise)
 
-- [ ] **Step 1: Write failing tests.** Update `version.test.ts` first: line ~5-6 `it('current deep-dive version is 2.1' …)` → title `is 2.2` and `toEqual({ major: 2, minor: 2 })`. Then add a new render `describe` (uses the public `renderDeepDiveHtml(md, sourceMd)`):
+- [ ] **Step 1: Write failing tests.** Update `version.test.ts` first: line ~5-6 `it('current deep-dive version is 2.1' …)` → title `is 2.2` and `toEqual({ major: 2, minor: 2 })`. (Do NOT touch `version.test.ts:16`'s `{2,1}` — it's an explicit `needsRegenerate` arg, not the constant.) Also bump `tests/components/VideoMenu.test.tsx`'s `deepDiveVersion: { major: 2, minor: 1 }` fixtures → `{ major: 2, minor: 2 }` (the link test goes stale→button otherwise). Then add a new render `describe` (uses the public `renderDeepDiveHtml(md, sourceMd)`):
 
 ```ts
 describe('H3 subsection timestamps', () => {
@@ -34,10 +34,10 @@ describe('H3 subsection timestamps', () => {
     expect((out.match(/0:36–1:42/g) ?? []).length).toBe(1); // folded once, not duplicated
   });
 
-  it('leaves a ### subsection with no ▶ unchanged (byte-identical <h3>)', () => {
+  it('leaves a ### subsection with no ▶ unchanged (plain <h3>, no trailing .ts)', () => {
     const out = render('## Sec\n▶ [0:00–0:30](https://www.youtube.com/watch?v=v1&t=0s)\nLead.\n\n### Plain Sub\nbody text.\n');
+    // Plain <h3> with NO trailing anchor (the H2 has its own .ts link — assert the H3 shape directly).
     expect(out).toContain('<h3>Plain Sub</h3>');
-    expect(out).not.toContain('class="ts" href="https://www.youtube.com/watch?v=v1&amp;t=0s" target="_blank" rel="noopener noreferrer">(0:00');
   });
 
   it('renders a bold ### heading inside a section as <h3><strong>…</strong></h3>', () => {
@@ -127,7 +127,7 @@ Then in `renderSection`: replace the inline H2 `tsHtml` with `tsAnchor(ts)`, and
 
 - [ ] **Step 5: Run — GREEN** (`npx jest render-deep-dive` + `npx jest deep-dive/version`). Confirm the existing `section restructure` tests (the `### Detail` no-▶ fixture) still pass (`<h3>Detail</h3>`, `not.toContain('▶')`).
 
-- [ ] **Step 6: Full suite + types + E2E check** — `npm test` then `npx tsc --noEmit`. Specifically verify the deep-dive E2E specs that seed `deepDiveVersion {2,0}` (`tests/e2e/deep-dive-doc.spec.ts:171,312`) still behave — `isOlder({2,0},{2,2})` is still `true` (already was vs `{2,1}`), so the re-render branch they relied on is unchanged. If any unit/E2E asserts the old `{2,1}` elsewhere, update to `{2,2}`. All green.
+- [ ] **Step 6: Full suite + types + blast-radius grep** — first `grep -rn "minor: 1" tests/` and reconcile each hit: if it feeds `CURRENT_DEEP_DIVE_VERSION` (a stamped doc compared to the constant, e.g. `VideoMenu.test.tsx`) → bump to `{2,2}`; if it's a local literal passed as an explicit `current`/`needsRegenerate` arg (`ensure.test.ts`, `version.test.ts:16`) → leave. Then `npm test` + `npx tsc --noEmit`. The deep-dive E2E specs seeding `{2,0}` (`deep-dive-doc.spec.ts:171,312`) are unaffected (`isOlder({2,0},{2,2})` still `true`, same branch). All green.
 
 - [ ] **Step 7: Commit** — `feat(deep-dive): fold H3 subsection ▶ into muted .ts links; deep-dive version 2.2`. `git commit -F -` quoted-EOF heredoc; end body with:
   ```
