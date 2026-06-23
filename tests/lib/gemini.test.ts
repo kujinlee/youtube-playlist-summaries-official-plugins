@@ -435,7 +435,7 @@ describe('generateDeepDive', () => {
 });
 
 describe('transcribeViaGemini', () => {
-  const URL = 'https://www.youtube.com/watch?v=vidGated';
+  const VIDEO_URL = 'https://www.youtube.com/watch?v=vidGated';
 
   function mockTranscriptResponse(segments: Array<{ startSec: number; text: string }>) {
     mockGenerateContent.mockResolvedValueOnce({
@@ -446,7 +446,7 @@ describe('transcribeViaGemini', () => {
   it('sends the YouTube URL as fileData and requests low media resolution', async () => {
     mockTranscriptResponse([{ startSec: 0, text: 'hello world' }]);
 
-    await transcribeViaGemini(URL, 'vidGated', 600);
+    await transcribeViaGemini(VIDEO_URL, 'vidGated', 600);
 
     const config = mockGetGenerativeModel.mock.calls[0][0] as {
       model: string;
@@ -458,7 +458,7 @@ describe('transcribeViaGemini', () => {
     const request = mockGenerateContent.mock.calls[0][0] as {
       contents: Array<{ parts: Array<{ fileData?: { fileUri: string; mimeType: string }; text?: string }> }>;
     };
-    expect(request.contents[0].parts[0].fileData).toEqual({ fileUri: URL, mimeType: 'video/mp4' });
+    expect(request.contents[0].parts[0].fileData).toEqual({ fileUri: VIDEO_URL, mimeType: 'video/mp4' });
     expect(request.contents[0].parts[1].text).toMatch(/entire video/i);
   });
 
@@ -471,7 +471,7 @@ describe('transcribeViaGemini', () => {
       { startSec: 30, text: 'last' },
     ]);
 
-    const segs = await transcribeViaGemini(URL, 'vidGated', 600);
+    const segs = await transcribeViaGemini(VIDEO_URL, 'vidGated', 600);
 
     expect(segs).toEqual([
       { text: 'first', offset: 0, duration: 10 },
@@ -484,7 +484,7 @@ describe('transcribeViaGemini', () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     mockTranscriptResponse([{ startSec: 0, text: 'a' }, { startSec: 30, text: 'b' }]); // lastOffset 30 / 600 = 5%
 
-    const segs = await transcribeViaGemini(URL, 'vidGated', 600);
+    const segs = await transcribeViaGemini(VIDEO_URL, 'vidGated', 600);
 
     expect(segs).toHaveLength(2);
     expect(warn).toHaveBeenCalledWith('[transcribe-coverage] low coverage 5% for vidGated');
@@ -492,24 +492,26 @@ describe('transcribeViaGemini', () => {
   });
 
   it('throws after retries when Gemini yields zero usable segments', async () => {
-    jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     mockGenerateContent.mockResolvedValue({ response: { text: () => JSON.stringify({ segments: [] }) } });
 
-    await expect(transcribeViaGemini(URL, 'vidGated', 600, 1, 0)).rejects.toThrow(/Gemini transcription failed for vidGated/);
+    await expect(transcribeViaGemini(VIDEO_URL, 'vidGated', 600, 1, 0)).rejects.toThrow(/Gemini transcription failed for vidGated/);
+    warn.mockRestore();
   });
 
   it('throws after retries on invalid JSON', async () => {
-    jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     mockGenerateContent.mockResolvedValue({ response: { text: () => 'not json' } });
 
-    await expect(transcribeViaGemini(URL, 'vidGated', 600, 1, 0)).rejects.toThrow(/Gemini transcription failed for vidGated/);
+    await expect(transcribeViaGemini(VIDEO_URL, 'vidGated', 600, 1, 0)).rejects.toThrow(/Gemini transcription failed for vidGated/);
+    warn.mockRestore();
   });
 
   it('does not warn or divide by zero when durationSeconds is 0', async () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     mockTranscriptResponse([{ startSec: 0, text: 'a' }, { startSec: 30, text: 'b' }]);
 
-    const segs = await transcribeViaGemini(URL, 'vidGated', 0);
+    const segs = await transcribeViaGemini(VIDEO_URL, 'vidGated', 0);
 
     expect(segs).toHaveLength(2);
     expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('[transcribe-coverage]'));
@@ -522,7 +524,7 @@ describe('transcribeViaGemini', () => {
       { startSec: 40, text: 'kept' },
     ]);
 
-    const segs = await transcribeViaGemini(URL, 'vidGated', 100);
+    const segs = await transcribeViaGemini(VIDEO_URL, 'vidGated', 100);
 
     // filter (drop-empty) precedes sort+dedupe, so the empty row is gone before dedupe runs.
     expect(segs).toEqual([{ text: 'kept', offset: 40, duration: 5 }]);
