@@ -21,6 +21,7 @@ const mockFetchTranscriptSegments = jest.mocked(youtube.fetchTranscriptSegments)
 const mockDetectLanguage = jest.mocked(youtube.detectLanguage);
 const mockGenerateSummary = jest.mocked(gemini.generateSummary);
 const mockTranscribeViaGemini = jest.mocked(gemini.transcribeViaGemini);
+const mockExtractQuickView = jest.mocked(gemini.extractQuickView);
 const mockGeneratePdf = jest.mocked(pdf.generatePdf);
 const mockUpsertVideo = jest.mocked(indexStore.upsertVideo);
 const mockAssertOutputFolder = jest.mocked(indexStore.assertOutputFolder);
@@ -50,6 +51,8 @@ function makeSummaryResponse(overrides: Partial<GeminiSummaryResponse> = {}): Ge
     summary: 'A great summary',
     ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
     overallScore: 3,
+    tldr: 'This video explains the topic.',
+    takeaways: ['Point one', 'Point two'],
     ...overrides,
   };
 }
@@ -86,6 +89,7 @@ describe('runIngestion', () => {
     mockUpsertVideo.mockImplementation(() => {});
     mockReadIndex.mockReturnValue({ playlistUrl: '', outputFolder, videos: [] });
     mockWriteIndex.mockImplementation(() => {});
+    mockExtractQuickView.mockResolvedValue({ tldr: 'QV tldr', takeaways: ['qa', 'qb'] });
   });
 
   afterEach(() => {
@@ -576,6 +580,18 @@ describe('runIngestion', () => {
     const content = fs.readFileSync(path.join(outputFolder, files[0]), 'utf-8');
     expect(content).toContain('> [!summary] Quick Reference');
     expect(content).toContain('> **TL;DR:** This video explains X.');
+  });
+
+  it('persists DERIVED tldr/takeaways to the index when generateSummary omits them', async () => {
+    mockFetchPlaylistVideos.mockResolvedValue([makeVideoMeta('vid1')]);
+    mockFetchTranscriptSegments.mockResolvedValue([{ text: 't', offset: 0, duration: 5 }]);
+    mockGenerateSummary.mockResolvedValue(makeSummaryResponse({ tldr: undefined, takeaways: undefined }));
+    mockExtractQuickView.mockResolvedValue({ tldr: 'Derived.', takeaways: ['d1', 'd2'] });
+    await runIngestion(PLAYLIST_URL, outputFolder, () => {});
+    expect(mockUpsertVideo).toHaveBeenCalledWith(
+      outputFolder,
+      expect.objectContaining({ id: 'vid1', tldr: 'Derived.', takeaways: ['d1', 'd2'] }),
+    );
   });
 
   // --- New-items progress ---
@@ -1117,6 +1133,8 @@ describe('writeSummaryDoc', () => {
     fs.mkdirSync(outputFolder, { recursive: true });
     mockDetectLanguage.mockReturnValue('en');
     mockGeneratePdf.mockResolvedValue(undefined);
+    mockExtractQuickView.mockResolvedValue({ tldr: 'QV tldr', takeaways: ['qa', 'qb'] });
+    mockFetchTranscriptSegments.mockResolvedValue([{ text: 't', offset: 0, duration: 5 }]);
   });
 
   afterEach(() => {
@@ -1165,5 +1183,49 @@ describe('writeSummaryDoc', () => {
     expect(mockGenerateSummary).toHaveBeenCalled();
     const md = fsReal.readFileSync(`${outputFolder}/gated-video.md`, 'utf-8');
     expect(md).toContain('From Gemini fallback');
+  });
+
+  // — Quick Reference fallback (Issue 2) —
+  const qrInput = () => ({ videoId: 'vidQR', title: 'T', youtubeUrl: 'https://youtu.be/x', channel: 'C', durationSeconds: 300, outputFolder, baseName: 'doc' });
+  const qrRead = () => fsReal.readFileSync(`${outputFolder}/doc.md`, 'utf-8');
+
+  it('QR: both present → no extractQuickView call, callout from generateSummary values', async () => {
+    mockGenerateSummary.mockResolvedValue(makeSummaryResponse({ tldr: 'This video does X.', takeaways: ['a', 'b'] }));
+    const r = await writeSummaryDoc(qrInput());
+    expect(mockExtractQuickView).not.toHaveBeenCalled();
+    expect(qrRead()).toContain('> **TL;DR:** This video does X.');
+    expect(r.tldr).toBe('This video does X.');
+  });
+
+  it('QR: neither present → extractQuickView(baseContent) fallback inserts callout', async () => {
+    mockGenerateSummary.mockResolvedValue(makeSummaryResponse({ tldr: undefined, takeaways: undefined }));
+    mockExtractQuickView.mockResolvedValue({ tldr: 'Derived tldr.', takeaways: ['d1', 'd2'] });
+    const r = await writeSummaryDoc(qrInput());
+    expect(mockExtractQuickView).toHaveBeenCalledTimes(1);
+    const arg = mockExtractQuickView.mock.calls[0][0] as string;
+    expect(arg).toContain('video_id: "vidQR"'); // baseContent = full md (frontmatter present)
+    expect(arg).toContain('# T');
+    expect(qrRead()).toContain('> **TL;DR:** Derived tldr.');
+    expect(r.tldr).toBe('Derived tldr.');
+    expect(r.takeaways).toEqual(['d1', 'd2']);
+  });
+
+  it('QR: only tldr present → fallback derives both (partial discarded)', async () => {
+    mockGenerateSummary.mockResolvedValue(makeSummaryResponse({ tldr: 'partial only', takeaways: undefined }));
+    mockExtractQuickView.mockResolvedValue({ tldr: 'Derived.', takeaways: ['d1'] });
+    const r = await writeSummaryDoc(qrInput());
+    expect(mockExtractQuickView).toHaveBeenCalledTimes(1);
+    expect(qrRead()).toContain('> **TL;DR:** Derived.');
+    expect(r.tldr).toBe('Derived.'); // partial 'partial only' discarded
+  });
+
+  it('QR: extractQuickView throws → graceful (md written without callout, no throw, undefined values)', async () => {
+    mockGenerateSummary.mockResolvedValue(makeSummaryResponse({ tldr: undefined, takeaways: undefined }));
+    mockExtractQuickView.mockRejectedValue(new Error('qv failed'));
+    const r = await writeSummaryDoc(qrInput());
+    expect(qrRead()).not.toContain('> [!summary] Quick Reference');
+    expect(qrRead()).toContain('# T'); // file still written
+    expect(r.tldr).toBeUndefined();
+    expect(r.takeaways).toBeUndefined();
   });
 });
