@@ -127,7 +127,7 @@ videos). No chunking needed for the playlist's video lengths (≤ ~1 h observed)
 | Gemini returns 0 segments / invalid JSON after retries | resolver throws clear error → summary fails (as today) |
 | Gemini fetch fails (private/age-gated/too long) | same → clear error |
 | Gemini under-covers a long video | return partial + dev-logger warning (coverage safeguard) |
-| Segments out of order / dup `startSec` | sorted on map; equal starts → 0 duration (harmless) |
+| Segments out of order / dup `startSec` | sorted on map; equal starts → **deduped (keep first)** so resolved offsets stay strictly increasing |
 | Language detection | runs on joined Gemini text — unchanged |
 | `.md` output | identical format; gated-video summaries carry ▶ timestamps (~1.6 s accuracy). No format change |
 

@@ -304,12 +304,35 @@ it('throws after retries on invalid JSON', async () => {
 
   await expect(transcribeViaGemini(URL, 'vidGated', 600, 1, 0)).rejects.toThrow(/Gemini transcription failed for vidGated/);
 });
+
+it('does not warn or divide by zero when durationSeconds is 0', async () => {
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  mockTranscriptResponse([{ startSec: 0, text: 'a' }, { startSec: 30, text: 'b' }]);
+
+  const segs = await transcribeViaGemini(URL, 'vidGated', 0);
+
+  expect(segs).toHaveLength(2);
+  expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('[transcribe-coverage]'));
+  warn.mockRestore();
+});
+
+it('drops an empty-text row even when it shares a startSec with a non-empty row', async () => {
+  mockTranscriptResponse([
+    { startSec: 40, text: '   ' },   // empty; would sort first among the equal-startSec pair
+    { startSec: 40, text: 'kept' },
+  ]);
+
+  const segs = await transcribeViaGemini(URL, 'vidGated', 100);
+
+  // filter (drop-empty) precedes sort+dedupe, so the empty row is gone before dedupe runs.
+  expect(segs).toEqual([{ text: 'kept', offset: 40, duration: 5 }]);
+});
 ```
 
 - [ ] **Step 9: Run to verify all transcribe tests pass**
 
 Run: `npx jest tests/lib/gemini.test.ts -t transcribeViaGemini`
-Expected: PASS (5 tests).
+Expected: PASS (7 tests).
 
 - [ ] **Step 10: Typecheck + full suite**
 
@@ -479,30 +502,27 @@ In `tests/lib/pipeline.test.ts`, add a mocked handle for `transcribeViaGemini` n
 const mockTranscribeViaGemini = jest.mocked(gemini.transcribeViaGemini);
 ```
 
-Add this test (place it near the other `writeSummaryDoc` tests; `transcript-source` is intentionally NOT mocked — the real resolver delegates to the already-mocked `youtube` and `gemini`):
+Add this test **inside the existing `describe('writeSummaryDoc')` block** (`tests/lib/pipeline.test.ts:1027`) — that block already provides the `outputFolder` fixture (`beforeEach` creates it, `afterEach` removes it AND calls `jest.clearAllMocks()`, which clears the `…Once` queue so nothing leaks). `transcript-source` is intentionally NOT mocked — the real resolver delegates to the already-mocked `youtube` and `gemini`:
 
 ```ts
-it('writeSummaryDoc falls back to Gemini transcription when captions are unavailable', async () => {
-  const dir = makeTempDir();
+it('falls back to Gemini transcription when captions are unavailable', async () => {
   mockFetchTranscriptSegments.mockRejectedValueOnce(new Error('Transcript is disabled on this video'));
   mockTranscribeViaGemini.mockResolvedValueOnce([{ text: 'gemini transcript', offset: 0, duration: 5 }]);
-  mockDetectLanguage.mockReturnValue('en');
   mockGenerateSummary.mockResolvedValue(makeSummaryResponse({ summary: 'From Gemini fallback' }));
 
-  const result = await writeSummaryDoc({
-    videoId: 'vidGated',
+  await writeSummaryDoc({
+    videoId: 'vidGated11',
     title: 'Gated Video',
     youtubeUrl: 'https://youtube.com/watch?v=vidGated',
     durationSeconds: 300,
-    outputFolder: dir,
+    outputFolder,            // from the describe('writeSummaryDoc') beforeEach fixture
     baseName: 'gated-video',
   });
 
-  expect(mockTranscribeViaGemini).toHaveBeenCalledWith('https://youtube.com/watch?v=vidGated', 'vidGated', 300);
+  expect(mockTranscribeViaGemini).toHaveBeenCalledWith('https://youtube.com/watch?v=vidGated', 'vidGated11', 300);
   expect(mockGenerateSummary).toHaveBeenCalled();
-  const written = fsReal.readFileSync(path.join(dir, 'gated-video.md'), 'utf-8');
-  expect(written).toContain('From Gemini fallback');
-  fsReal.rmSync(dir, { recursive: true, force: true });
+  const md = fsReal.readFileSync(`${outputFolder}/gated-video.md`, 'utf-8');
+  expect(md).toContain('From Gemini fallback');
 });
 ```
 
@@ -538,10 +558,21 @@ Replace line 43 inside `writeSummaryDoc`:
 Run: `npx jest tests/lib/pipeline.test.ts -t "falls back to Gemini"`
 Expected: PASS.
 
-- [ ] **Step 5: Run the whole pipeline suite (regression check)**
+- [ ] **Step 5: Fix the coincidental regression test, then run the whole pipeline suite**
+
+One existing test — `describe('runIngestion')` → `it('continues to next video when one video fails')` (`tests/lib/pipeline.test.ts:113`) — mocks `fetchTranscriptSegments.mockRejectedValueOnce` for vid1. After this task, `writeSummaryDoc` calls the **real** resolver, which catches that rejection and falls through to the auto-mocked `transcribeViaGemini` (returns `undefined` by default → `if (segments.length)` on `undefined` → TypeError → re-thrown). The test would still pass, but **by accident** — a future change to the gemini mock could silently break it. Make the cascade failure explicit by adding one line to that test, right after the `mockFetchTranscriptSegments` setup (lines 115-117):
+
+```ts
+    mockFetchTranscriptSegments
+      .mockRejectedValueOnce(new Error('No transcript available'))
+      .mockResolvedValueOnce([{ text: 'transcript', offset: 0, duration: 5 }]);
+    mockTranscribeViaGemini.mockRejectedValue(new Error('Gemini unavailable')); // vid1: both sources fail → error; vid2 uses captions so Gemini is never reached
+```
+
+(vid2's captions resolve via the second `…Once`, so the resolver returns before calling Gemini — the persistent reject is inert for vid2.)
 
 Run: `npx jest tests/lib/pipeline.test.ts`
-Expected: PASS — existing ingestion tests still green (the real resolver delegates to `mockFetchTranscriptSegments` for the captions path).
+Expected: PASS — the failing-video test now explicitly exercises the cascade; all other ingestion tests still green (the real resolver delegates to `mockFetchTranscriptSegments` for the captions path, never reaching Gemini).
 
 - [ ] **Step 6: Typecheck + full suite**
 
@@ -575,3 +606,13 @@ git commit -m "feat(transcript): writeSummaryDoc uses caption→Gemini resolver"
 **Placeholder scan:** none — all steps carry exact code/commands.
 
 **Type consistency:** `transcribeViaGemini(youtubeUrl, videoId, durationSeconds)` and `resolveTranscriptSegments(videoId, youtubeUrl, durationSeconds)` argument orders are used identically in their definitions, callers, and tests. `TranscriptSegment` shape consistent throughout.
+
+## Adversarial review resolutions (applied 2026-06-22)
+
+Review: `docs/reviews/plan-transcript-fallback-gemini-review.md` (Claude stood in for usage-limited Codex). Verdict was `needs-rework` with no Blocking/compile defects. Applied:
+- **High-1:** Task 3 Step 5 now makes the failing-video regression test set `mockTranscribeViaGemini.mockRejectedValue(...)` so the cascade fails explicitly (no coincidental pass via auto-mock `undefined`→TypeError).
+- **Medium-1:** Task 3 gated-path test moved inside `describe('writeSummaryDoc')`, using its `outputFolder` fixture + `afterEach` cleanup (no leakage of `…Once` mocks).
+- **Medium-2:** Task 1 Step 8 adds a `durationSeconds: 0` test (no warn, no div-by-zero).
+- **Low-1:** Task 1 Step 8 adds an equal-`startSec`/first-empty dedupe test.
+- **Low-3:** spec error-table row corrected (dedupe, not 0-duration).
+- **Medium-3 / Low-2 / Low-4:** confirmed correct/intentional — no change.
