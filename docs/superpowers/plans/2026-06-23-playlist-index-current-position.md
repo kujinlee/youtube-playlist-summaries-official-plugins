@@ -53,7 +53,7 @@ describe('playlistIndex tracks current playlist position', () => {
     expect(w.find((v) => v.id === 'vidA')?.playlistIndex).toBe(2);
   });
 
-  it('un-archives AND re-numbers a removed video that returns to the playlist', async () => {
+  it('un-archives (via reconcile upsert) AND re-numbers a removed video that returns', async () => {
     const d = makeIndexedVideo('vidD', { playlistIndex: 9, archived: true, removedFromPlaylist: true });
     const others = ['vidW', 'vidX', 'vidY'].map((id) => makeIndexedVideo(id));
     mockReadIndex.mockReturnValue({ playlistUrl: PLAYLIST_URL, outputFolder, videos: [...others, d] });
@@ -62,10 +62,14 @@ describe('playlistIndex tracks current playlist position', () => {
       ['vidW', 'vidX', 'vidY', 'vidD'].map((id) => makeVideoMeta(id)),
     );
     await runIngestion(PLAYLIST_URL, outputFolder, () => {});
-    const dw = lastWrittenVideos().find((v) => v.id === 'vidD');
-    expect(dw?.playlistIndex).toBe(4);
-    expect(dw?.archived).toBe(false);
-    expect(dw?.removedFromPlaylist).toBe(false);
+    // index-store is mocked, so the reconcile un-archive is observable only at the upsert call
+    // (the re-stamp pass re-reads the mocked seeded array). Mirror the existing :332 test.
+    expect(mockUpsertVideo).toHaveBeenCalledWith(
+      outputFolder,
+      expect.objectContaining({ id: 'vidD', archived: false, removedFromPlaylist: false }),
+    );
+    // playlistIndex is re-derived by the final writeIndex re-stamp pass (vidD is in positionMap)
+    expect(lastWrittenVideos().find((v) => v.id === 'vidD')?.playlistIndex).toBe(4);
   });
 
   it('re-numbers an archived-but-still-in-playlist video (kept archived)', async () => {
@@ -102,7 +106,7 @@ describe('playlistIndex tracks current playlist position', () => {
 });
 ```
 
-- [ ] **Step 2: Run — confirm RED** (`npx jest pipeline -t "tracks current playlist position"`). The stale/collision/returned/archived cases fail (old write-once keeps the frozen value).
+- [ ] **Step 2: Run — confirm RED** (`npx jest pipeline -t "tracks current playlist position"`). The stale/collision/archived `playlistIndex` assertions fail (old write-once keeps the frozen value). For the returned-video test, the `playlistIndex` assertion is the one that flips RED→GREEN; its `mockUpsertVideo` un-archive assertion passes both before and after the flip (reconcile is independent of the change). (`mockUpsertVideo` is the existing `jest.mocked(indexStore.upsertVideo)` already declared at the top of the file.)
 
 - [ ] **Step 3: Implement the flip** in `lib/pipeline.ts`. Change the re-stamp expression (currently `playlistIndex: v.playlistIndex ?? positionMap.get(v.id),`) to:
 
