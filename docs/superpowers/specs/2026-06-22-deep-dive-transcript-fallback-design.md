@@ -44,30 +44,61 @@ Everything else in `write-doc.ts` (the 3-tier combined→transcript-only→video
 
 | Case | Before | After |
 |------|--------|-------|
-| Captions available | combined path, ▶ timestamps | **unchanged** (resolver returns captions; no Gemini transcribe call) |
-| Captions gated/empty | video-only, **no ▶** | **Gemini transcribe → combined path → ▶ timestamps** |
-| Captions gated **and** Gemini transcribe fails | video-only, no ▶ | video-only, no ▶ (**unchanged** graceful floor) |
+| Captions return ≥1 segment | combined path, ▶ timestamps | **unchanged** (resolver returns captions; NO Gemini transcribe call) |
+| Captions **empty `[]`** (structurally present, no throw) | video-only, **no ▶** | **Gemini transcribe → combined path → ▶** (the resolver treats empty `[]` as a fall-through trigger — `transcript-source.ts:18`) |
+| Captions throw (gated/disabled) | video-only, **no ▶** | **Gemini transcribe → combined path → ▶** |
+| Captions unavailable **AND** Gemini transcribe fails | video-only, no ▶ | video-only, no ▶ (**unchanged** graceful floor — resolver throws → `catch` → `segments=null`) |
 
-**Cost:** only on **gated** deep-dives, one extra `transcribeViaGemini` call (`gemini-2.5-flash`, ~256k tokens ≈ cents) before the existing `generateDeepDiveCombined` (`gemini-2.5-pro`) call. Captioned videos (the majority) are unaffected — no extra call. Same cost discipline as PR #15.
+**Cost — stated honestly (corrects the first draft):**
+- **Net-new cost on a gated video = one `transcribeViaGemini` call** (`gemini-2.5-flash`, low-res, ~256k tokens ≈ cents). It is NOT a doubling of the expensive call: a gated deep-dive **already** uploaded the video to `gemini-2.5-pro` via the **video-only** path (`generateDeepDive`). The fix upgrades that same pro call from video-only → **combined** (video **+** transcript), which is strictly higher quality for a marginal token increase, and adds only the cheap flash transcribe in front.
+- **Empty-but-successful captions** (`[]`) now also trigger the flash transcribe (previously they went straight to video-only). This is the intended trade (timestamps + transcript-grounded depth for a cents-level flash call), but it IS a behavioral change — owned here, not hidden.
+- Captioned videos (the majority, ≥1 segment) are completely unaffected — no extra call.
+
+**Why `generateDeepDiveCombined` (keeps the video) and not `generateDeepDiveFromTranscript` (segments-only, no video upload) for Gemini-sourced segments** — H2 from review, decided:
+- `generateDeepDiveFromTranscript` (`gemini.ts:23`) *does* resolve `[[TS:i]]` → ▶ and would avoid the pro **video** upload, so it is the cheaper way to get timestamps. **But** the pro video upload is **not new** for a gated video (the video-only path already did it), and the combined path's **visual grounding is the entire value proposition of a deep-dive**. Degrading gated-video deep-dives to transcript-only to save a cost that was already being paid would trade away depth for no marginal saving versus the status quo. So: **keep the existing cascade order (combined first)**. `generateDeepDiveFromTranscript` remains the existing 2nd-tier fallback when combined throws.
+- (Future optimization, out of scope: route Gemini-sourced segments to `generateDeepDiveFromTranscript` when the operator opts into a cheaper/no-video deep-dive. Not now.)
+
+**`durationSeconds === 0`** (schema allows `nonnegative()`): `transcribeViaGemini` already guards its coverage warning with `durationSeconds > 0` (`gemini.ts:544`), so a 0-duration video won't crash — it simply skips the low-coverage warning. No special handling needed; noted so it is not a surprise.
 
 ## Scope decisions (flagged for user review tomorrow)
 
-- **No version bump / no mass regeneration.** A deep-dive **major** bump would re-run the Gemini cascade for **every** deep-dive (expensive, and re-processes captioned ones needlessly); a **minor** bump only re-renders HTML from the existing `.md` (won't restore missing tokens). Neither cleanly targets "only the gated docs." So: the fix applies to **new generations and on-demand regenerations**. Existing timestamp-less deep-dives are restored by regenerating those specific videos (the user can trigger per-video). **Open question for the user:** do you want a one-off script to find + regenerate just the timestamp-less deep-dives whose captions are now available? (Default: no — leave on-demand.)
+- **No version bump / no blanket mass regeneration.** A deep-dive **major** bump would re-run the Gemini cascade for **every** deep-dive (expensive, and re-processes captioned ones needlessly); a **minor** bump only re-renders HTML from the existing `.md` (won't restore missing tokens). Neither cleanly targets "only the timestamp-less docs."
+- **But the existing broken docs must not be silently abandoned** (review M3). Resolution, without a blanket regen and without over-building:
+  1. **Verification repairs the visible docs (in this branch):** after the fix lands, regenerate the identified timestamp-less deep-dives whose captions are confirmed available (`v4F1gFy-hqg` *software-fundamentals*, and `bC9BaY18b0o` if time permits) and assert ▶ timestamps now appear end-to-end. This proves the fix **and** repairs the specific docs the user saw — so the reported symptom is gone, not deferred.
+  2. **Corpus-wide repair = explicit offer, not silent default.** A small operator-invoked script that scans the index for ▶-less deep-dives with now-available captions and regenerates only those is straightforward to add, but it is **not built in this branch** (it would re-run Gemini across an unknown set of videos — a cost decision that is the user's to make). It is surfaced as a tracked open question for tomorrow, not defaulted to "no." If the user wants it, it is a fast follow-up.
 
 ## Out of scope
 
 - Summary path (already has the fallback — PR #15).
 - HTML render / `render-deep-dive.ts` (timestamps render correctly when present — this is purely about *producing* them).
-- Forced mass regeneration / version bump (see Scope decisions).
+- Blanket forced mass regeneration / version bump (see Scope decisions; a targeted opt-in repair script IS in scope).
+- Routing Gemini-sourced segments to the no-video `generateDeepDiveFromTranscript` (future cost optimization).
+
+## Other callers (grep-confirmed)
+
+`fetchTranscriptSegments` is imported by only `lib/transcript-source.ts` (the resolver) and `lib/deep-dive/write-doc.ts`. The summary path already routes through the resolver (`pipeline.ts:44`). **`write-doc.ts` is the last remaining direct caller** — so this fix closes the gap completely; no other surface has it.
 
 ## Testing (TDD — boundary mocks per project policy)
 
-`tests/lib/deep-dive/write-doc.test.ts` — mock `resolveTranscriptSegments` (from `../transcript-source`) instead of `fetchTranscriptSegments`:
-- **Captions available** (resolver returns segments): combined path, ▶ body written, `resolveTranscriptSegments` called with `(videoId, youtubeUrl, durationSeconds)`. (Adapts the existing combined-path test.)
-- **Flip `:103`/`:116`:** when captions are gated, the resolver (real cascade) yields **Gemini** segments → **combined path runs, ▶ present** — NOT video-only. Assert `generateDeepDiveCombined` called with the resolver's segments.
-- **Both sources fail** (resolver throws): `segments = null` → **video-only path**, no ▶ — the graceful floor is preserved. (This is the *only* remaining no-▶ case.)
-- Existing combined-throw → transcript-only → video-only tiering tests: unchanged (they mock the generators, not the fetch).
-- Full `npm test` + `npx tsc --noEmit` green before each commit. Dual review per task.
+**Mock boundary (corrects the first draft — B1):** mock `../../../lib/youtube` and `../../../lib/gemini` and run the **REAL** `resolveTranscriptSegments` — exactly as `tests/lib/pipeline.test.ts` does (`jest.mock('../../lib/youtube')` + `jest.mock('../../lib/gemini')`, never the resolver) and as the dev-process "Mocking Boundaries" table mandates (mock at `lib/youtube.ts` and `lib/gemini.ts`). **Do NOT `jest.mock('../../../lib/transcript-source')`** — mocking the resolver would leave the captions→Gemini cascade (the whole point of this fix) untested. Add a `jest.mocked(gemini.transcribeViaGemini)` handle.
+
+**`tests/lib/deep-dive/write-doc.test.ts` changes — every test whose mock setup currently forces video-only via a caption rejection/empty MUST be updated (H3 — there are FOUR, the first draft listed two):**
+
+| Test | Today | After |
+|------|-------|-------|
+| `:70` combined path | asserts `mockFetchTranscriptSegments` called with id | keep; captions return `SEGMENTS` (beforeEach) → resolver returns them → combined path unchanged. (Assertion on `fetchTranscriptSegments` still holds — the real resolver calls it; optionally also assert `transcribeViaGemini` NOT called, proving no extra cost on captioned videos.) |
+| `:103` "fetch fails → video-only, no ▶" | captions throw → video-only | **FLIP:** captions throw **+ `transcribeViaGemini` returns segments** → **combined path, ▶ present**. Rename to "captions gated → Gemini fallback → combined with ▶". |
+| `:116` "empty `[]` → video-only, no ▶" | captions `[]` → video-only | **FLIP:** captions `[]` **+ `transcribeViaGemini` returns segments** → **combined path, ▶ present**. |
+| `:168` "step event on video-only path" | captions throw → video-only | captions throw **+ `transcribeViaGemini` throws** → resolver throws → `segments=null` → video-only step event (preserve intent by failing BOTH sources). |
+| `:180` "no transcript AND video-only fails → throws" | captions throw → video-only→fail | captions throw **+ `transcribeViaGemini` throws** + `generateDeepDive` throws → throws with messages. |
+
+**New test (the floor, explicitly):** captions throw **and** `transcribeViaGemini` throws → `segments=null` → **video-only path, no ▶** — the *only* remaining no-▶ case. (Distinct from `:168`/`:180` which assert the step event / error aggregation.)
+
+**Unchanged (M2 — corrected reason):** `:92` (combined-throw → transcript-only), `:132` (combined+transcript throw → video-only), `:194` (all paths fail) mock the **generators**; they reach the cascade because captions succeed via `beforeEach` (`mockFetchTranscriptSegments.mockResolvedValue(SEGMENTS)`, :62) — so the real resolver returns those captions and `transcribeViaGemini` is never called. They keep passing *because captions succeed*, not because "fetch mocking is irrelevant."
+
+**Verification (Phase 4):** regenerate `v4F1gFy-hqg`'s deep-dive against the running app (captions confirmed available) and assert the written `.md` now contains ▶ — end-to-end proof + repairs the doc.
+
+Full `npm test` + `npx tsc --noEmit` green before each commit. Dual review per task.
 
 ## Appendix — diagnosis artifacts
 
