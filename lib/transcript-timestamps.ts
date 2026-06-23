@@ -42,17 +42,22 @@ const FENCE = /^\s*(```|~~~)/; // opens/closes a fenced code block (matches pars
 
 /**
  * Replace each own-line `[[TS:<index>]]` token with a `▶ [start–end](url)` line, resolving the real
- * timestamp from `segments[index].offset`. End of a token = next token's start; the last token's
- * end = video duration (last segment offset + duration).
+ * timestamp from `segments[index].offset`. End of a token = next kept token's start; the last kept
+ * token's end = video duration (last segment offset + duration).
+ *
+ * Lenient selection: invalid candidates (out-of-range index, non-finite offset, offset >= videoDuration)
+ * are removed individually. From the remaining candidates the longest strictly-increasing-offset
+ * subsequence (LIS) is kept — only that subset emits `▶` lines. The rest are dropped (line removed).
+ *
+ * Global no-op (no `▶` emitted, tokens stripped): N===0, no `videoId`, `segments.length===0`, or
+ * non-finite `videoDuration`.
  *
  * Fence-aware: tokens inside ``` / ~~~ fenced code blocks are left verbatim (never counted toward
- * validation, never rewritten) — mirroring parse.ts's fence handling. Unterminated fences: the
+ * selection, never rewritten) — mirroring parse.ts's fence handling. Unterminated fences: the
  * remainder of the document is treated as fenced content.
  *
- * All-or-nothing degradation: if any (non-fenced, own-line) index is out of range, indices are not
- * strictly increasing, `videoId` is missing, or there are no segments, ALL such token lines are
- * dropped (no `▶` lines emitted). Any stray inline token OUTSIDE a fence is stripped regardless, so
- * no raw `[[TS:…]]` ever reaches the reader (spec §8).
+ * Any stray inline token OUTSIDE a fence is stripped regardless, so no raw `[[TS:…]]` ever reaches
+ * the reader (spec §8).
  */
 export function resolveTranscriptTokens(
   markdown: string,
@@ -61,57 +66,79 @@ export function resolveTranscriptTokens(
 ): string {
   const lines = markdown.split('\n');
 
-  // Pass 1: collect own-line token line indices OUTSIDE fences, in document order.
-  const tokenLines: number[] = [];
-  const indices: number[] = [];
+  // Pass 1: record own-line non-fenced tokens in document order.
+  const tokens: { lineIndex: number; index: number }[] = [];
   let inFence = false;
   lines.forEach((line, i) => {
     if (FENCE.test(line)) { inFence = !inFence; return; }
     if (inFence) return;
     const m = line.match(OWN_LINE_TOKEN);
     if (m) {
-      tokenLines.push(i);
       const raw = m[1].trim();
-      indices.push(/^\d+$/.test(raw) ? Number(raw) : NaN);
+      tokens.push({ lineIndex: i, index: /^\d+$/.test(raw) ? Number(raw) : NaN });
     }
   });
-
-  const valid =
-    tokenLines.length > 0 &&
-    !!videoId &&
-    segments.length > 0 &&
-    indices.every((n) => Number.isInteger(n) && n >= 0 && n < segments.length) &&
-    indices.every((n, k) => k === 0 || n > indices[k - 1]) &&
-    // Codex MEDIUM: don't trust transcript ordering — resolved offsets must be finite & strictly increasing.
-    indices.every((n, k) => Number.isFinite(segments[n].offset) && (k === 0 || segments[n].offset > segments[indices[k - 1]].offset)) &&
-    // Codex: the final segment feeds videoDuration (last token's end) — it must be finite too.
-    Number.isFinite(segments[segments.length - 1].offset) &&
-    Number.isFinite(segments[segments.length - 1].duration);
-
-  if (tokenLines.length > 0 && !valid) {
-    console.warn('resolveTranscriptTokens: degrading — invalid/missing segment indices or videoId');
-  }
+  const N = tokens.length;
+  const tokenSet = new Set(tokens.map((t) => t.lineIndex));
 
   const lastSeg = segments[segments.length - 1];
-  const videoDuration = segments.length > 0 ? Math.floor(lastSeg.offset + lastSeg.duration) : 0;
-  const tokenSet = new Set(tokenLines);
+  const videoDuration = segments.length > 0 ? Math.floor(lastSeg.offset + lastSeg.duration) : NaN;
+  const globalOk = N > 0 && !!videoId && segments.length > 0 && Number.isFinite(videoDuration);
+
+  // Select the kept tokens (candidate filter + longest strictly-increasing-offset subsequence).
+  const keptMap = new Map<number, { start: number; end: number }>();
+  let kept = 0;
+  if (globalOk) {
+    const candidates = tokens.filter((t) =>
+      Number.isInteger(t.index) &&
+      t.index >= 0 &&
+      t.index < segments.length &&
+      Number.isFinite(segments[t.index].offset) &&
+      Math.floor(segments[t.index].offset) < videoDuration,
+    );
+    const offs = candidates.map((c) => segments[c.index].offset);
+    const len = offs.map(() => 1);
+    const prev = offs.map(() => -1);
+    for (let i = 0; i < offs.length; i++) {
+      for (let j = 0; j < i; j++) {
+        // strict `>` keeps the SMALLEST predecessor j on ties → deterministic
+        if (offs[j] < offs[i] && len[j] + 1 > len[i]) { len[i] = len[j] + 1; prev[i] = j; }
+      }
+    }
+    let best = -1;
+    for (let i = 0; i < offs.length; i++) if (best === -1 || len[i] > len[best]) best = i; // earliest max
+    const pos: number[] = [];
+    for (let i = best; i >= 0; i = prev[i]) pos.push(i);
+    pos.reverse();
+    const keptTokens = pos.map((p) => candidates[p]); // document order, strictly increasing offsets
+    kept = keptTokens.length;
+    keptTokens.forEach((t, k) => {
+      const start = Math.floor(segments[t.index].offset);
+      const end = k + 1 < keptTokens.length
+        ? Math.floor(segments[keptTokens[k + 1].index].offset)
+        : videoDuration;
+      keptMap.set(t.lineIndex, { start, end });
+    });
+  }
+
+  if (N > 0) {
+    if (!globalOk || kept === 0) {
+      console.warn(`resolveTranscriptTokens: dropped all ${N} timestamp tokens (invalid indices or missing videoId/segments)`);
+    } else if (kept < N) {
+      console.warn(`resolveTranscriptTokens: kept ${kept} of ${N} timestamp tokens (dropped ${N - kept} out-of-range/out-of-order)`);
+    }
+  }
 
   // Pass 2: rebuild line-by-line, fence-aware.
-  let tokenK = 0;
   inFence = false;
   const out: (string | null)[] = lines.map((line, i) => {
     if (FENCE.test(line)) { inFence = !inFence; return line; }
     if (inFence) return line;                       // fenced content: verbatim
     if (tokenSet.has(i)) {
-      if (!valid) return null;                      // degrade: drop the own-line token line
-      const startSec = Math.floor(segments[indices[tokenK]].offset);
-      const endSec = tokenK + 1 < indices.length
-        ? Math.floor(segments[indices[tokenK + 1]].offset)
-        : videoDuration;
-      tokenK++;
-      return timestampLine(startSec, endSec, videoId as string);
+      const k = keptMap.get(i);
+      return k ? timestampLine(k.start, k.end, videoId as string) : null; // dropped token line removed
     }
-    return line.replace(ANY_TOKEN, '');             // strip any stray inline (non-own-line) token
+    return line.replace(ANY_TOKEN, '');             // strip any stray inline token
   });
 
   return out.filter((l): l is string => l !== null).join('\n');
