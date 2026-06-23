@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
-import { fetchPlaylistVideos, fetchTranscriptSegments, detectLanguage } from './youtube';
+import { fetchPlaylistVideos, detectLanguage } from './youtube';
 import { generateSummary } from './gemini';
+import { resolveTranscriptSegments } from './transcript-source';
 import { assertOutputFolder, assertVideoId, upsertVideo, readIndex, writeIndex } from './index-store';
 import { slugify } from './slugify';
 import type { ProgressEvent, Video, VideoMeta, RatingValue, VideoType, Audience, GeminiSummaryResponse } from '../types';
@@ -40,7 +41,7 @@ export interface SummaryDocResult {
  */
 export async function writeSummaryDoc(input: SummaryDocInput): Promise<SummaryDocResult> {
   const { videoId, title, youtubeUrl, channel, durationSeconds, outputFolder, baseName } = input;
-  const segments = await fetchTranscriptSegments(videoId);
+  const { segments } = await resolveTranscriptSegments(videoId, youtubeUrl, durationSeconds);
   const transcript = segments.map((s) => s.text).join(' '); // plain text for language detection only
   const language = detectLanguage(transcript);
   const { summary: rawSummary, ratings, overallScore, videoType, audience, tags, tldr, takeaways } =

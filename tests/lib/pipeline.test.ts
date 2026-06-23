@@ -20,6 +20,7 @@ const mockFetchPlaylistVideos = jest.mocked(youtube.fetchPlaylistVideos);
 const mockFetchTranscriptSegments = jest.mocked(youtube.fetchTranscriptSegments);
 const mockDetectLanguage = jest.mocked(youtube.detectLanguage);
 const mockGenerateSummary = jest.mocked(gemini.generateSummary);
+const mockTranscribeViaGemini = jest.mocked(gemini.transcribeViaGemini);
 const mockGeneratePdf = jest.mocked(pdf.generatePdf);
 const mockUpsertVideo = jest.mocked(indexStore.upsertVideo);
 const mockAssertOutputFolder = jest.mocked(indexStore.assertOutputFolder);
@@ -115,6 +116,7 @@ describe('runIngestion', () => {
     mockFetchTranscriptSegments
       .mockRejectedValueOnce(new Error('No transcript available'))
       .mockResolvedValueOnce([{ text: 'transcript', offset: 0, duration: 5 }]);
+    mockTranscribeViaGemini.mockRejectedValue(new Error('Gemini unavailable')); // vid1: both sources fail → error; vid2 uses captions so Gemini is never reached
     mockGenerateSummary.mockResolvedValue(makeSummaryResponse());
 
     const events: ProgressEvent[] = [];
@@ -1060,5 +1062,25 @@ describe('writeSummaryDoc', () => {
     expect(mockGenerateSummary).toHaveBeenCalledWith(
       [{ text: 'hello world', offset: 0, duration: 5 }], 'en', 'vid11111111',
     );
+  });
+
+  it('falls back to Gemini transcription when captions are unavailable', async () => {
+    mockFetchTranscriptSegments.mockRejectedValueOnce(new Error('Transcript is disabled on this video'));
+    mockTranscribeViaGemini.mockResolvedValueOnce([{ text: 'gemini transcript', offset: 0, duration: 5 }]);
+    mockGenerateSummary.mockResolvedValue(makeSummaryResponse({ summary: 'From Gemini fallback' }));
+
+    await writeSummaryDoc({
+      videoId: 'vidGated11',
+      title: 'Gated Video',
+      youtubeUrl: 'https://youtube.com/watch?v=vidGated',
+      durationSeconds: 300,
+      outputFolder,            // from the describe('writeSummaryDoc') beforeEach fixture
+      baseName: 'gated-video',
+    });
+
+    expect(mockTranscribeViaGemini).toHaveBeenCalledWith('https://youtube.com/watch?v=vidGated', 'vidGated11', 300);
+    expect(mockGenerateSummary).toHaveBeenCalled();
+    const md = fsReal.readFileSync(`${outputFolder}/gated-video.md`, 'utf-8');
+    expect(md).toContain('From Gemini fallback');
   });
 });
