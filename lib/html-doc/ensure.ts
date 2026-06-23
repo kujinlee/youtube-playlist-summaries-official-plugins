@@ -20,6 +20,7 @@ export async function ensureHtmlDoc(
   outputFolder: string,
   onProgress: (e: ProgressEvent) => void,
   current: DocVersion = CURRENT_DOC_VERSION,
+  force = false,
 ): Promise<void> {
   assertOutputFolder(outputFolder);
   assertVideoId(videoId);
@@ -35,7 +36,7 @@ export async function ensureHtmlDoc(
 
   onProgress({ type: 'start' });
 
-  if (needsResummarize(stored, current)) {
+  if (force || needsResummarize(stored, current)) {
     onProgress({ type: 'step', videoId, step: 'Re-summarizing (adding timestamps)…', current: 1, total: 2 });
     const r = await writeSummaryDoc({
       videoId: video.id, title: video.title, youtubeUrl: video.youtubeUrl,

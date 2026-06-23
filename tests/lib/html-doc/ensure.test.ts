@@ -5,6 +5,7 @@ import * as pipeline from '../../../lib/pipeline';
 import * as generate from '../../../lib/html-doc/generate';
 import * as rerender from '../../../lib/html-doc/rerender';
 import * as indexStore from '../../../lib/index-store';
+import { CURRENT_DOC_VERSION } from '../../../lib/doc-version';
 
 jest.mock('../../../lib/pipeline');
 jest.mock('../../../lib/html-doc/generate');
@@ -95,5 +96,19 @@ describe('ensureHtmlDoc', () => {
     } finally {
       unlinkSpy.mockRestore();
     }
+  });
+
+  it('force=true on a current doc → re-summarizes and stamps current (not inflated)', async () => {
+    withVideo({ docVersion: { major: 3, minor: 3 }, summaryHtml: 'htmls/base.html' });
+    await ensureHtmlDoc('vid11111111', '/out', () => {}, CURRENT_DOC_VERSION, true);
+    expect(pipeline.writeSummaryDoc).toHaveBeenCalledWith(expect.objectContaining({ baseName: 'base' }));
+    const patches = (indexStore.updateVideoFields as jest.Mock).mock.calls.map((c) => c[2]);
+    expect(patches).toEqual(expect.arrayContaining([expect.objectContaining({ docVersion: { major: 3, minor: 3 } })]));
+  });
+
+  it('force=false on a current doc → no-op (regression guard)', async () => {
+    withVideo({ docVersion: { major: 3, minor: 3 }, summaryHtml: 'htmls/base.html' });
+    await ensureHtmlDoc('vid11111111', '/out', () => {}, CURRENT_DOC_VERSION, false);
+    expect(pipeline.writeSummaryDoc).not.toHaveBeenCalled();
   });
 });

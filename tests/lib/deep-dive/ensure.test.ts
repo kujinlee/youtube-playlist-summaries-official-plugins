@@ -238,4 +238,18 @@ describe('ensureDeepDiveHtml', () => {
     expect(events[0]).toMatchObject({ type: 'start' });
     expect(events[events.length - 1]).toMatchObject({ type: 'done' });
   });
+
+  // ── force flag ────────────────────────────────────────────────────────────────
+  it('force=true on a current doc → regenerates cascade and stamps current', async () => {
+    writeIndex(outputFolder, makeVideo({ deepDiveMd: MD_FILE, deepDiveHtml: HTML_PATH, deepDiveVersion: CURRENT }));
+    await ensureDeepDiveHtml(VIDEO_ID, outputFolder, () => {}, CURRENT, true);
+    expect(mockWriteDeepDiveDoc).toHaveBeenCalled();
+    expect(storedVideo(outputFolder).deepDiveVersion).toEqual(CURRENT);
+  });
+
+  it('force=false on a current doc → no-op (regression guard)', async () => {
+    writeIndex(outputFolder, makeVideo({ deepDiveMd: MD_FILE, deepDiveHtml: HTML_PATH, deepDiveVersion: CURRENT }));
+    await ensureDeepDiveHtml(VIDEO_ID, outputFolder, () => {}, CURRENT, false);
+    expect(mockWriteDeepDiveDoc).not.toHaveBeenCalled();
+  });
 });

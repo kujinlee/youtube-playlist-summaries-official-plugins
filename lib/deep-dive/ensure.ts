@@ -22,6 +22,7 @@ export async function ensureDeepDiveHtml(
   videoId: string, outputFolder: string,
   onProgress: (e: ProgressEvent) => void,
   current: DeepDiveVersion = CURRENT_DEEP_DIVE_VERSION,
+  force = false,
 ): Promise<void> {
   assertOutputFolder(outputFolder);
   assertVideoId(videoId);
@@ -30,7 +31,7 @@ export async function ensureDeepDiveHtml(
   const stored: DeepDiveVersion = video.deepDiveVersion ?? PRE_FEATURE;
   onProgress({ type: 'start' });
 
-  if (!video.deepDiveMd || needsRegenerate(stored, current)) {
+  if (force || !video.deepDiveMd || needsRegenerate(stored, current)) {
     const { deepDiveMd } = await writeDeepDiveDoc(video, outputFolder, onProgress);
     onProgress({ type: 'step', videoId, step: 'Building HTML…', current: 1, total: 1 });
     // Pass the just-written .md — the index isn't stamped until the updateVideoFields below,
