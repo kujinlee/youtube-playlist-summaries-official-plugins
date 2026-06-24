@@ -159,38 +159,44 @@ export const NAV_SCRIPT = `<script>
 
 **Interfaces (Consumes):** `digControl`, `startSecFromTsUrl`, `NAV_SCRIPT`, `NAV_CSS` from Task 1.
 
-- [ ] **Step 1: Failing tests** — add to `render.test.ts`:
+- [ ] **Step 1: Failing tests.** Add the summary tests INSIDE the existing `describe('renderMagazineHtml — section timestamps')` block (so the file's `withTs` fixture — section0 `startSec:135`, section1 `timeRange:null` — and `model` are in scope):
 ```ts
-it('emits data-start + a dig-deeper control when hasDeepDive', () => {
-  const html = renderMagazineHtml(parsedFixtureWithTimeRange, modelFixture, true);
-  expect(html).toMatch(/<section[^>]*data-start="\d+"/);
-  expect(html).toContain('class="dig" data-type="deep-dive"');
-  expect(html).toContain('</script>'); // NAV_SCRIPT present
+it('emits data-start on the section + a dig-deeper control when hasDeepDive', () => {
+  const html = renderMagazineHtml(withTs, model, true);
+  expect(html).toMatch(/<section data-start="135">/);
+  expect(html).toContain('class="dig" data-type="deep-dive" data-t="135"');
+  expect(html).toContain('dig deeper');
+  expect(html).toContain('a.dig'); // NAV_SCRIPT present (unique token)
 });
 it('omits the dig control when hasDeepDive is false (default)', () => {
-  const html = renderMagazineHtml(parsedFixtureWithTimeRange, modelFixture);
-  expect(html).not.toContain('class="dig"');
+  expect(renderMagazineHtml(withTs, model)).not.toContain('class="dig"');
 });
-it('omits data-start on a section with no timeRange', () => {
-  const html = renderMagazineHtml(parsedFixtureNoTimeRange, modelFixture, true);
-  // the no-timeRange section's <section> has no data-start (presence-gated)
-  expect(html).toMatch(/<section>\s/); // at least one bare <section>
+it('emits data-start="0" for a 0:00 section (presence-gated, not truthiness)', () => {
+  const zero = { ...withTs, sections: [
+    { ...withTs.sections[0], timeRange: { ...withTs.sections[0].timeRange!, startSec: 0 } },
+    withTs.sections[1],
+  ] };
+  expect(renderMagazineHtml(zero, model, true)).toMatch(/<section data-start="0">/);
+});
+it('puts data-start only on timeRange sections (section1 null → bare <section>)', () => {
+  const html = renderMagazineHtml(withTs, model, true);
+  expect((html.match(/<section data-start=/g) ?? []).length).toBe(1); // only section0
 });
 ```
-(Build `parsedFixtureWithTimeRange` with a section whose `timeRange.startSec` is e.g. 0 to also cover start=0 → `data-start="0"`. Reuse the file's existing parsed/model fixtures; check their shape first.)
-Add to `render-deep-dive.test.ts`:
+Add the deep-dive tests INSIDE the existing `describe('H3 subsection timestamps')` block (so `FM` is in scope), calling `renderDeepDiveHtml` directly with the 3rd arg:
 ```ts
 it('emits data-start on <h2> + an "↑ summary" control when hasSummary', () => {
   const out = renderDeepDiveHtml(FM + '## Sec\n▶ [0:00–0:30](https://www.youtube.com/watch?v=v1&t=0s)\nbody\n', 'v1-deep-dive.md', true);
-  expect(out).toMatch(/<h2[^>]*data-start="0"/);
+  expect(out).toMatch(/<h2 data-start="0"/);
   expect(out).toContain('class="dig" data-type="summary"');
+  expect(out).toContain('a.dig'); // NAV_SCRIPT present
 });
 it('omits the dig control by default', () => {
   const out = renderDeepDiveHtml(FM + '## Sec\n▶ [0:00–0:30](https://www.youtube.com/watch?v=v1&t=0s)\nbody\n', 'v1-deep-dive.md');
   expect(out).not.toContain('class="dig"');
 });
 ```
-Update `tests/lib/deep-dive/version.test.ts:6` → `{ major: 2, minor: 3 }` (title "is 2.3"); and `tests/components/VideoMenu.test.tsx` deepDiveVersion fixtures `:34,:51,:67` `{2,2}→{2,3}`.
+Update `tests/lib/deep-dive/version.test.ts` — BOTH the title at `:5` (`'current deep-dive version is 2.2'`→`'…2.3'`) AND the assertion at `:6` (`{ major: 2, minor: 3 }`). Update `tests/components/VideoMenu.test.tsx` deepDiveVersion fixtures `:34,:51,:67` `{2,2}→{2,3}` (leave the docVersion `{3,3}` fixtures at `:15,:27` untouched — summary version is NOT bumped).
 
 - [ ] **Step 2: Run — RED.**
 
@@ -211,7 +217,7 @@ Update `tests/lib/deep-dive/version.test.ts:6` → `{ major: 2, minor: 3 }` (tit
     const heading = `<h2${dataStart}>${md.renderInline(raw.heading)}${tsAnchor(ts)}${dig}</h2>`;
     ```
     Append `${NAV_CSS}` to STRUCTURAL_CSS-equivalent style; inject `${NAV_SCRIPT}` before the closing scripts (end-of-body).
-  - **Drivers:** `generate.ts` runHtmlDoc → `renderMagazineHtml(parsed, model, !!video.deepDiveMd)`; `rerender.ts` reRenderSummaryHtml (line 60) → `renderMagazineHtml(parsed, envelope.model, !!video.deepDiveMd)`; `generate-deep-dive.ts` runDeepDiveHtml (line 50) → `renderDeepDiveHtml(mdContent, md, !!video.summaryMd)`; reRenderDeepDiveHtml → `renderDeepDiveHtml(mdContent, video.deepDiveMd, !!video.summaryMd)`.
+  - **Drivers (4 call sites, all have `video` in scope):** `generate.ts` `runHtmlDoc` → `renderMagazineHtml(parsed, model, !!video.deepDiveMd)`; `rerender.ts:60` `reRenderSummaryHtml` → `renderMagazineHtml(parsed, envelope.model, !!video.deepDiveMd)`; `generate-deep-dive.ts:50` `runDeepDiveHtml` → `renderDeepDiveHtml(mdContent, md, !!video.summaryMd)`; `generate-deep-dive.ts:94` `reRenderDeepDiveHtml` → `renderDeepDiveHtml(mdContent, video.deepDiveMd, !!video.summaryMd)`.
   - **version.ts:** `CURRENT_DEEP_DIVE_VERSION = { major: 2, minor: 3 }` + comment `minor 3 = summary↔deep-dive nav controls`.
 
 - [ ] **Step 4: Run — GREEN** (`npx jest render html-doc/render-deep-dive deep-dive/version VideoMenu`). Confirm existing render + H3 `section restructure` tests still pass.
