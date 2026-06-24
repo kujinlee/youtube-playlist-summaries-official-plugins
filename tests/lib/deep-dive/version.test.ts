@@ -2,8 +2,8 @@ import { CURRENT_DEEP_DIVE_VERSION, needsRegenerate } from '../../../lib/deep-di
 import { isOlder } from '../../../lib/version';
 
 describe('deep-dive version', () => {
-  it('current deep-dive version is 2.2', () => {
-    expect(CURRENT_DEEP_DIVE_VERSION).toEqual({ major: 2, minor: 2 });
+  it('current deep-dive version is 2.3', () => {
+    expect(CURRENT_DEEP_DIVE_VERSION).toEqual({ major: 2, minor: 3 });
   });
   it('needsRegenerate when stored major is behind', () => {
     expect(needsRegenerate({ major: 1, minor: 0 }, CURRENT_DEEP_DIVE_VERSION)).toBe(true);

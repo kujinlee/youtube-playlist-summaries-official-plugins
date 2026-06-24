@@ -4,6 +4,7 @@ import {
   BASE_PALETTE_LIGHT_PRE, BASE_PALETTE_LIGHT_POST, BASE_PALETTE_DARK_PRE, BASE_PALETTE_DARK_POST,
   type Palette,
 } from './theme';
+import { digControl, startSecFromTsUrl, NAV_SCRIPT, NAV_CSS } from './nav';
 
 // html:false → raw HTML in the (Gemini-generated) markdown is escaped, not passed through.
 // markdown-it's default validateLink already blocks javascript:/vbscript:/data: (non-image) hrefs.
@@ -181,11 +182,14 @@ function renderSubsections(rest: string): string {
   return [preHtml, subsHtml].filter(Boolean).join('\n');
 }
 
-function renderSection(raw: RawSection): string {
+function renderSection(raw: RawSection, hasSummary = false): string {
   const lines = [...raw.lines];
   const ts = extractTimestamp(lines); // mutates lines (removes the ▶ line)
   const tsHtml = tsAnchor(ts);
-  const heading = `<h2>${md.renderInline(raw.heading)}${tsHtml}</h2>`;
+  const startSec = ts ? startSecFromTsUrl(ts.url) : null;
+  const dataStart = startSec != null ? ` data-start="${startSec}"` : '';
+  const dig = (hasSummary && startSec != null) ? digControl('summary', startSec) : '';
+  const heading = `<h2${dataStart}>${md.renderInline(raw.heading)}${tsHtml}${dig}</h2>`;
 
   const { para, rest } = takeFirstParagraph(lines);
   let leadHtml = '';
@@ -200,7 +204,7 @@ function renderSection(raw: RawSection): string {
 }
 
 /** Faithfully render a deep-dive markdown document into a self-contained HTML page. */
-export function renderDeepDiveHtml(mdContent: string, sourceMd: string): string {
+export function renderDeepDiveHtml(mdContent: string, sourceMd: string, hasSummary = false): string {
   const lang = (frontmatterField(mdContent, 'lang') ?? 'EN').toLowerCase();
   const videoId = frontmatterField(mdContent, 'video_id') ?? '';
   // Strip the leading YAML frontmatter block, normalize newlines, linkify the header URL.
@@ -214,7 +218,7 @@ export function renderDeepDiveHtml(mdContent: string, sourceMd: string): string 
   // ▶ timestamp trails the heading (muted) and gold lands only on the lead's first sentence.
   const { preamble, sections } = splitSections(body);
   const preambleHtml = md.render(preamble);
-  const sectionsHtml = sections.map(renderSection).join('\n');
+  const sectionsHtml = sections.map((s) => renderSection(s, hasSummary)).join('\n');
   const bodyHtml = `${preambleHtml}\n${sectionsHtml}`;
 
   return `<!DOCTYPE html>
@@ -227,13 +231,13 @@ export function renderDeepDiveHtml(mdContent: string, sourceMd: string): string 
 <meta name="video-id" content="${esc(videoId)}">
 <title>${esc(title)}</title>
 ${THEME_HEAD_SCRIPT}
-<style>${themeStyleBlock(LIGHT, DARK)}${STRUCTURAL_CSS}</style>
+<style>${themeStyleBlock(LIGHT, DARK)}${STRUCTURAL_CSS}${NAV_CSS}</style>
 </head>
 <body>
 ${THEME_TOGGLE_BUTTON}${PRINT_BUTTON}
 <article class="dd">
 ${bodyHtml}</article>
-${THEME_TOGGLE_SCRIPT}
+${NAV_SCRIPT}${THEME_TOGGLE_SCRIPT}
 </body>
 </html>`;
 }
