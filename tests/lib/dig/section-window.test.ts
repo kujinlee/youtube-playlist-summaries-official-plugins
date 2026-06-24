@@ -57,3 +57,14 @@ test('duplicate startSec uses next-by-index for endSec (L1 collision)', () => {
   // (documented collision: both share the same startSec)
   expect(w.endSec).toBe(100);
 });
+
+// ── Behavior 8: skip null-timeRange sections for endSec ────────────────────────────────────
+test('skips sections without timeRange when finding endSec', () => {
+  const a = sec(100);
+  const n = sec(null); // non-dig-enabled section, timeRange: null
+  const b = sec(300);
+  const w = windowForSection(a, [a, n, b], [seg(100), seg(200)], 999)!;
+  // a is at index 0; next dig-enabled is b at index 2; endSec = b.timeRange.startSec = 300
+  expect(w.endSec).toBe(300);
+  expect(w.transcriptWindow.map((s) => s.offset)).toEqual([100, 200]);
+});

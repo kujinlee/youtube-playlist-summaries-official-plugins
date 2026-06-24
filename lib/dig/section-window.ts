@@ -45,7 +45,7 @@ export function windowForSection(
 
   // Find the section's position by reference (handles duplicate startSec correctly).
   const idx = allSections.indexOf(section);
-  const next = idx >= 0 ? allSections[idx + 1] : undefined;
+  const next = idx >= 0 ? allSections.slice(idx + 1).find((s) => s.timeRange != null) : undefined;
   const endSec = next?.timeRange?.startSec ?? durationSeconds;
 
   const transcriptWindow = segments.filter(
