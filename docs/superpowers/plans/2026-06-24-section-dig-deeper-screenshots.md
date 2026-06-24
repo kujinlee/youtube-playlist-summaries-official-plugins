@@ -15,7 +15,8 @@
 - **No SDK migration.** The dig Gemini call uses a direct REST `fetch` to `…/v1beta/models/gemini-2.5-pro:generateContent?key=${GEMINI_API_KEY}`; the legacy `@google/generative-ai` SDK stays for all other calls.
 - **Timestamps are absolute** (Task 0): `[[SLIDE:sec]]` `sec` is original-video seconds; `ffmpeg -ss (sec - S)`.
 - **`sectionId = startSec`** threads timeline/nav/resolver/upsert.
-- **Exec discipline:** yt-dlp/ffmpeg only via `execFile`/`spawn` with **argv arrays** — never a shell string. `videoId` validated by `VIDEO_ID_RE` (`lib/index-store.ts:8`); `youtubeUrl` constructed server-side from `videoId`, never request-supplied.
+- **Exec discipline:** yt-dlp/ffmpeg only via `execFile`/`spawn` with **argv arrays** — never a shell string. `videoId` validated by `assertVideoId(videoId)` (exported, `lib/index-store.ts:33`; `VIDEO_ID_RE` itself is module-private — do NOT import it). `youtubeUrl` constructed server-side from `videoId`, never request-supplied.
+- **POST transport (H-2):** the trigger POST sends `{ outputFolder, force? }` in the **JSON body** (mirroring `deep-dive/route.ts:17-18`), NOT query params. The `view detail` and `dig-state` GETs use query params. `[sectionId]` route param arrives as a **string** — `Number()` it and validate non-negative integer (L-4).
 - **No summary version bump** (avoids 236-Gemini re-summarize). `digVersion` is a provenance stamp only — it never triggers auto-regeneration.
 - **Renderer safety:** companion HTML uses `new MarkdownIt({ html: false })`; captions sanitized before interpolation. HTML always base64-inlines images, never a relative `img src`.
 - **Mocking boundaries:** Gemini at the `fetch` boundary; yt-dlp/ffmpeg at the `execFile` boundary; E2E mocks at the API route level. No real network/exec in unit tests.
@@ -34,13 +35,14 @@
 | `lib/dig/generate.ts` (create) | `buildDigPrompt` + clipped Gemini REST call |
 | `lib/dig/companion-doc.ts` (create) | idempotent upsert into `<basename>-dig-deeper.md`; assets-before-doc ordering |
 | `lib/html-doc/render-dig-deeper.ts` (create) | render dig-deeper `.md` → self-contained HTML with base64-inlined slides |
-| `types.ts` (modify) | `Video.digDeeperMd?`, `Video.digDeeperHtml?` |
+| `types/index.ts` (modify) | add `digDeeperMd`/`digDeeperHtml` to `VideoSchema` (Zod, not a TS interface) |
 | `app/api/videos/[id]/dig/[sectionId]/route.ts` (create) | POST: create job, orchestrate units |
 | `app/api/videos/[id]/dig/[sectionId]/stream/route.ts` (create) | GET: subscribe job by `jobId` |
 | `app/api/videos/[id]/dig-state/route.ts` (create) | GET: dug `sectionId` list for control toggling |
 | `app/api/html/[id]/route.ts` (modify) | accept `type=dig-deeper` |
+| `lib/html-doc/render.ts` (modify) | emit the new dig control for ALL timestamped sections (drop `hasDeepDive` gating) — Task 12 |
 | `lib/html-doc/nav.ts` (modify) | dug-state fetch on load + control state machine (not-dug/loading/dug/error) |
-| tests alongside each `lib/**` file; `e2e/dig-deeper.spec.ts` | |
+| **Test locations (B-2):** all unit/component tests live under `tests/` (`testMatch` only discovers `tests/lib/**`, `tests/api/**`, `tests/components/**`). Mirror source: `lib/dig/X.ts` → `tests/lib/dig/X.test.ts`; route tests → `tests/api/<name>.test.ts`. Import sources via the `@/` alias (`@/lib/dig/X`), configured in `jest.config.ts:9`. E2E: `e2e/dig-deeper.spec.ts`. | |
 
 ---
 
@@ -48,14 +50,14 @@
 
 **Files:**
 - Modify: `lib/transcript-timestamps.ts:62`
-- Test: `lib/transcript-timestamps.test.ts`
+- Test: `tests/lib/transcript-timestamps.test.ts`
 
 **Interfaces:**
 - Produces: `resolveTranscriptTokens(markdown: string, segments: TranscriptSegment[], videoId: string | null, videoDuration?: number): string` — when `videoDuration` is given, it is used as the upper bound instead of `lastSeg.offset + lastSeg.duration`, so a *windowed* segment array no longer drops tokens at the window's tail. Omitting it preserves existing behavior exactly.
 
 - [ ] **Step 1: Write the failing test**
 ```ts
-import { resolveTranscriptTokens } from './transcript-timestamps';
+import { resolveTranscriptTokens } from '@/lib/transcript-timestamps';
 
 test('windowed segments resolve the tail token when full duration is passed', () => {
   // window = two segments at 600s and 660s; full video is 1279s long
@@ -67,6 +69,9 @@ test('windowed segments resolve the tail token when full duration is passed', ()
   const out = resolveTranscriptTokens('point [[TS:1]] here', segments, 'vid123', 1279);
   expect(out).toContain('data-t="660"');     // tail token survived
   expect(out).not.toContain('[[TS:1]]');      // token was replaced, not left raw
+  // B-1: the tail token's END must use the passed full duration (21:19), not the window end,
+  // proving videoDuration gates the :119 end computation too — not just the :97 candidate filter.
+  expect(out).toContain('21:19');             // formatTimestamp(1279)
 });
 
 test('omitting videoDuration preserves prior behavior (no signature break)', () => {
@@ -81,7 +86,7 @@ Run: `npx jest transcript-timestamps -t "tail token"`
 Expected: FAIL — tail token dropped (`[[TS:1]]` still present) because duration is derived from the window.
 
 - [ ] **Step 3: Implement minimal change**
-Add the optional 4th param. Where the function currently computes the duration bound (the `lastSeg.offset + lastSeg.duration` expression flagged at `:84-85`), use `videoDuration ?? (lastSeg.offset + lastSeg.duration)`. Change nothing else.
+Add the optional 4th param. The duration bound is computed at `transcript-timestamps.ts:85` (`const videoDuration = … lastSeg.offset + lastSeg.duration …`) and reused at `:97` (candidate filter) and `:119` (last token's end). Change only the `:85` definition to `const videoDuration = videoDuration_param ?? Math.floor(lastSeg.offset + lastSeg.duration)` (rename the param to avoid shadowing). Both `:97` and `:119` then honor the passed value automatically. Change nothing else.
 
 - [ ] **Step 4: Run tests to verify they pass**
 Run: `npx jest transcript-timestamps`
@@ -90,7 +95,7 @@ Expected: PASS (new + all existing).
 - [ ] **Step 5: Typecheck + commit**
 ```bash
 npx tsc --noEmit
-git add lib/transcript-timestamps.ts lib/transcript-timestamps.test.ts
+git add lib/transcript-timestamps.ts tests/lib/transcript-timestamps.test.ts
 git commit -m "feat(dig): optional videoDuration bound for windowed token resolution"
 ```
 
@@ -100,7 +105,7 @@ git commit -m "feat(dig): optional videoDuration bound for windowed token resolu
 
 **Files:**
 - Create: `lib/dig/section-window.ts`
-- Test: `lib/dig/section-window.test.ts`
+- Test: `tests/lib/dig/section-window.test.ts`
 
 **Interfaces:**
 - Consumes: `ParsedSection` (`lib/html-doc/types.ts:12`, has `prose`, `timeRange?: {startSec,endSec}|null`), `TranscriptSegment` (`lib/transcript-timestamps.ts:2`, `{text, offset, duration}`).
@@ -130,7 +135,7 @@ export function windowForSection(
 
 - [ ] **Step 1: Write failing tests** (one per behavior)
 ```ts
-import { windowForSection } from './section-window';
+import { windowForSection } from '@/lib/dig/section-window';
 const seg = (offset: number) => ({ text: `s${offset}`, offset, duration: 10 });
 const sec = (startSec: number | null, prose = 'body') => ({
   numeral: '1', title: 'T', prose,
@@ -163,7 +168,7 @@ test('empty prose falls back to title', () => {
 - [ ] **Step 5: Typecheck + commit**
 ```bash
 npx tsc --noEmit
-git add lib/dig/section-window.ts lib/dig/section-window.test.ts
+git add lib/dig/section-window.ts tests/lib/dig/section-window.test.ts
 git commit -m "feat(dig): pure section-window with transcript slicing"
 ```
 
@@ -173,7 +178,7 @@ git commit -m "feat(dig): pure section-window with transcript slicing"
 
 **Files:**
 - Create: `lib/dig/slide-tokens.ts`
-- Test: `lib/dig/slide-tokens.test.ts`
+- Test: `tests/lib/dig/slide-tokens.test.ts`
 
 **Interfaces:**
 - Produces:
@@ -202,7 +207,7 @@ Grammar: `/\[\[SLIDE:(\d+)(?:\|([^\]]*))?\]\]/g` — `sec` = leading integer; ca
 
 - [ ] **Step 1: Write failing tests** (one per behavior)
 ```ts
-import { parseSlideTokens, sanitizeCaption } from './slide-tokens';
+import { parseSlideTokens, sanitizeCaption } from '@/lib/dig/slide-tokens';
 test('valid token in range', () => {
   expect(parseSlideTokens('x [[SLIDE:312|Diagram]] y', 300, 400))
     .toEqual([{ raw: '[[SLIDE:312|Diagram]]', sec: 312, caption: 'Diagram' }]);
@@ -229,7 +234,7 @@ test('caption injection neutralized', () => {
 - [ ] **Step 5: Typecheck + commit**
 ```bash
 npx tsc --noEmit
-git add lib/dig/slide-tokens.ts lib/dig/slide-tokens.test.ts
+git add lib/dig/slide-tokens.ts tests/lib/dig/slide-tokens.test.ts
 git commit -m "feat(dig): [[SLIDE]] token grammar, sanitization, dedupe, cap"
 ```
 
@@ -239,7 +244,7 @@ git commit -m "feat(dig): [[SLIDE]] token grammar, sanitization, dedupe, cap"
 
 **Files:**
 - Create: `lib/dig/slides.ts`
-- Test: `lib/dig/slides.test.ts`
+- Test: `tests/lib/dig/slides.test.ts`
 
 **Interfaces:**
 - Consumes: `parseSlideTokens` (Task 3); `assertVideoId`, `VIDEO_ID_RE` semantics (`lib/index-store.ts`).
@@ -268,7 +273,7 @@ Uses `execFile` (from `node:child_process`, promisified) — mocked in tests via
 ```ts
 jest.mock('node:child_process');
 import { execFile } from 'node:child_process';
-import { resolveSlideTokens } from './slides';
+import { resolveSlideTokens } from '@/lib/dig/slides';
 
 test('no tokens → no exec, unchanged', async () => {
   const out = await resolveSlideTokens('plain text', {
@@ -304,12 +309,13 @@ test('crafted videoId rejected before exec', async () => {
 ```
 
 - [ ] **Step 2: Run** → FAIL.
-- [ ] **Step 3: Implement:** parse via Task 3; if none, return unchanged. Validate `videoId` (`VIDEO_ID_RE`); build `youtubeUrl` server-side; resolve `assetPath = path.resolve(assetsRoot, videoId, `${sectionId}-${sec}.jpg`)` and assert `assetPath.startsWith(path.resolve(assetsRoot) + path.sep)`. `execFile('yt-dlp', ['--download-sections', `*${S}-${E}`, '-f', 'bv[height<=720]', '-o', tmp, youtubeUrl])`; per token `execFile('ffmpeg', ['-ss', String(sec-S), '-i', tmp, '-frames:v','1','-q:v','2', assetPath])`; rewrite token. Catch ENOENT/non-zero → strip remaining tokens, log `[dig-slide-miss]`; per-frame failure → drop that token. Delete tmp in `finally`.
+- [ ] **Step 3: Implement:** parse via Task 3; if none, return unchanged. Validate via `assertVideoId(videoId)` (H-4 — `VIDEO_ID_RE` is not exported; `assertVideoId` throws on traversal chars); build `youtubeUrl` server-side; resolve `assetPath = path.resolve(assetsRoot, videoId, `${sectionId}-${sec}.jpg`)` and assert `assetPath.startsWith(path.resolve(assetsRoot) + path.sep)`. `execFile('yt-dlp', ['--download-sections', `*${S}-${E}`, '-f', 'bv[height<=720]', '-o', tmp, youtubeUrl])`; per token `execFile('ffmpeg', ['-ss', String(sec-S), '-i', tmp, '-frames:v','1','-q:v','2', assetPath])`; rewrite token. Catch ENOENT/non-zero → strip remaining tokens, log `[dig-slide-miss]`; per-frame failure → drop that token. Write tmp clip under `.cache/`; delete in `finally`.
 - [ ] **Step 4: Run** → PASS.
-- [ ] **Step 5: Typecheck + commit**
+- [ ] **Step 5: gitignore `.cache/` (M-1) + typecheck + commit**
 ```bash
+grep -qxF '/.cache/' .gitignore || printf '\n/.cache/\n' >> .gitignore
 npx tsc --noEmit
-git add lib/dig/slides.ts lib/dig/slides.test.ts
+git add lib/dig/slides.ts tests/lib/dig/slides.test.ts .gitignore
 git commit -m "feat(dig): slide extraction via yt-dlp+ffmpeg with argv safety + fallbacks"
 ```
 
@@ -319,7 +325,7 @@ git commit -m "feat(dig): slide extraction via yt-dlp+ffmpeg with argv safety + 
 
 **Files:**
 - Create: `lib/dig/generate.ts`
-- Test: `lib/dig/generate.test.ts`
+- Test: `tests/lib/dig/generate.test.ts`
 
 **Interfaces:**
 - Consumes: `SectionWindow` (Task 2); `buildIndexedTranscript` (`lib/transcript-timestamps.ts:36`); `GEMINI_API_KEY` env.
@@ -342,7 +348,7 @@ Uses global `fetch` (mocked in tests).
 
 - [ ] **Step 1: Write failing tests** with `global.fetch` mocked
 ```ts
-import { buildDigPrompt, generateDig } from './generate';
+import { buildDigPrompt, generateDig } from '@/lib/dig/generate';
 
 test('buildDigPrompt names the clip range and slide rules', () => {
   const p = buildDigPrompt('en', 300, 400);
@@ -364,10 +370,21 @@ test('generateDig sends clipped video_metadata + server-built url', async () => 
   expect(part.video_metadata.end_offset.seconds).toBe(400);
 });
 
-test('non-200 throws', async () => {
+test('non-200 throws after retry', async () => {
   jest.spyOn(global, 'fetch').mockResolvedValue(new Response('nope', { status: 500 }));
   await expect(generateDig({ sectionId:1,startSec:1,endSec:2,transcriptWindow:[],summaryProse:'p' } as any,
     'abc12345678', 'en')).rejects.toThrow();
+});
+
+test('retries once on transient failure then succeeds (M-4)', async () => {
+  const spy = jest.spyOn(global, 'fetch')
+    .mockResolvedValueOnce(new Response('busy', { status: 503 }))
+    .mockResolvedValueOnce(new Response(
+      JSON.stringify({ candidates: [{ content: { parts: [{ text: 'OK' }] } }] }), { status: 200 }));
+  const md = await generateDig({ sectionId:1,startSec:1,endSec:2,transcriptWindow:[],summaryProse:'p' } as any,
+    'abc12345678', 'en');
+  expect(md).toBe('OK');
+  expect(spy).toHaveBeenCalledTimes(2);   // one retry
 });
 ```
 
@@ -377,7 +394,7 @@ test('non-200 throws', async () => {
 - [ ] **Step 5: Typecheck + commit**
 ```bash
 npx tsc --noEmit
-git add lib/dig/generate.ts lib/dig/generate.test.ts
+git add lib/dig/generate.ts tests/lib/dig/generate.test.ts
 git commit -m "feat(dig): clipped gemini-2.5-pro REST call + dig prompt"
 ```
 
@@ -387,7 +404,7 @@ git commit -m "feat(dig): clipped gemini-2.5-pro REST call + dig prompt"
 
 **Files:**
 - Create: `lib/dig/companion-doc.ts`
-- Test: `lib/dig/companion-doc.test.ts` (uses `fs.mkdtemp` temp dirs — real fs, no network)
+- Test: `tests/lib/dig/companion-doc.test.ts` (uses `fs.mkdtemp` temp dirs — real fs, no network)
 
 **Interfaces:**
 - Produces:
@@ -416,7 +433,7 @@ export async function readDugSectionIds(digDeeperPath: string): Promise<number[]
 ```ts
 import { mkdtemp, readFile } from 'node:fs/promises';
 import os from 'node:os'; import path from 'node:path';
-import { upsertDugSection, readDugSectionIds } from './companion-doc';
+import { upsertDugSection, readDugSectionIds } from '@/lib/dig/companion-doc';
 
 const base = (p: string, section: any) => ({
   digDeeperPath: p, videoTitle: 'V', videoId: 'abc12345678',
@@ -443,12 +460,19 @@ test('second section ordered by startSec; re-dig replaces in place', async () =>
 ```
 
 - [ ] **Step 2: Run** → FAIL.
-- [ ] **Step 3: Implement** parse-or-init frontmatter (reuse the project's existing frontmatter helper if one exists under `lib/`; else a minimal YAML read/write for these known fields), upsert block keyed by `sectionId`, sort by `startSec`, write via temp-file + `rename`.
+- [ ] **Step 3: Implement (M-3 — no YAML lib exists; specify the exact format).** No reusable block-YAML helper exists (`parse.ts:4` `frontmatterField` is a single-field regex, unexported; `gray-matter` is not a dependency). Hand-roll for this fixed schema only: frontmatter delimited by `---` lines; scalar fields `title/videoId/language/sourceVideoUrl` as `key: "value"`; `digVersion: { major: 1, minor: 0 }` inline; and the `sections:` list as block sequence:
+```yaml
+sections:
+  - sectionId: 312
+    startSec: 312
+    generatedAt: "2026-06-24T12:00:00Z"
+```
+  Parse by reading lines between the `---` fences; for `sections`, collect `- sectionId:`/`startSec:`/`generatedAt:` triples. Upsert block keyed by `sectionId`, sort body + `sections` by `startSec`, write via temp-file + `rename`. `readDugSectionIds` returns the `sectionId` integers (or `[]` if the file/`sections` key is absent). Keep `generatedAt` an input param (no `Date.now()` inside — testability).
 - [ ] **Step 4: Run** → PASS.
 - [ ] **Step 5: Typecheck + commit**
 ```bash
 npx tsc --noEmit
-git add lib/dig/companion-doc.ts lib/dig/companion-doc.test.ts
+git add lib/dig/companion-doc.ts tests/lib/dig/companion-doc.test.ts
 git commit -m "feat(dig): idempotent dig-deeper companion doc upsert"
 ```
 
@@ -458,7 +482,7 @@ git commit -m "feat(dig): idempotent dig-deeper companion doc upsert"
 
 **Files:**
 - Create: `lib/html-doc/render-dig-deeper.ts`
-- Test: `lib/html-doc/render-dig-deeper.test.ts`
+- Test: `tests/lib/html-doc/render-dig-deeper.test.ts`
 
 **Interfaces:**
 - Consumes: `markdown-it` with `{ html: false }` (mirror `render-deep-dive.ts:11`); `NAV_CSS`/`NAV_SCRIPT`, theme from `lib/html-doc/theme.ts`.
@@ -476,35 +500,50 @@ git commit -m "feat(dig): idempotent dig-deeper companion doc upsert"
 
 - [ ] **Step 1: Write failing tests** (write a tiny real JPEG into a temp `assets/` for Behavior 1; reference a missing file for Behavior 2).
 - [ ] **Step 2: Run** → FAIL.
-- [ ] **Step 3: Implement:** render markdown; post-process `<img src="assets/…">` by resolving against `dirname(mdPath)`, reading bytes, replacing `src` with base64 data-URI; drop `<img>` if the file is missing. Inline CSS/theme/NAV like `render-deep-dive.ts`.
+- [ ] **Step 3: Implement (M-5 — prefer a renderer rule over HTML regex):** override markdown-it's `image` rule so, at render time, an `assets/…` src is resolved against `dirname(mdPath)`, read, and emitted as a `data:image/jpeg;base64,…` `<img>`; **if the file is missing, drop the `<img>` entirely** (decision: drop, not alt-only) so no relative `src` ever ships. Test asserts BOTH `expect(html).not.toMatch(/src="assets\//)` AND, for the present-file case, `src="data:image/jpeg;base64,`. Inline CSS/theme/NAV like `render-deep-dive.ts`.
 - [ ] **Step 4: Run** → PASS.
 - [ ] **Step 5: Typecheck + commit**
 ```bash
 npx tsc --noEmit
-git add lib/html-doc/render-dig-deeper.ts lib/html-doc/render-dig-deeper.test.ts
+git add lib/html-doc/render-dig-deeper.ts tests/lib/html-doc/render-dig-deeper.test.ts
 git commit -m "feat(dig): dig-deeper HTML renderer with base64 slide inlining"
 ```
 
 ---
 
-## Task 8: Index fields `digDeeperMd` / `digDeeperHtml`
+## Task 8: Index fields `digDeeperMd` / `digDeeperHtml` (B-3: `Video` is a Zod schema)
 
 **Files:**
-- Modify: `types.ts` (Video interface), and the index-store read/write if it whitelists fields.
-- Test: extend the relevant index-store test.
+- Modify: `types/index.ts` — `Video` is `z.infer<typeof VideoSchema>` (`:46-78`); add the fields to **`VideoSchema`**, mirroring `summaryHtml`/`deepDiveHtml` (`:59-60`). There is no `types.ts` and no TS `interface Video`.
+- Test: `tests/lib/index-store.test.ts` (or a new `tests/lib/video-schema.test.ts`).
 
 **Interfaces:**
-- Produces: `Video.digDeeperMd?: string; Video.digDeeperHtml?: string;` (filenames relative to `raw/`).
+- Produces (in `VideoSchema`): `digDeeperMd: z.string().nullable().optional()`, `digDeeperHtml: z.string().nullable().optional()` → `Video.digDeeperMd?: string | null`, `Video.digDeeperHtml?: string | null`.
 
-- [ ] **Step 1: Write failing test** — round-trip a `Video` with `digDeeperMd` set through index write+read; assert it persists.
-- [ ] **Step 2: Run** → FAIL (field stripped/absent).
-- [ ] **Step 3: Implement** — add optional fields; include them in any field whitelist/serializer.
+> **B-3 note:** a plain write→read round-trip will NOT fail before the change — `readIndex` does `JSON.parse` with no Zod parse, so unknown fields already survive. The RED test must exercise **`VideoSchema.parse(...)`** (or `PlaylistIndexSchema.parse`) directly, so the field is dropped/typed only after it's added to the schema.
+
+- [ ] **Step 1: Write failing test**
+```ts
+import { VideoSchema } from '@/types';   // '@/types' resolves to types/index.ts via the @/ alias
+test('VideoSchema carries digDeeperMd/digDeeperHtml', () => {
+  const parsed = VideoSchema.parse({
+    id: 'abc12345678', /* …minimum required fields per VideoSchema… */
+    digDeeperMd: 'x-dig-deeper.md', digDeeperHtml: 'x-dig-deeper.html',
+  });
+  expect(parsed.digDeeperMd).toBe('x-dig-deeper.md');
+  expect(parsed.digDeeperHtml).toBe('x-dig-deeper.html');
+});
+```
+(Populate the required fields by copying a valid `Video` fixture already used in `tests/`.)
+
+- [ ] **Step 2: Run** → FAIL — `VideoSchema.parse` strips the unknown keys, so `parsed.digDeeperMd` is `undefined`.
+- [ ] **Step 3: Implement** — add the two `z.string().nullable().optional()` fields to `VideoSchema`.
 - [ ] **Step 4: Run** → PASS.
 - [ ] **Step 5: Typecheck + commit**
 ```bash
 npx tsc --noEmit
-git add types.ts lib/index-store.ts lib/index-store.test.ts
-git commit -m "feat(dig): Video.digDeeperMd/digDeeperHtml index fields"
+git add types/index.ts tests/lib/index-store.test.ts
+git commit -m "feat(dig): VideoSchema digDeeperMd/digDeeperHtml fields"
 ```
 
 ---
@@ -513,21 +552,21 @@ git commit -m "feat(dig): Video.digDeeperMd/digDeeperHtml index fields"
 
 **Files:**
 - Create: `app/api/videos/[id]/dig/[sectionId]/route.ts`
-- Test: `app/api/videos/[id]/dig/[sectionId]/route.test.ts` (mock `lib/dig/*` + `lib/job-registry`)
+- Test: `tests/api/dig-post.test.ts` — **model on `tests/api/deep-dive-post.test.ts`** (copy its `Request`-builder, `params: Promise<{id}>` handling, and `jest.mock('@/lib/job-registry')` + `_resetJobRegistry()` setup; H-5). Mock `@/lib/dig/*`.
 
 **Interfaces:**
-- Consumes: Tasks 2–8; `createJob/emitJobEvent/getActiveJob/releaseJobLock/deleteJob` (`lib/job-registry.ts`), `assertOutputFolder/assertVideoId` (`lib/index-store.ts`), `parseSummaryMarkdown` (`lib/html-doc/parse.ts`), `resolveTranscriptTokens` (Task 1), `resolveTranscriptSegments` (existing).
-- Produces: `POST` → `{ jobId }`. Mirrors `app/api/videos/[id]/deep-dive/route.ts` (grace window, lock release on terminal).
+- Consumes: Tasks 2–8; `createJob/emitJobEvent/getActiveJob/releaseJobLock/deleteJob` (`lib/job-registry.ts`), `assertOutputFolder/assertVideoId` (`lib/index-store.ts`), `parseSummaryMarkdown` (`lib/html-doc/parse.ts` — returns `{ sections: ParsedSection[] }`), `resolveTranscriptTokens` (Task 1), `resolveTranscriptSegments` (existing).
+- Produces: `POST` reading `{ outputFolder, force? }` from the **JSON body** (H-2) → `{ jobId }`. Mirrors `app/api/videos/[id]/deep-dive/route.ts` (grace window, lock release on terminal). `sectionId` param is coerced via `Number()` and validated as a non-negative integer (L-4).
 
 **Enumerated Behaviors:**
 
 | # | Behavior | Trigger | Expected |
 |---|---|---|---|
 | 1 | Happy path | valid POST | creates job, runs: parse summary → window → generateDig → resolve TS (with full duration) → resolveSlideTokens → upsert → render+save HTML → set index fields → `done`; returns `{jobId}` |
-| 2 | Missing outputFolder | absent | 400 |
-| 3 | Invalid videoId/sectionId | bad | 400 (no job) |
+| 2 | Missing outputFolder (body) | absent | 400 |
+| 3 | Invalid videoId / non-integer sectionId | bad | 400 (no job); test asserts `Number('abc')`/negative → 400 (L-4) |
 | 4 | Section not found | `sectionId` matches no parsed section | `error` event, no doc mutation |
-| 5 | Same-section in-flight (H7) | second POST while loading | returns existing `jobId` (key = `folder::videoId::sectionId`); no second Gemini call |
+| 5 | Same-section in-flight (H7/H-3) | second POST while loading | returns existing `jobId`; **test asserts `getActiveJob` was called with the exact key `${outputFolder}::${videoId}::${sectionId}`** and `generateDig` called once |
 | 6 | `force=1` | re-dig | overwrites that section's block |
 | 7 | Gemini fails | generateDig throws | `error` event; no partial doc write |
 | 8 | yt-dlp gated | slides fallback | `done` with text-only doc |
@@ -535,12 +574,12 @@ git commit -m "feat(dig): Video.digDeeperMd/digDeeperHtml index fields"
 
 - [ ] **Step 1: Write failing tests** for Behaviors 1–9 (mock units; assert orchestration order, in-flight key, status codes, terminal events).
 - [ ] **Step 2: Run** → FAIL.
-- [ ] **Step 3: Implement** the handler: copy the deep-dive route's job/lock/grace scaffolding; key the lock as `${outputFolder}::${videoId}::${sectionId}` (H7); orchestrate the pipeline; emit `step`/`done`/`error`.
+- [ ] **Step 3: Implement** the handler: read `outputFolder`/`force` from `await request.json()` (H-2); `Number(sectionId)` + non-negative-integer guard (L-4); copy the deep-dive route's job/lock/grace scaffolding; `createJob(jobId, key)` with `key = ${outputFolder}::${videoId}::${sectionId}` (H-3); orchestrate the pipeline; emit `step`/`done`/`error`.
 - [ ] **Step 4: Run** targeted → then `npm test`.
 - [ ] **Step 5: Typecheck + commit**
 ```bash
 npx tsc --noEmit
-git add app/api/videos/[id]/dig/[sectionId]/route.ts app/api/videos/[id]/dig/[sectionId]/route.test.ts
+git add "app/api/videos/[id]/dig/[sectionId]/route.ts" tests/api/dig-post.test.ts
 git commit -m "feat(dig): POST dig trigger route + per-section orchestration"
 ```
 
@@ -551,7 +590,7 @@ git commit -m "feat(dig): POST dig trigger route + per-section orchestration"
 **Files:**
 - Create: `app/api/videos/[id]/dig/[sectionId]/stream/route.ts` (copy deep-dive `stream/route.ts` verbatim — subscribe by `?jobId=`)
 - Create: `app/api/videos/[id]/dig-state/route.ts`
-- Test: `app/api/videos/[id]/dig-state/route.test.ts`
+- Test: `tests/api/dig-state.test.ts` (model on `tests/api/html-serve.test.ts` for the GET harness; mock `@/lib/dig/companion-doc`)
 
 **Interfaces:**
 - `GET stream?jobId=` → SSE subscription only, no side effects (mirror existing).
@@ -572,7 +611,7 @@ git commit -m "feat(dig): POST dig trigger route + per-section orchestration"
 - [ ] **Step 5: Typecheck + commit**
 ```bash
 npx tsc --noEmit
-git add "app/api/videos/[id]/dig/[sectionId]/stream/route.ts" "app/api/videos/[id]/dig-state/route.ts" "app/api/videos/[id]/dig-state/route.test.ts"
+git add "app/api/videos/[id]/dig/[sectionId]/stream/route.ts" "app/api/videos/[id]/dig-state/route.ts" tests/api/dig-state.test.ts
 git commit -m "feat(dig): GET stream subscribe + dig-state route"
 ```
 
@@ -582,7 +621,7 @@ git commit -m "feat(dig): GET stream subscribe + dig-state route"
 
 **Files:**
 - Modify: `app/api/html/[id]/route.ts` (the type-allowlist at `:27-30`)
-- Test: extend its route test.
+- Test: extend `tests/api/html-serve.test.ts`.
 
 **Interfaces:**
 - `GET /api/html/[id]?outputFolder=&type=dig-deeper` → serves `renderDigDeeperHtml` of the video's `digDeeperMd`.
@@ -602,47 +641,83 @@ git commit -m "feat(dig): GET stream subscribe + dig-state route"
 - [ ] **Step 5: Typecheck + commit**
 ```bash
 npx tsc --noEmit
-git add "app/api/html/[id]/route.ts" "app/api/html/[id]/route.test.ts"
+git add "app/api/html/[id]/route.ts" tests/api/html-serve.test.ts
 git commit -m "feat(dig): serve type=dig-deeper HTML"
 ```
 
 ---
 
-## Task 12: `nav.ts` client wiring (dug-state + control state machine)
+## Task 12: Repoint the summary dig control (B-4 / spec D1)
+
+**Why:** Today `render.ts:83` emits the control only `(hasDeepDive && startSec != null)` and `digControl('deep-dive', startSec)` (`nav.ts:8`) renders a cross-doc link to the **legacy** deep-dive doc. With deep-dive replaced (D1), the control must appear on **every timestamped section** regardless of `deepDiveMd`, and must drive the new POST→SSE flow — otherwise Tasks 9–11's routes are never invoked.
 
 **Files:**
-- Modify: `lib/html-doc/nav.ts` (extend `NAV_SCRIPT`; the `digControl` markup gains `data-section` = startSec)
-- Test: `lib/html-doc/nav.test.ts` (jsdom: simulate dig-state fetch + click → POST → stream)
+- Modify: `lib/html-doc/render.ts:83` (gating) and `lib/html-doc/nav.ts:8` (`digControl` signature/markup)
+- Test: `tests/lib/html-doc/render.test.ts` (or the existing render test) + `tests/lib/html-doc/nav.test.ts`
 
 **Interfaces:**
-- Consumes: routes from Tasks 9–11.
-- Produces: on load, `NAV_SCRIPT` fetches `dig-state` and marks each control dug/not-dug; click on not-dug → POST trigger, subscribe stream, show ⏳; on `done` → "view detail ↓" linking to `…&type=dig-deeper#t=<startSec>`; on `error` → ⚠ retry.
+- `digControl(startSec: number): string` — drop the `targetType` param; emit `<a class="dig" data-section="${startSec}" data-t="${startSec}">dig deeper ▶</a>` (the state machine in Task 13 owns behavior). Update `render.ts` to `const dig = startSec != null ? digControl(startSec) : '';` (drop `hasDeepDive`). Also drop the now-unused `hasDeepDive` plumbing if it becomes dead (check `render-deep-dive.ts` still needs its own counterpart control — keep that path; only the summary→dig path changes).
 
 **Enumerated Behaviors:**
 
 | # | Behavior | Trigger | Expected |
 |---|---|---|---|
-| 1 | Dug on load | dig-state lists sectionId | control renders "view detail ↓" linking with all params (`outputFolder`,`type=dig-deeper`,`#t`) |
-| 2 | Not-dug click | click | POST (not GET), then GET stream?jobId; control ⏳ |
-| 3 | done | stream `done` | control → "view detail ↓" |
-| 4 | error | stream `error` | control → ⚠ retry |
-| 5 | force re-dig | ↻ on dug | POST `&force=1` |
-| 6 | URL params (E2E rule) | links | every param asserted, not just one |
+| 1 | Control on every timestamped section | section has `startSec`, `deepDiveMd` null | dig control present (was absent before) |
+| 2 | No control without timestamp | `startSec == null` | no control |
+| 3 | Markup carries sectionId | any | `data-section="${startSec}"` present |
 
-- [ ] **Step 1: Write failing tests** (jsdom; mock `fetch`/EventSource).
+- [ ] **Step 1: Write failing test** — render a summary whose video has `deepDiveMd: null` and a timestamped section; assert the dig control is emitted with `data-section`. (Currently fails: gated out.)
 - [ ] **Step 2: Run** → FAIL.
-- [ ] **Step 3: Implement** the `NAV_SCRIPT` additions + `digControl` `data-section`.
+- [ ] **Step 3: Implement** the gating + `digControl` signature change; fix all callers (`wireDigLinks` is rewritten in Task 13).
 - [ ] **Step 4: Run** → PASS; `npm test`.
 - [ ] **Step 5: Typecheck + commit**
 ```bash
 npx tsc --noEmit
-git add lib/html-doc/nav.ts lib/html-doc/nav.test.ts
-git commit -m "feat(dig): nav dug-state + dig control state machine"
+git add lib/html-doc/render.ts lib/html-doc/nav.ts tests/lib/html-doc/render.test.ts
+git commit -m "feat(dig): emit dig control on all timestamped sections (replace deep-dive)"
 ```
 
 ---
 
-## Task 13: E2E (Playwright)
+## Task 13: `nav.ts` dug-state fetch + control state machine (H-1)
+
+**Scope note (H-1):** `NAV_SCRIPT` (`nav.ts:42-58`) is today a ~12-line IIFE with no fetch/EventSource/state. This task adds a real client state machine as inline browser JS (no imports, no TS — it ships as a string). It is the largest client surface; treat its behaviors below as the contract.
+
+**Files:**
+- Modify: `lib/html-doc/nav.ts` — extend `NAV_SCRIPT`; keep `wireDigLinks` for jsdom-testable logic, repoint it to the POST→SSE flow.
+- Test: `tests/lib/html-doc/nav.test.ts` (jsdom; mock `global.fetch` and `EventSource`)
+
+**Interfaces:**
+- Consumes: routes from Tasks 9–11; the `outputFolder` is read from a page-level data attribute / existing global the summary HTML already exposes (verify how the current summary HTML passes `outputFolder` to client JS; reuse that channel).
+- Produces: on load, fetch `GET dig-state?outputFolder=` → for each `[data-section]` in the returned `sectionIds`, render "view detail ↓"; the rest stay "dig deeper ▶". Click not-dug → `POST /api/videos/[id]/dig/[sectionId]` with `{outputFolder}` body → subscribe `GET …/stream?jobId=` (EventSource) → ⏳ → on `done` "view detail ↓", on `error` "⚠ retry". `↻` → POST with `{outputFolder, force:true}`.
+
+**Enumerated Behaviors:**
+
+| # | Behavior | Trigger | Expected |
+|---|---|---|---|
+| 1 | Dug on load | dig-state lists sectionId | "view detail ↓" linking `/api/html/[id]?outputFolder=<enc>&type=dig-deeper#t=<startSec>` (assert ALL params) |
+| 2 | dig-state fetch fails | network error on load | controls default to "dig deeper ▶" (fail-open, not blank) |
+| 3 | Not-dug click | click | **POST** (assert method, not GET) with `{outputFolder}` body; then EventSource to stream?jobId; control ⏳ |
+| 4 | Job done | stream emits `done` | control → "view detail ↓" with all params |
+| 5 | Job error event | stream emits `{type:'error'}` | control → ⚠ retry |
+| 6 | EventSource transport error | `onerror` (not a job event) | control → ⚠ retry (distinct from #5 but same UI) |
+| 7 | Double-click while loading | click during ⏳ | second click ignored (no 2nd POST) |
+| 8 | force re-dig | ↻ on dug | POST `{outputFolder, force:true}` |
+
+- [ ] **Step 1: Write failing tests** for Behaviors 1–8 (jsdom; mock `fetch` + a fake `EventSource`).
+- [ ] **Step 2: Run** → FAIL.
+- [ ] **Step 3: Implement** the `NAV_SCRIPT` state machine + `wireDigLinks` logic.
+- [ ] **Step 4: Run** → PASS; `npm test`.
+- [ ] **Step 5: Typecheck + commit**
+```bash
+npx tsc --noEmit
+git add lib/html-doc/nav.ts tests/lib/html-doc/nav.test.ts
+git commit -m "feat(dig): nav dug-state fetch + dig control state machine"
+```
+
+---
+
+## Task 14: E2E (Playwright)
 
 **Files:**
 - Create: `e2e/dig-deeper.spec.ts`
@@ -670,12 +745,12 @@ git commit -m "test(dig): E2E with/without slides, URL params, POST-not-GET"
 
 ---
 
-## Self-Review
+## Self-Review (rev 2 — post plan review)
 
-**Spec coverage:** §0 spike → done (no task). §2 units → Tasks 2–12. §3a window → T2. §3b REST → T5. §3c grammar/H2/H4 → T1,T3. §4 slides/H3/M3/L4 → T4. §5 doc format/M6 → T6. §6 UI/B1/B2 → T9,T10,T12. §7 errors/H7 → T4,T9. §9 testing → every task + T13. H6 (renderer, serve, index) → T7,T8,T11. **No uncovered spec requirement.**
+**Spec coverage:** §0 spike → done (no task). §3a window → T2. §3b REST → T5. §3c grammar/H2 → T1,T3. §4 slides → T4. §5 doc format → T6. §6 UI/B1/B2 → T9,T10,T13. D1 replace-control → **T12 (new)**. §7 errors/H7 → T4,T9. H6 (renderer/serve/index) → T7,T8(VideoSchema),T11. testing → every task + T14. **No uncovered spec requirement.**
 
-**Placeholders:** none — each task has real test code and concrete implementation direction with exact signatures.
+**Tasks (14):** 1 resolver duration · 2 section-window · 3 SLIDE grammar · 4 slides exec · 5 gemini REST · 6 companion-doc · 7 renderer · 8 VideoSchema fields · 9 POST orchestration · 10 stream+dig-state · 11 html serve · 12 repoint control (D1) · 13 nav state machine · 14 E2E.
 
-**Type consistency:** `sectionId`/`startSec` are `number` throughout; `SectionWindow`, `SlideToken`, `DugSection` defined once and consumed by name; `resolveSlideTokens`/`generateDig`/`upsertDugSection`/`readDugSectionIds`/`renderDigDeeperHtml` names match across producer and consumer tasks.
+**Plan-review findings folded in:** B-1 (T1 line :85 + tail-end assert), B-2 (all tests under `tests/`, `@/` imports), B-3 (T8 VideoSchema + real RED), B-4 (T12 new), H-1 (T13 expanded behaviors), H-2 (POST body transport), H-3 (T9 lock-key assertion), H-4 (assertVideoId), H-5 (model on `tests/api/deep-dive-post.test.ts`), M-1 (`.cache/` gitignore T4), M-3 (T6 explicit YAML), M-4 (T5 retry test), M-5 (T7 drop-img + renderer rule), L-4 (sectionId coercion). M-2 accepted coverage gap (exec only unit-mocked).
 
-**Post-Plan Gate reminder:** before dispatching any implementation subagent — run the adversarial review of THIS plan, save to `docs/reviews/plan-dig-deeper-screenshots-codex.md` (Codex at limit → Claude fallback), address Blocking/High, get explicit human approval.
+**Placeholders:** none. **Type consistency:** `sectionId`/`startSec` `number` throughout; `SectionWindow`/`SlideToken`/`DugSection` defined once; `resolveSlideTokens`/`generateDig`/`upsertDugSection`/`readDugSectionIds`/`renderDigDeeperHtml`/`digControl(startSec)` names consistent across producer/consumer.
