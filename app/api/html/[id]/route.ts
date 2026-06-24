@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { assertOutputFolder, assertVideoId, readIndex } from '../../../../lib/index-store';
 import { runDeepDiveHtml } from '../../../../lib/html-doc/generate-deep-dive';
+import { renderDigDeeperHtml } from '../../../../lib/html-doc/render-dig-deeper';
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -25,7 +26,7 @@ export async function GET(request: Request, { params }: Params) {
   }
 
   const type = searchParams.get('type');
-  if (type !== 'summary' && type !== 'deep-dive') {
+  if (type !== 'summary' && type !== 'deep-dive' && type !== 'dig-deeper') {
     return new Response(JSON.stringify({ error: 'unsupported or missing type' }), { status: 400 });
   }
 
@@ -65,6 +66,20 @@ export async function GET(request: Request, { params }: Params) {
     } catch {
       return new Response(JSON.stringify({ error: 'file not found' }), { status: 404 });
     }
+  }
+
+  if (type === 'dig-deeper') {
+    if (!video.digDeeperMd) {
+      return new Response(JSON.stringify({ error: 'dig-deeper not available' }), { status: 404 });
+    }
+    const mdAbsPath = path.resolve(outputFolder, video.digDeeperMd);
+    let mdContent: string;
+    try {
+      mdContent = fs.readFileSync(mdAbsPath, 'utf-8');
+    } catch {
+      return new Response(JSON.stringify({ error: 'dig-deeper file not found' }), { status: 404 });
+    }
+    return serveHtml(renderDigDeeperHtml(mdContent, mdAbsPath));
   }
 
   // type === 'deep-dive'

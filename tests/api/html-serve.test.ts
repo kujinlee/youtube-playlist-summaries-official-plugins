@@ -78,3 +78,45 @@ it('serves a summary HTML whose filename has a Korean slug (B-1)', async () => {
     `http://localhost/api/html/${VIDEO_ID}?outputFolder=${encodeURIComponent(dir)}&type=summary`), ctx);
   expect(res.status).toBe(200); // was 404 before the Unicode-regex fix
 });
+
+// --- type=dig-deeper (Behaviors 1–3) ---
+
+function digDeeperUrl() {
+  return new Request(
+    `http://localhost/api/html/${VIDEO_ID}?outputFolder=${encodeURIComponent(dir)}&type=dig-deeper`
+  );
+}
+
+it('dig-deeper: 404 when digDeeperMd is absent (B-3)', async () => {
+  writeIndex(video({ digDeeperMd: null }));
+  const res = await GET(digDeeperUrl(), ctx);
+  expect(res.status).toBe(404);
+});
+
+it('dig-deeper: 404 when digDeeperMd file is missing on disk (B-3)', async () => {
+  writeIndex(video({ digDeeperMd: 'wiki/missing-dig-deeper.md' }));
+  const res = await GET(digDeeperUrl(), ctx);
+  expect(res.status).toBe(404);
+});
+
+it('dig-deeper: 200 HTML rendered from digDeeperMd (B-1)', async () => {
+  fs.mkdirSync(path.join(dir, 'wiki'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'wiki', 'dig-deeper.md'),
+    '# Dig Deeper\n\nSome deeper content here.\n'
+  );
+  writeIndex(video({ digDeeperMd: 'wiki/dig-deeper.md' }));
+  const res = await GET(digDeeperUrl(), ctx);
+  expect(res.status).toBe(200);
+  expect(res.headers.get('Content-Type')).toMatch(/text\/html/);
+  const body = await res.text();
+  expect(body).toContain('<!DOCTYPE html');
+  expect(body).toContain('Dig Deeper');
+});
+
+it('unknown type still 400 (B-2)', async () => {
+  writeIndex(video({ summaryHtml: 'htmls/a.html' }));
+  const base = `http://localhost/api/html/${VIDEO_ID}?outputFolder=${encodeURIComponent(dir)}`;
+  const res = await GET(new Request(`${base}&type=banana`), ctx);
+  expect(res.status).toBe(400);
+});
