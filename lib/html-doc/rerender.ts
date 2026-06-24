@@ -57,7 +57,7 @@ export function reRenderSummaryHtml(videoId: string, outputFolder: string): ReRe
     return { status: 'skipped-drift', mdSections: mdTitles, modelSections: envelope.sourceSections };
   }
 
-  const html = renderMagazineHtml(parsed, envelope.model);
+  const html = renderMagazineHtml(parsed, envelope.model, !!video.deepDiveMd);
   const htmlRel = `htmls/${base}.html`;
   const finalPath = path.join(outputFolder, htmlRel);
   fs.mkdirSync(path.dirname(finalPath), { recursive: true });

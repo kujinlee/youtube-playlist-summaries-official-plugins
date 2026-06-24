@@ -47,7 +47,7 @@ export async function runDeepDiveHtml(
 
   const mdPath = path.join(outputFolder, md);
   const mdContent = fs.readFileSync(mdPath, 'utf-8');
-  const html = renderDeepDiveHtml(mdContent, md);
+  const html = renderDeepDiveHtml(mdContent, md, !!video.summaryMd);
 
   const base = md.replace(/\.md$/, '');
   const htmlRel = `htmls/${base}.html`;
@@ -91,7 +91,7 @@ export function reRenderDeepDiveHtml(videoId: string, outputFolder: string): Dee
     return { status: 'skipped-no-md' };
   }
 
-  const html = renderDeepDiveHtml(mdContent, video.deepDiveMd);
+  const html = renderDeepDiveHtml(mdContent, video.deepDiveMd, !!video.summaryMd);
   const base = video.deepDiveMd.replace(/\.md$/, '');
   const htmlRel = `htmls/${base}.html`;
   const finalPath = path.join(outputFolder, htmlRel);

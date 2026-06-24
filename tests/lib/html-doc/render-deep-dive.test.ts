@@ -283,5 +283,16 @@ lang: EN
       expect(out).not.toContain('▶');
       expect(out).not.toContain('not-a-valid-ts-line');
     });
+
+    it('emits data-start on <h2> + an "↑ summary" control when hasSummary', () => {
+      const out = renderDeepDiveHtml(FM + '## Sec\n▶ [0:00–0:30](https://www.youtube.com/watch?v=v1&t=0s)\nbody\n', 'v1-deep-dive.md', true);
+      expect(out).toMatch(/<h2 data-start="0"/);
+      expect(out).toContain('class="dig" data-type="summary"');
+      expect(out).toContain('a.dig'); // NAV_SCRIPT present
+    });
+    it('omits the dig control by default', () => {
+      const out = renderDeepDiveHtml(FM + '## Sec\n▶ [0:00–0:30](https://www.youtube.com/watch?v=v1&t=0s)\nbody\n', 'v1-deep-dive.md');
+      expect(out).not.toContain('class="dig"');
+    });
   });
 });

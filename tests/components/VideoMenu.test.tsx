@@ -30,8 +30,8 @@ it('disables the item while busy', () => {
 
 // ── Deep Dive doc (new unified item) ────────────────────────────────────────
 
-it('Deep Dive doc — renders as a LINK when current (deepDiveHtml + deepDiveVersion 2.1)', () => {
-  render(<VideoMenu {...props} video={{ ...base, deepDiveMd: 'dd.md', deepDiveHtml: 'htmls/dd.html', deepDiveVersion: { major: 2, minor: 2 } } as any} />);
+it('Deep Dive doc — renders as a LINK when current (deepDiveHtml + deepDiveVersion 2.3)', () => {
+  render(<VideoMenu {...props} video={{ ...base, deepDiveMd: 'dd.md', deepDiveHtml: 'htmls/dd.html', deepDiveVersion: { major: 2, minor: 3 } } as any} />);
   const el = screen.getByRole('link', { name: /Deep Dive doc/i });
   expect(el).toHaveAttribute('href', expect.stringContaining('type=deep-dive'));
   expect(el).toHaveAttribute('href', expect.stringContaining('outputFolder='));
@@ -48,7 +48,7 @@ it('Deep Dive doc — renders as a BUTTON when never generated (deepDiveMd and d
 });
 
 it('Deep Dive doc — renders DISABLED with hourglass when busy', () => {
-  render(<VideoMenu {...props} busy video={{ ...base, deepDiveMd: 'dd.md', deepDiveHtml: 'htmls/dd.html', deepDiveVersion: { major: 2, minor: 2 } } as any} />);
+  render(<VideoMenu {...props} busy video={{ ...base, deepDiveMd: 'dd.md', deepDiveHtml: 'htmls/dd.html', deepDiveVersion: { major: 2, minor: 3 } } as any} />);
   const el = screen.getByText(/Deep Dive doc/i).closest('a,button,span');
   expect(el).toHaveAttribute('aria-disabled', 'true');
   expect(el?.textContent).toMatch(/⏳/);
@@ -64,7 +64,7 @@ it('Deep Dive doc — calls onDeepDive with video.id on button click', () => {
 });
 
 it('old "Deep Dive" and "View Deep Dive HTML" items no longer exist', () => {
-  render(<VideoMenu {...props} video={{ ...base, deepDiveMd: 'dd.md', deepDiveHtml: 'htmls/dd.html', deepDiveVersion: { major: 2, minor: 2 } } as any} />);
+  render(<VideoMenu {...props} video={{ ...base, deepDiveMd: 'dd.md', deepDiveHtml: 'htmls/dd.html', deepDiveVersion: { major: 2, minor: 3 } } as any} />);
   // There must be exactly one deep-dive-doc control (the unified item)
   const deepDiveDocEls = screen.getAllByText(/Deep Dive doc/i);
   expect(deepDiveDocEls).toHaveLength(1);

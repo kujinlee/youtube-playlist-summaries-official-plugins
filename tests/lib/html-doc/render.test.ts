@@ -247,4 +247,26 @@ describe('renderMagazineHtml — section timestamps', () => {
     expect(html).toContain('>(A &amp; B)</a>');
     expect(html).toContain('href="https://youtu.be/x?v=1&amp;t=0s"');
   });
+
+  it('emits data-start on the section + a dig-deeper control when hasDeepDive', () => {
+    const html = renderMagazineHtml(withTs, model, true);
+    expect(html).toMatch(/<section data-start="135">/);
+    expect(html).toContain('class="dig" data-type="deep-dive" data-t="135"');
+    expect(html).toContain('dig deeper');
+    expect(html).toContain('a.dig'); // NAV_SCRIPT present (unique token)
+  });
+  it('omits the dig control when hasDeepDive is false (default)', () => {
+    expect(renderMagazineHtml(withTs, model)).not.toContain('class="dig"');
+  });
+  it('emits data-start="0" for a 0:00 section (presence-gated, not truthiness)', () => {
+    const zero = { ...withTs, sections: [
+      { ...withTs.sections[0], timeRange: { ...withTs.sections[0].timeRange!, startSec: 0 } },
+      withTs.sections[1],
+    ] };
+    expect(renderMagazineHtml(zero, model, true)).toMatch(/<section data-start="0">/);
+  });
+  it('puts data-start only on timeRange sections (section1 null → bare <section>)', () => {
+    const html = renderMagazineHtml(withTs, model, true);
+    expect((html.match(/<section data-start=/g) ?? []).length).toBe(1); // only section0
+  });
 });

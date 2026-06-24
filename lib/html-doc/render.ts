@@ -4,6 +4,7 @@ import {
   BASE_PALETTE_LIGHT_PRE, BASE_PALETTE_LIGHT_POST, BASE_PALETTE_DARK_PRE, BASE_PALETTE_DARK_POST,
   type Palette,
 } from './theme';
+import { digControl, NAV_SCRIPT, NAV_CSS } from './nav';
 
 const SERIF = `Georgia, 'Nanum Myeongjo', 'Apple SD Gothic Neo', 'Times New Roman', serif`;
 
@@ -50,7 +51,7 @@ function esc(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-export function renderMagazineHtml(parsed: ParsedSummary, model: MagazineModel): string {
+export function renderMagazineHtml(parsed: ParsedSummary, model: MagazineModel, hasDeepDive = false): string {
   const metaParts = [parsed.channel, parsed.duration]
     .filter(Boolean)
     .map((s) => esc(s as string));
@@ -77,12 +78,15 @@ export function renderMagazineHtml(parsed: ParsedSummary, model: MagazineModel):
       const ts = s.timeRange
         ? ` <a class="ts" href="${esc(s.timeRange.url)}" target="_blank" rel="noopener noreferrer">(${esc(s.timeRange.label)})</a>`
         : '';
+      const startSec = s.timeRange ? s.timeRange.startSec : null;
+      const dataStart = startSec != null ? ` data-start="${startSec}"` : '';
+      const dig = (hasDeepDive && startSec != null) ? digControl('deep-dive', startSec) : '';
       const bullets = m.bullets
         .map((b) => `<li>${esc(b.text)}</li>`)
         .join('');
-      return `<section>
+      return `<section${dataStart}>
       ${ghost}
-      <h2>${esc(s.title)}${ts}</h2>
+      <h2>${esc(s.title)}${ts}${dig}</h2>
       <p class="lead">${esc(m.lead)}</p>
       <ul>${bullets}</ul>
     </section>`;
@@ -102,7 +106,7 @@ export function renderMagazineHtml(parsed: ParsedSummary, model: MagazineModel):
 <meta name="video-id" content="${esc(parsed.videoId ?? '')}">
 <title>${esc(parsed.title)}</title>
 ${THEME_HEAD_SCRIPT}
-<style>${themeStyleBlock(LIGHT, DARK)}${STRUCTURAL_CSS}</style>
+<style>${themeStyleBlock(LIGHT, DARK)}${STRUCTURAL_CSS}${NAV_CSS}</style>
 </head>
 <body>
 ${THEME_TOGGLE_BUTTON}${PRINT_BUTTON}
@@ -113,7 +117,7 @@ ${THEME_TOGGLE_BUTTON}${PRINT_BUTTON}
   ${sections}
   <footer>Skim view — generated from the source note${footerSource}. Full text lives in the source <code>.md</code>.</footer>
 </article>
-${THEME_TOGGLE_SCRIPT}
+${NAV_SCRIPT}${THEME_TOGGLE_SCRIPT}
 </body>
 </html>`;
 }
