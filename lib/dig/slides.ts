@@ -59,18 +59,17 @@ export async function resolveSlideTokens(
   // Build YouTube URL server-side from the validated videoId.
   const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
-  // Ensure assets directory exists.
-  const assetsDir = path.resolve(assetsRoot, videoId);
-  fs.mkdirSync(assetsDir, { recursive: true });
-
-  // Write temp clip under .cache/.
+  // Temp clip path — directory created only once a valid token is confirmed
+  // (just before yt-dlp download, below).
   const cacheDir = path.resolve('.cache');
-  fs.mkdirSync(cacheDir, { recursive: true });
   const tmpClip = path.join(cacheDir, `clip-${crypto.randomUUID()}.mp4`);
 
   let result = markdown;
 
   try {
+    // Ensure .cache/ exists only now that we know we have tokens to process.
+    fs.mkdirSync(cacheDir, { recursive: true });
+
     // Download the section clip once for all tokens.
     try {
       await execFileAsync('yt-dlp', [
@@ -100,6 +99,10 @@ export async function resolveSlideTokens(
         result = result.replace(token.raw, '');
         continue;
       }
+
+      // Create asset directory only after the containment check passes.
+      const assetsDir = path.resolve(assetsRoot, videoId);
+      fs.mkdirSync(assetsDir, { recursive: true });
 
       try {
         await execFileAsync('ffmpeg', [

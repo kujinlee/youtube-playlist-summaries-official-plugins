@@ -7,19 +7,34 @@
 
 jest.mock('node:child_process');
 
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { resolveSlideTokens } from '@/lib/dig/slides';
 
-const VALID_OPTS = {
+// Helper: make execFile a typed mock.
+const mockExecFile = execFile as unknown as jest.Mock;
+
+let tmpAssetsRoot: string;
+
+// Create a unique temp dir per test run; remove it after all tests complete.
+beforeAll(() => {
+  tmpAssetsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slides-test-'));
+});
+
+afterAll(() => {
+  fs.rmSync(tmpAssetsRoot, { recursive: true, force: true });
+});
+
+// Rebuild VALID_OPTS using the temp dir so it is always fresh.
+const getOpts = () => ({
   videoId: 'abc12345678',
   startSec: 300,
   endSec: 400,
-  assetsRoot: '/tmp/a',
+  assetsRoot: tmpAssetsRoot,
   sectionId: 300,
-} as const;
-
-// Helper: make execFile a typed mock.
-const mockExecFile = execFile as unknown as jest.Mock;
+});
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -28,13 +43,13 @@ beforeEach(() => {
 // ─── Behavior 1: No tokens → no exec, unchanged ────────────────────────────
 
 test('no tokens → no exec called, markdown returned unchanged', async () => {
-  const out = await resolveSlideTokens('plain text', VALID_OPTS);
+  const out = await resolveSlideTokens('plain text', getOpts());
   expect(out).toBe('plain text');
   expect(mockExecFile).not.toHaveBeenCalled();
 });
 
 test('empty string → no exec called, empty string returned', async () => {
-  const out = await resolveSlideTokens('', VALID_OPTS);
+  const out = await resolveSlideTokens('', getOpts());
   expect(out).toBe('');
   expect(mockExecFile).not.toHaveBeenCalled();
 });
@@ -46,7 +61,7 @@ test('happy path rewrites token and calls yt-dlp then ffmpeg with array argv', a
     cb(null, '', ''),
   );
 
-  const out = await resolveSlideTokens('see [[SLIDE:352|Loop]]', VALID_OPTS);
+  const out = await resolveSlideTokens('see [[SLIDE:352|Loop]]', getOpts());
 
   expect(out).toContain('![Loop](assets/abc12345678/300-352.jpg)');
 
@@ -65,7 +80,7 @@ test('happy path yt-dlp argv contains --download-sections with correct range', a
     cb(null, '', ''),
   );
 
-  await resolveSlideTokens('[[SLIDE:352|x]]', VALID_OPTS);
+  await resolveSlideTokens('[[SLIDE:352|x]]', getOpts());
 
   const ytDlpCall = mockExecFile.mock.calls.find((c: unknown[]) => c[0] === 'yt-dlp') as unknown[] | undefined;
   expect(ytDlpCall).toBeDefined();
@@ -83,7 +98,7 @@ test('happy path ffmpeg -ss is relative offset (sec - startSec)', async () => {
   );
 
   // sec=352, startSec=300 → offset=52
-  await resolveSlideTokens('[[SLIDE:352|x]]', VALID_OPTS);
+  await resolveSlideTokens('[[SLIDE:352|x]]', getOpts());
 
   const ffmpegCall = mockExecFile.mock.calls.find((c: unknown[]) => c[0] === 'ffmpeg') as unknown[] | undefined;
   expect(ffmpegCall).toBeDefined();
@@ -98,7 +113,7 @@ test('happy path youtubeUrl is server-built from videoId', async () => {
     cb(null, '', ''),
   );
 
-  await resolveSlideTokens('[[SLIDE:352|x]]', VALID_OPTS);
+  await resolveSlideTokens('[[SLIDE:352|x]]', getOpts());
 
   const ytDlpCall = mockExecFile.mock.calls.find((c: unknown[]) => c[0] === 'yt-dlp') as unknown[] | undefined;
   const args = ytDlpCall![1] as string[];
@@ -112,7 +127,7 @@ test('ENOENT on yt-dlp → strips all tokens, returns text-only, no throw', asyn
     cb(Object.assign(new Error('enoent'), { code: 'ENOENT' })),
   );
 
-  const out = await resolveSlideTokens('see [[SLIDE:352|Loop]]', VALID_OPTS);
+  const out = await resolveSlideTokens('see [[SLIDE:352|Loop]]', getOpts());
   expect(out).toBe('see ');
   // Must not throw — test itself verifies no rejection
 });
@@ -126,7 +141,7 @@ test('ENOENT on ffmpeg → strips that token, returns text-only, no throw', asyn
     return cb(Object.assign(new Error('enoent'), { code: 'ENOENT' }));
   });
 
-  const out = await resolveSlideTokens('see [[SLIDE:352|Loop]]', VALID_OPTS);
+  const out = await resolveSlideTokens('see [[SLIDE:352|Loop]]', getOpts());
   expect(out).toBe('see ');
 });
 
@@ -137,7 +152,7 @@ test('yt-dlp non-zero exit → all tokens stripped, text-only returned', async (
     cb(Object.assign(new Error('exit 1'), { code: 1 })),
   );
 
-  const out = await resolveSlideTokens('intro [[SLIDE:310|A]] body [[SLIDE:350|B]]', VALID_OPTS);
+  const out = await resolveSlideTokens('intro [[SLIDE:310|A]] body [[SLIDE:350|B]]', getOpts());
   expect(out).toBe('intro  body ');
   // No image markdown
   expect(out).not.toContain('![');
@@ -154,7 +169,7 @@ test('second ffmpeg call fails → first token kept, second dropped', async () =
     return cb(Object.assign(new Error('exit 1'), { code: 1 })); // second frame fails
   });
 
-  const out = await resolveSlideTokens('[[SLIDE:310|A]] [[SLIDE:350|B]]', VALID_OPTS);
+  const out = await resolveSlideTokens('[[SLIDE:310|A]] [[SLIDE:350|B]]', getOpts());
   expect(out).toContain('![A](assets/abc12345678/300-310.jpg)');
   expect(out).not.toContain('![B]');
   // Second token is stripped to empty string
@@ -165,21 +180,21 @@ test('second ffmpeg call fails → first token kept, second dropped', async () =
 
 test('videoId with / rejected before exec', async () => {
   await expect(
-    resolveSlideTokens('[[SLIDE:352|x]]', { ...VALID_OPTS, videoId: '../etc' }),
+    resolveSlideTokens('[[SLIDE:352|x]]', { ...getOpts(), videoId: '../etc' }),
   ).rejects.toThrow();
   expect(mockExecFile).not.toHaveBeenCalled();
 });
 
 test('videoId with .. rejected before exec', async () => {
   await expect(
-    resolveSlideTokens('[[SLIDE:352|x]]', { ...VALID_OPTS, videoId: '../../secret' }),
+    resolveSlideTokens('[[SLIDE:352|x]]', { ...getOpts(), videoId: '../../secret' }),
   ).rejects.toThrow();
   expect(mockExecFile).not.toHaveBeenCalled();
 });
 
 test('empty videoId rejected before exec', async () => {
   await expect(
-    resolveSlideTokens('[[SLIDE:352|x]]', { ...VALID_OPTS, videoId: '' }),
+    resolveSlideTokens('[[SLIDE:352|x]]', { ...getOpts(), videoId: '' }),
   ).rejects.toThrow();
   expect(mockExecFile).not.toHaveBeenCalled();
 });
@@ -191,7 +206,7 @@ test('execFile is always called with array argv — never a string command', asy
     cb(null, '', ''),
   );
 
-  await resolveSlideTokens('[[SLIDE:310|X]] [[SLIDE:350|Y]]', VALID_OPTS);
+  await resolveSlideTokens('[[SLIDE:310|X]] [[SLIDE:350|Y]]', getOpts());
 
   expect(mockExecFile).toHaveBeenCalled();
   mockExecFile.mock.calls.forEach((call: unknown[]) => {
