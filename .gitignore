@@ -56,3 +56,5 @@ next-env.d.ts
 
 # Per-machine Claude Code settings (permission grants, local paths) — not shared
 .claude/settings.local.json
+
+/.cache/
