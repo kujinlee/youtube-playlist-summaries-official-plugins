@@ -27,7 +27,10 @@ export async function POST(request: Request, { params }: Params) {
 
   if (!outputFolder) return NextResponse.json({ error: 'outputFolder is required' }, { status: 400 });
 
-  // Validate sectionId: must be a non-negative integer
+  // Validate sectionId: must be a non-empty, non-negative integer
+  if (!sectionIdParam || sectionIdParam.trim() === '') {
+    return NextResponse.json({ error: 'invalid sectionId' }, { status: 400 });
+  }
   const sectionIdInt = Number(sectionIdParam);
   if (!Number.isInteger(sectionIdInt) || sectionIdInt < 0) {
     return NextResponse.json({ error: 'invalid sectionId' }, { status: 400 });
@@ -44,6 +47,9 @@ export async function POST(request: Request, { params }: Params) {
   if (!force) {
     const existing = getActiveJob(key);
     if (existing) return NextResponse.json({ jobId: existing });
+  } else {
+    const existing = getActiveJob(key);
+    if (existing) releaseJobLock(existing);
   }
 
   const jobId = crypto.randomUUID();

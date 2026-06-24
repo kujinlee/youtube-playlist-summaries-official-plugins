@@ -23,7 +23,7 @@ import * as transcriptTimestamps from '../../lib/transcript-timestamps';
 import * as parseMod from '../../lib/html-doc/parse';
 import * as transcriptSource from '../../lib/transcript-source';
 import * as indexStore from '../../lib/index-store';
-import { _resetJobRegistry } from '../../lib/job-registry';
+import * as jobRegistry from '../../lib/job-registry';
 import * as fs from 'node:fs/promises';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
@@ -38,6 +38,24 @@ jest.mock('../../lib/html-doc/parse');
 jest.mock('../../lib/transcript-source');
 jest.mock('../../lib/index-store');
 jest.mock('node:fs/promises');
+// Mock job-registry so its exports are jest.fn() wrappers that delegate to
+// the real implementations. This allows spyOn to intercept calls because
+// the route's closured references call through to mutable jest.fn() instances.
+jest.mock('../../lib/job-registry', () => {
+  const real = jest.requireActual<typeof import('../../lib/job-registry')>('../../lib/job-registry');
+  return {
+    createJob: jest.fn((...args: Parameters<typeof real.createJob>) => real.createJob(...args)),
+    deleteJob: jest.fn((...args: Parameters<typeof real.deleteJob>) => real.deleteJob(...args)),
+    emitJobEvent: jest.fn((...args: Parameters<typeof real.emitJobEvent>) => real.emitJobEvent(...args)),
+    getActiveJob: jest.fn((...args: Parameters<typeof real.getActiveJob>) => real.getActiveJob(...args)),
+    releaseJobLock: jest.fn((...args: Parameters<typeof real.releaseJobLock>) => real.releaseJobLock(...args)),
+    subscribeJob: jest.fn((...args: Parameters<typeof real.subscribeJob>) => real.subscribeJob(...args)),
+    cancelJob: jest.fn((...args: Parameters<typeof real.cancelJob>) => real.cancelJob(...args)),
+    getJobSignal: jest.fn((...args: Parameters<typeof real.getJobSignal>) => real.getJobSignal(...args)),
+    isIngestionRunning: jest.fn((...args: Parameters<typeof real.isIngestionRunning>) => real.isIngestionRunning(...args)),
+    _resetJobRegistry: jest.fn((...args: Parameters<typeof real._resetJobRegistry>) => real._resetJobRegistry(...args)),
+  };
+});
 
 // ── Typed mock refs ───────────────────────────────────────────────────────────
 
@@ -132,7 +150,7 @@ function post(videoId: string, sectionId: string | number, body: unknown) {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  _resetJobRegistry();
+  jobRegistry._resetJobRegistry();
 
   // Default mock implementations — happy path
   mockAssertOutputFolder.mockImplementation(() => {});
@@ -312,6 +330,9 @@ describe('B1: happy path', () => {
 // ── B4: Section not found ─────────────────────────────────────────────────────
 
 describe('B4: section not found', () => {
+  beforeEach(() => { jest.spyOn(console, 'error').mockImplementation(() => {}); });
+  afterEach(() => { jest.restoreAllMocks(); });
+
   it('returns 200 with jobId but emits an error event (no doc mutation)', async () => {
     // Sections exist but none match SECTION_ID
     mockParseSummaryMarkdown.mockReturnValue({
@@ -389,6 +410,9 @@ describe('B6: force flag', () => {
 // ── B7: Gemini fails ──────────────────────────────────────────────────────────
 
 describe('B7: Gemini failure', () => {
+  beforeEach(() => { jest.spyOn(console, 'error').mockImplementation(() => {}); });
+  afterEach(() => { jest.restoreAllMocks(); });
+
   it('emits error event; upsertDugSection and HTML write NOT called', async () => {
     mockGenerateDig.mockRejectedValue(new Error('Gemini rate limit'));
 
@@ -446,5 +470,126 @@ describe('B9: assets-before-doc ordering', () => {
     expect(slideIdx).toBeGreaterThanOrEqual(0);
     expect(upsertIdx).toBeGreaterThanOrEqual(0);
     expect(slideIdx).toBeLessThan(upsertIdx);
+  });
+});
+
+// ── Finding 1: force evicts existing lock before creating new job ─────────────
+
+describe('Finding 1: force=1 evicts existing lock', () => {
+  it('force=1 calls releaseJobLock on the old job before creating a new one', async () => {
+    // Hang first job so it stays active
+    mockGenerateDig.mockReturnValue(new Promise(() => {}));
+    const firstRes = await post(VIDEO_ID, SECTION_ID, { outputFolder: HOME });
+    const { jobId: firstJobId } = await firstRes.json();
+
+    // Clear call counts so we can track what the force request does
+    (jobRegistry.releaseJobLock as jest.Mock).mockClear();
+
+    // Reset generateDig for the force request
+    mockGenerateDig.mockResolvedValue('# New content');
+    const secondRes = await post(VIDEO_ID, SECTION_ID, { outputFolder: HOME, force: 1 });
+    const { jobId: secondJobId } = await secondRes.json();
+
+    // releaseJobLock should have been called with the OLD jobId
+    expect(jobRegistry.releaseJobLock).toHaveBeenCalledWith(firstJobId);
+    // Force creates a new job
+    expect(secondJobId).not.toBe(firstJobId);
+  });
+
+  it('force=1 does NOT return the old jobId', async () => {
+    mockGenerateDig.mockReturnValue(new Promise(() => {}));
+    const firstRes = await post(VIDEO_ID, SECTION_ID, { outputFolder: HOME });
+    const { jobId: firstJobId } = await firstRes.json();
+
+    mockGenerateDig.mockResolvedValue('# New content');
+    const secondRes = await post(VIDEO_ID, SECTION_ID, { outputFolder: HOME, force: 1 });
+    const { jobId: secondJobId } = await secondRes.json();
+
+    expect(secondJobId).not.toBe(firstJobId);
+    expect(typeof secondJobId).toBe('string');
+    expect(secondJobId.length).toBeGreaterThan(0);
+  });
+
+  it('non-force second request still returns the existing jobId (unchanged behavior)', async () => {
+    mockGenerateDig.mockReturnValue(new Promise(() => {}));
+    const firstRes = await post(VIDEO_ID, SECTION_ID, { outputFolder: HOME });
+    const { jobId: firstJobId } = await firstRes.json();
+
+    const secondRes = await post(VIDEO_ID, SECTION_ID, { outputFolder: HOME });
+    const { jobId: secondJobId } = await secondRes.json();
+
+    expect(secondJobId).toBe(firstJobId);
+  });
+});
+
+// ── Finding 2: exact lock-key string ─────────────────────────────────────────
+
+describe('Finding 2: exact lock-key string used in job registry', () => {
+  it('getActiveJob is called with the exact composite key outputFolder::videoId::sectionId', async () => {
+    await post(VIDEO_ID, SECTION_ID, { outputFolder: HOME });
+
+    const expectedKey = `${HOME}::${VIDEO_ID}::${SECTION_ID}`;
+    expect(jobRegistry.getActiveJob).toHaveBeenCalledWith(expectedKey);
+  });
+
+  it('createJob is called with the exact composite key outputFolder::videoId::sectionId', async () => {
+    await post(VIDEO_ID, SECTION_ID, { outputFolder: HOME });
+
+    const expectedKey = `${HOME}::${VIDEO_ID}::${SECTION_ID}`;
+    expect(jobRegistry.createJob).toHaveBeenCalledWith(expect.any(String), expectedKey);
+  });
+});
+
+// ── Finding 3: empty/whitespace sectionId → 400 ───────────────────────────────
+
+describe('Finding 3: empty/whitespace sectionId → 400', () => {
+  it('400 when sectionId is empty string ""', async () => {
+    const res = await post(VIDEO_ID, '', { outputFolder: HOME });
+    expect(res.status).toBe(400);
+  });
+
+  it('400 when sectionId is whitespace "  "', async () => {
+    const res = await post(VIDEO_ID, '  ', { outputFolder: HOME });
+    expect(res.status).toBe(400);
+  });
+});
+
+// ── Finding 4: suppress console.error in error-path tests ────────────────────
+
+describe('Finding 4: console.error suppressed in error paths', () => {
+  let consoleErrorSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleErrorSpy.mockRestore();
+  });
+
+  it('Gemini failure does not leak console.error to CI output', async () => {
+    mockGenerateDig.mockRejectedValue(new Error('Gemini rate limit'));
+
+    const res = await post(VIDEO_ID, SECTION_ID, { outputFolder: HOME });
+    expect(res.status).toBe(200);
+
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(mockUpsertDugSection).not.toHaveBeenCalled();
+  });
+
+  it('section-not-found error does not leak console.error to CI output', async () => {
+    mockParseSummaryMarkdown.mockReturnValue({
+      sections: [
+        { title: 'Other', prose: 'other', timeRange: { startSec: 999, endSec: 1200 } },
+      ],
+    });
+
+    const res = await post(VIDEO_ID, SECTION_ID, { outputFolder: HOME });
+    expect(res.status).toBe(200);
+
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(mockUpsertDugSection).not.toHaveBeenCalled();
   });
 });
