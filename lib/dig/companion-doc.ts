@@ -10,10 +10,18 @@
  *
  * NOTE: `generatedAt` must be supplied by the caller. This module never calls
  * `Date.now()` or `new Date()` internally (testability).
+ *
+ * Body format — each section is wrapped in sentinel comments so that `## ` /
+ * `### ` headings inside bodyMarkdown never confuse the parser (C1 fix):
+ *
+ *   <!-- dig-section: 312 -->
+ *   ## <title>
+ *
+ *   <bodyMarkdown (may contain ## / ###)>
+ *   <!-- /dig-section -->
  */
 
 import { readFile, writeFile, rename } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
@@ -68,6 +76,7 @@ function serializeFrontmatter(doc: CompanionDoc): string {
     for (const s of doc.sections) {
       lines.push(`  - sectionId: ${s.sectionId}`);
       lines.push(`    startSec: ${s.startSec}`);
+      lines.push(`    title: "${yamlQuote(s.title)}"`);
       lines.push(`    generatedAt: "${yamlQuote(s.generatedAt)}"`);
     }
   }
@@ -76,17 +85,34 @@ function serializeFrontmatter(doc: CompanionDoc): string {
   return lines.join('\n');
 }
 
+/**
+ * Serialize body using sentinel-delimited blocks so that `## ` / `### ` inside
+ * bodyMarkdown is never mistaken for a section boundary (C1 fix).
+ *
+ * Format per section (ordered by startSec):
+ *
+ *   <!-- dig-section: <sectionId> -->
+ *   ## <title>
+ *
+ *   <bodyMarkdown (verbatim, trimEnd)>
+ *   <!-- /dig-section -->
+ */
 function serializeBody(sections: DugSection[]): string {
   return sections
-    .map((s) => `## ${s.title}\n\n${s.bodyMarkdown.trimEnd()}\n`)
-    .join('\n');
+    .map((s) => {
+      const body = s.bodyMarkdown.trimEnd();
+      return `<!-- dig-section: ${s.sectionId} -->\n## ${s.title}\n\n${body}\n<!-- /dig-section -->`;
+    })
+    .join('\n\n');
 }
 
 function serialize(doc: CompanionDoc): string {
   // sections must be sorted by startSec before serializing
   const sorted = [...doc.sections].sort((a, b) => a.startSec - b.startSec);
   const docSorted: CompanionDoc = { ...doc, sections: sorted };
-  return serializeFrontmatter(docSorted) + '\n' + serializeBody(sorted);
+  const fm = serializeFrontmatter(docSorted);
+  const body = serializeBody(sorted);
+  return fm + '\n' + body + '\n';
 }
 
 // ── YAML parsing ──────────────────────────────────────────────────────────────
@@ -112,7 +138,7 @@ interface ParsedFrontmatter {
   videoId: string;
   language: 'en' | 'ko';
   sourceVideoUrl: string;
-  sections: Array<{ sectionId: number; startSec: number; generatedAt: string }>;
+  sections: Array<{ sectionId: number; startSec: number; title: string; generatedAt: string }>;
 }
 
 function parseFrontmatter(fmText: string): ParsedFrontmatter {
@@ -122,11 +148,11 @@ function parseFrontmatter(fmText: string): ParsedFrontmatter {
   let videoId = '';
   let language: 'en' | 'ko' = 'en';
   let sourceVideoUrl = '';
-  const sections: Array<{ sectionId: number; startSec: number; generatedAt: string }> = [];
+  const sections: Array<{ sectionId: number; startSec: number; title: string; generatedAt: string }> = [];
 
   // State machine for parsing the sections block sequence
   let inSections = false;
-  let currentSection: Partial<{ sectionId: number; startSec: number; generatedAt: string }> | null = null;
+  let currentSection: Partial<{ sectionId: number; startSec: number; title: string; generatedAt: string }> | null = null;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -147,6 +173,7 @@ function parseFrontmatter(fmText: string): ParsedFrontmatter {
           sections.push({
             sectionId: currentSection.sectionId,
             startSec: currentSection.startSec,
+            title: currentSection.title ?? '',
             generatedAt: currentSection.generatedAt ?? '',
           });
         }
@@ -157,6 +184,12 @@ function parseFrontmatter(fmText: string): ParsedFrontmatter {
       const startSecMatch = line.match(/^\s{4}startSec\s*:\s*(\d+)/);
       if (startSecMatch && currentSection) {
         currentSection.startSec = parseInt(startSecMatch[1], 10);
+        continue;
+      }
+
+      const titleMatch = line.match(/^\s{4}title\s*:\s*(.+)$/);
+      if (titleMatch && currentSection) {
+        currentSection.title = parseYamlQuotedScalar(titleMatch[1]);
         continue;
       }
 
@@ -203,6 +236,7 @@ function parseFrontmatter(fmText: string): ParsedFrontmatter {
     sections.push({
       sectionId: currentSection.sectionId,
       startSec: currentSection.startSec,
+      title: currentSection.title ?? '',
       generatedAt: currentSection.generatedAt ?? '',
     });
   }
@@ -211,49 +245,46 @@ function parseFrontmatter(fmText: string): ParsedFrontmatter {
 }
 
 /**
- * Parse the body of a companion doc (below the closing `---`) into a map
- * of sectionId → { title, bodyMarkdown } using the `## <title>` headings.
+ * Parse the body of a companion doc into a map of sectionId → { title, bodyMarkdown }.
  *
- * Body sections are separated by `## ` headings. We need to correlate headings
- * back to sectionIds using the frontmatter sections list (matched by title).
- * When multiple sections share the same title, we rely on order.
+ * Uses sentinel-delimited blocks (`<!-- dig-section: N -->` … `<!-- /dig-section -->`).
+ * `## ` / `### ` inside bodyMarkdown is safe because the sentinel, not a heading,
+ * defines the block boundary (C1 fix).
+ *
+ * Falls back to frontmatter `title` field when the sentinel block is missing
+ * (legacy format or empty body).
  */
 function parseBodySections(
   bodyText: string,
-  fmSections: Array<{ sectionId: number; startSec: number; generatedAt: string }>,
-  titleMap: Map<number, string>,
+  fmSections: Array<{ sectionId: number; startSec: number; title: string; generatedAt: string }>,
 ): Map<number, { title: string; bodyMarkdown: string }> {
   const result = new Map<number, { title: string; bodyMarkdown: string }>();
   if (!bodyText.trim()) return result;
 
-  // Split body on `## ` headings (at start of line)
-  const blocks = bodyText.split(/^(?=## )/m).filter((b) => b.trim() !== '');
+  // Match sentinel-delimited blocks
+  const blockRe = /<!-- dig-section: (\d+) -->\n([\s\S]*?)<!-- \/dig-section -->/g;
+  let match: RegExpExecArray | null;
 
-  // Build a list of (title, bodyMarkdown) from blocks in order
-  const parsed: Array<{ title: string; bodyMarkdown: string }> = blocks.map((block) => {
-    const headingMatch = block.match(/^## (.+)$/m);
+  while ((match = blockRe.exec(bodyText)) !== null) {
+    const sectionId = parseInt(match[1], 10);
+    const blockContent = match[2]; // everything between sentinels
+
+    // First line of blockContent is `## <title>`
+    const headingMatch = blockContent.match(/^## (.+)$/m);
     const title = headingMatch ? headingMatch[1].trim() : '';
-    // Body is everything after the heading line
-    const rest = block.replace(/^## .+\n?/, '');
-    return { title, bodyMarkdown: rest.trimEnd() };
-  });
-
-  // Map parsed blocks back to sectionIds by order of appearance in fmSections
-  // (fmSections are sorted by startSec, and body blocks are in the same order)
-  const fmSorted = [...fmSections].sort((a, b) => a.startSec - b.startSec);
-
-  for (let i = 0; i < fmSorted.length && i < parsed.length; i++) {
-    result.set(fmSorted[i].sectionId, parsed[i]);
+    // Body is everything after the heading line (and the blank line that follows)
+    const rest = blockContent.replace(/^## .+\n?\n?/, '');
+    result.set(sectionId, { title, bodyMarkdown: rest.trimEnd() });
   }
 
+  // If no sentinel blocks found (legacy files or empty body), return empty map.
+  // Callers fall back to frontmatter title in that case.
   return result;
 }
 
 // ── Read existing doc ─────────────────────────────────────────────────────────
 
 async function readCompanionDoc(filePath: string): Promise<CompanionDoc | null> {
-  if (!existsSync(filePath)) return null;
-
   let raw: string;
   try {
     raw = await readFile(filePath, 'utf8');
@@ -268,18 +299,15 @@ async function readCompanionDoc(filePath: string): Promise<CompanionDoc | null> 
   const [, fmText, bodyText] = fmMatch;
   const fm = parseFrontmatter(fmText);
 
-  // Build a title map from sectionId -> title (from frontmatter)
-  // We need it to reconstruct DugSection objects
-  const titleMap = new Map<number, string>();
-
-  const bodyMap = parseBodySections(bodyText, fm.sections, titleMap);
+  const bodyMap = parseBodySections(bodyText, fm.sections);
 
   const sections: DugSection[] = fm.sections.map((s) => {
     const body = bodyMap.get(s.sectionId);
     return {
       sectionId: s.sectionId,
       startSec: s.startSec,
-      title: body?.title ?? '',
+      // Title sourced from body map (sentinel block) first, then frontmatter
+      title: body?.title ?? s.title,
       bodyMarkdown: body?.bodyMarkdown ?? '',
       generatedAt: s.generatedAt,
     };

@@ -129,3 +129,97 @@ test('re-dig does not duplicate frontmatter entry', async () => {
   const matches = md.match(/^## X$/gm);
   expect(matches).toHaveLength(1);
 });
+
+// C1 — bodyMarkdown containing ## / ### does not corrupt other sections on second upsert
+test('round-trip: ## and ### inside bodyMarkdown do not corrupt other sections', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'dig-'));
+  const p = path.join(dir, 'v-dig-deeper.md');
+
+  const bodyWithHeadings =
+    'Intro paragraph.\n\n## Sub\n\nSub content.\n\n### Deeper\n\nDeeper content.\n';
+
+  // Upsert section A with bodyMarkdown that contains ## and ###
+  await upsertDugSection(
+    base(p, {
+      sectionId: 312,
+      startSec: 312,
+      title: 'SectionA',
+      bodyMarkdown: bodyWithHeadings,
+      generatedAt: 'T1',
+    }),
+  );
+
+  // Upsert a different section B — this triggers a read→parse→modify→rewrite
+  await upsertDugSection(
+    base(p, {
+      sectionId: 100,
+      startSec: 100,
+      title: 'SectionB',
+      bodyMarkdown: 'plain body',
+      generatedAt: 'T2',
+    }),
+  );
+
+  // Re-read and verify both sections are intact
+  const ids = await readDugSectionIds(p);
+  expect(ids).toEqual([100, 312]);
+
+  // Verify section A's bodyMarkdown is preserved (## Sub and ### Deeper intact)
+  const md = await readFile(p, 'utf8');
+
+  // Section A body must contain its internal headings verbatim
+  expect(md).toContain('## Sub');
+  expect(md).toContain('### Deeper');
+  expect(md).toContain('Deeper content.');
+
+  // Section B body must be present and uncontaminated
+  expect(md).toContain('plain body');
+
+  // Crucially: both sections must be individually resolvable (third upsert to verify round-trip)
+  await upsertDugSection(
+    base(p, {
+      sectionId: 312,
+      startSec: 312,
+      title: 'SectionA',
+      bodyMarkdown: bodyWithHeadings,
+      generatedAt: 'T3',
+    }),
+  );
+  const md2 = await readFile(p, 'utf8');
+  expect(await readDugSectionIds(p)).toEqual([100, 312]);
+  // Section B must still be intact after re-digging A
+  expect(md2).toContain('plain body');
+  // Section A's internal headings must still be intact
+  expect(md2).toContain('## Sub');
+  expect(md2).toContain('### Deeper');
+});
+
+// I3 — videoTitle with special chars (", :, #) survives write+read+rewrite
+test('special-char videoTitle round-trip: quotes, colon, hash preserved', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'dig-'));
+  const p = path.join(dir, 'v-dig-deeper.md');
+  const specialTitle = 'Video "Title": #1 Best & Worst';
+
+  await upsertDugSection({
+    digDeeperPath: p,
+    videoTitle: specialTitle,
+    videoId: 'abc12345678',
+    language: 'en',
+    sourceVideoUrl: 'https://yt/x',
+    section: { sectionId: 1, startSec: 1, title: 'T', bodyMarkdown: 'body', generatedAt: 'TS' },
+  });
+
+  // Second write to force read→parse→rewrite cycle
+  await upsertDugSection({
+    digDeeperPath: p,
+    videoTitle: specialTitle,
+    videoId: 'abc12345678',
+    language: 'en',
+    sourceVideoUrl: 'https://yt/x',
+    section: { sectionId: 2, startSec: 2, title: 'U', bodyMarkdown: 'body2', generatedAt: 'TS2' },
+  });
+
+  const md = await readFile(p, 'utf8');
+  // The title must be preserved exactly (both double-quotes in the YAML value)
+  expect(md).toContain(`"${specialTitle.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`);
+});
