@@ -194,6 +194,29 @@ describe('resolveTranscriptTokens — malformed token hardening (Codex)', () => 
   });
 });
 
+describe('resolveTranscriptTokens — windowed segments', () => {
+  it('windowed segments resolve the tail token when full duration is passed', () => {
+    // window = two segments at 600s and 660s; full video is 1279s long
+    const segments = [
+      { text: 'a', offset: 600, duration: 30 },
+      { text: 'b', offset: 660, duration: 30 },
+    ];
+    // [[TS:1]] is the last (tail) segment — without a duration bound it would be dropped.
+    const out = resolveTranscriptTokens('## Section\n[[TS:1]]\n\nbody', segments, 'vid123', 1279);
+    expect(out).toContain('t=660s');            // tail token survived (the URL param)
+    expect(out).not.toContain('[[TS:1]]');      // token was replaced, not left raw
+    // B-1: the tail token's END must use the passed full duration (21:19), not the window end,
+    // proving videoDuration gates the :119 end computation too — not just the :97 candidate filter.
+    expect(out).toContain('21:19');             // formatTimestamp(1279)
+  });
+
+  it('omitting videoDuration preserves prior behavior (no signature break)', () => {
+    const segments = [{ text: 'a', offset: 10, duration: 5 }];
+    const out = resolveTranscriptTokens('## Section\n[[TS:0]]\n\nbody', segments, 'vid123');
+    expect(out).toContain('t=10s');             // the URL param
+  });
+});
+
 describe('resolveTranscriptTokens — lenient selection', () => {
   it('keeps valid tokens and drops only an out-of-range one (partial)', () => {
     const md = '## 1. A\n[[TS:0]]\n\n## 2. B\n[[TS:99]]\n\nbody';
