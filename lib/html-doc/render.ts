@@ -80,7 +80,7 @@ export function renderMagazineHtml(parsed: ParsedSummary, model: MagazineModel, 
         : '';
       const startSec = s.timeRange ? s.timeRange.startSec : null;
       const dataStart = startSec != null ? ` data-start="${startSec}"` : '';
-      const dig = (hasDeepDive && startSec != null) ? digControl('deep-dive', startSec) : '';
+      const dig = startSec != null ? digControl(startSec) : '';
       const bullets = m.bullets
         .map((b) => `<li>${esc(b.text)}</li>`)
         .join('');

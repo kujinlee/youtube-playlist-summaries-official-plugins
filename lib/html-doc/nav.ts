@@ -4,10 +4,24 @@ export function startSecFromTsUrl(url: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
-/** The cross-doc nav control (muted trailing link); href is computed client-side by wireDigLinks. */
-export function digControl(targetType: 'summary' | 'deep-dive', startSec: number): string {
-  const label = targetType === 'deep-dive' ? 'dig deeper ▾' : '↑ summary';
-  return ` <a class="dig" data-type="${targetType}" data-t="${startSec}">${label}</a>`;
+/**
+ * The summary-side dig control (POST→SSE flow). Omits `data-type`; uses `data-section`
+ * so Task 13's state machine can identify the section to fetch.
+ */
+export function digControl(startSec: number): string;
+/**
+ * The deep-dive-side cross-doc nav control (muted trailing link back to summary).
+ * `targetType` must be 'summary'. href computed client-side by wireDigLinks via `data-type`.
+ */
+export function digControl(targetType: 'summary', startSec: number): string;
+export function digControl(targetTypeOrStartSec: 'summary' | number, startSec?: number): string {
+  if (typeof targetTypeOrStartSec === 'number') {
+    // Summary-side: new POST-driven control (D1)
+    const sec = targetTypeOrStartSec;
+    return ` <a class="dig" data-section="${sec}" data-t="${sec}">dig deeper ▶</a>`;
+  }
+  // Deep-dive-side: cross-doc "↑ summary" link (backward-compat)
+  return ` <a class="dig" data-type="${targetTypeOrStartSec}" data-t="${startSec}">↑ summary</a>`;
 }
 
 /** Rebuild each .dig href from the current serve URL: swap `type`, set `#t=`, inherit id+outputFolder. */

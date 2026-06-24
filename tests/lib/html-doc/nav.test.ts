@@ -8,15 +8,35 @@ describe('startSecFromTsUrl', () => {
 });
 
 describe('digControl', () => {
-  it('builds a deep-dive control with data attrs', () => {
-    const h = digControl('deep-dive', 16);
-    expect(h).toContain('class="dig"');
-    expect(h).toContain('data-type="deep-dive"');
-    expect(h).toContain('data-t="16"');
-    expect(h).toContain('dig deeper');
+  describe('summary-side (1-arg, POST-driven)', () => {
+    it('emits class="dig", data-section, data-t, and "dig deeper" label', () => {
+      const h = digControl(16);
+      expect(h).toContain('class="dig"');
+      expect(h).toContain('data-section="16"');
+      expect(h).toContain('data-t="16"');
+      expect(h).toContain('dig deeper');
+    });
+    it('does NOT emit data-type (not a cross-doc link)', () => {
+      expect(digControl(16)).not.toContain('data-type=');
+    });
+    it('handles startSec=0 (presence-gated, not truthiness)', () => {
+      const h = digControl(0);
+      expect(h).toContain('data-section="0"');
+      expect(h).toContain('data-t="0"');
+    });
   });
-  it('builds a summary control with data-t="0"', () => {
-    expect(digControl('summary', 0)).toContain('data-t="0"');
+
+  describe('deep-dive-side (2-arg "summary", cross-doc nav)', () => {
+    it('builds a "↑ summary" control with data-type and data-t', () => {
+      const h = digControl('summary', 0);
+      expect(h).toContain('class="dig"');
+      expect(h).toContain('data-type="summary"');
+      expect(h).toContain('data-t="0"');
+      expect(h).toContain('↑ summary');
+    });
+    it('carries the correct startSec in data-t', () => {
+      expect(digControl('summary', 200)).toContain('data-t="200"');
+    });
   });
 });
 
