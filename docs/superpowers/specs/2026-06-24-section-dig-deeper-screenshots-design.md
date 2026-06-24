@@ -23,26 +23,21 @@ This feature replaces the deep-dive doc with **on-demand, per-section elaboratio
 | D4 | Trigger = **non-blocking per-section spinner** |
 | D5 | Architecture = **Approach A** (one combined Gemini call + token-resolver extraction) |
 
-### Cost — PROVISIONAL, pending Task 0 spike
+### Cost — VERIFIED (Task 0, §0)
 
-The cost advantage depends entirely on **clip-grounding actually working** (Task 0). *If* a ~5-min clip is honored: ~$0.04–0.12/section, and digging all ~6 sections (~$0.26–0.71) stays cheaper than one monolithic deep-dive (~$1.40) because each clip stays under the 200k premium tier. **If clip-grounding silently no-ops (the full video is billed per call), this feature is MORE expensive than what it replaces** — Task 0 must resolve this before any other implementation, and the measured `usageMetadata` token count replaces these estimates.
+Clip-grounding is honored (measured): a 2-min clip billed 35,485 prompt tokens, so a ~5-min section ≈ ~90k tokens — under the 200k tier. **Measured ≈ $0.046/section**; digging all ~6 sections ≈ **$0.27**, cheaper than one monolithic deep-dive (~$1.40). Screenshots add $0 API cost (local ffmpeg). The cost advantage is confirmed, not assumed.
 
 ---
 
-## 0. Task 0 — Mandatory Verification Spike (gate before all other work)
+## 0. Task 0 — Verification Spike — ✅ DONE (2026-06-24)
 
-Three load-bearing claims cannot be verified statically and MUST be proven by a throwaway spike before any other task begins:
+Three load-bearing claims, verified by a throwaway raw-REST probe (video `L2JKgj7WzU4`, 21.3 min; 2-min clip `[600,720]`; `gemini-2.5-pro`):
 
-1. **Clip-grounding reaches the wire.** The installed SDK `@google/generative-ai@0.24.1` has **no** `videoMetadata`/`startOffset` types (confirmed); `@google/genai` is not installed. Spike: issue a real clipped call and inspect the outgoing request body + `usageMetadata.promptTokenCount`. **Pass** = `videoMetadata` is transmitted AND token count ≈ clip-length (not full-video). **Fail** = full-video token count → clipping ignored.
-2. **Timestamp frame-of-reference.** Determine whether Gemini emits **absolute** (original-video) or **clip-relative** seconds for a clipped call. Record which.
-3. **Cost.** Compute real $/section from the spike's `usageMetadata`.
+1. **Clip-grounding reaches the wire — ✅ HONORED.** Raw REST `generateContent` with part-level `video_metadata.{start_offset,end_offset}` returned `usageMetadata.promptTokenCount = 35,485` ≈ the ~36k clip estimate, **not** the ~384k full-video figure. The API bills only the clip.
+2. **Timestamp frame-of-reference — ✅ ABSOLUTE.** Gemini reported slide timestamps as 621/625/646 s (inside `[600,720]`) and self-declared `REFERENCE: absolute`. So `ffmpeg -ss (sec - S)` is correct; `slides.ts` treats `sec` as absolute.
+3. **Cost — measured ≈ $0.046/section** (35,485 in × $1.25/M + small output), low end of the estimate, well under the 200k tier.
 
-**Decision gate (recorded in the plan):**
-- Pass → proceed; bake the observed frame-of-reference into `slides.ts` (B4) and replace §1 estimates with measured cost.
-- `videoMetadata` unsupported on `0.24.1` → **migrate the Gemini client to `@google/genai`** (native `videoMetadata` + `mediaResolution`) as an explicit pre-req task, then re-run the spike.
-- Clipping unconfirmable on any SDK → **stop and report to user**: the feature reduces to full-video calls (cost model inverted) — re-decide worthfulness. Do not silently proceed.
-
-`slides.ts` MUST handle both frame-of-reference outcomes defensively regardless of the spike result (see §4).
+**Resolution (no SDK migration):** the probe used **raw REST**, proving the *API* honors clipping independent of the legacy SDK's missing `videoMetadata` types. Therefore `generate.ts` issues the dig call via a **direct REST `fetch`** (mirroring the spike) rather than the `@google/generative-ai` SDK or a migration to `@google/genai`. The legacy SDK remains for all other Gemini calls. `slides.ts` still validates `sec ∈ [S,E]` defensively and supports a clip-relative fallback flag in case future models differ.
 
 ---
 
@@ -108,16 +103,19 @@ windowForSection(section, allSections, segments, durationSeconds) → {
 
 ### 3b. `generate.ts` — Gemini request
 
+Issued via **direct REST `fetch`** (Task 0 §0 — the legacy SDK lacks `video_metadata` types; REST is proven and avoids an SDK migration). Request body:
 ```
-parts: [
-  { fileData: { fileUri: youtubeUrl, mimeType: 'video/mp4',
-                videoMetadata: { startOffset: `${S}s`, endOffset: `${endSec}s` } } },
-  { text: buildDigPrompt(lang, S, endSec) + buildIndexedTranscriptBlock(transcriptWindow) + summaryProse }
-]
+POST .../v1beta/models/gemini-2.5-pro:generateContent?key=GEMINI_API_KEY
+contents:[{ role:'user', parts:[
+  { file_data: { file_uri: youtubeUrl, mime_type:'video/mp4' },
+    video_metadata: { start_offset:{seconds:S}, end_offset:{seconds:E} } },
+  { text: buildDigPrompt(lang, S, E) + buildIndexedTranscriptBlock(transcriptWindow) + summaryProse }
+]}]
 ```
 - **Model:** `gemini-2.5-pro` (`DEEPDIVE_MODEL`). **`youtubeUrl` constructed server-side from validated `videoId`** — never request-supplied (H3).
-- **Media resolution:** DEFAULT (slides legible). Subject to Task 0; the `videoMetadata`/`mediaResolution` transport is exactly what Task 0 verifies. (The existing `transcribeViaGemini` already casts `mediaResolution` onto a part — `gemini.ts:546`; whether part-level fields serialize on this SDK is the spike.)
+- **Media resolution:** DEFAULT (slides legible; clip stays under 200k regardless).
 - **Output:** plain markdown, NOT JSON mode (avoids the Gemini-JSON-reliability trap).
+- **Retry/timeout:** wrap the `fetch` with the same retry posture as the SDK calls (`REQUEST_TIMEOUT_MS`, one retry on transient failure).
 
 ### 3c. Token contracts — precise grammar (H5)
 
@@ -281,9 +279,9 @@ The dig-deeper doc **is** the cache. Dug section → control links to it (no reg
 
 ## 10. Open Risks (carry into plan review)
 
-1. **B3/B4/M1 — clip-grounding + cost** → resolved by **Task 0 spike** (§0) before any other work; decision gate documented there.
+1. **B3/B4/M1 — clip-grounding + cost** → ✅ **RESOLVED by Task 0** (§0): clipping honored, timestamps absolute, ~$0.046/section. No SDK migration (dig call via REST).
 2. **YouTube gating / missing binary** — text-only fallback, scoped to slide-heavy sections.
 3. **Frame accuracy** — single-frame MVP; multi-candidate phase-2.
 4. **Long sections** crossing the 200k tier — rare, accepted.
 5. **Binary assets in corpus** — `raw/assets/` JPEGs committed (data repo); `.cache/` video temp gitignored (L3 — resolved, not deferred).
-6. **SDK migration risk** — if Task 0 forces `@google/genai`, that migration touches all of `lib/gemini.ts`; size/scope to be assessed when the gate fires.
+6. **REST call maintenance** — the dig call bypasses the SDK; keep its retry/timeout aligned with `gemini.ts` and watch for API schema changes to `video_metadata`.

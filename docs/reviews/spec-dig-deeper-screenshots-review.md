@@ -53,4 +53,4 @@
 ## Disposition (author)
 
 - **B1, B2, H1–H7, M2–M6, L1–L4:** addressed by spec revision (commit following this review).
-- **B3, B4, M1:** cannot be resolved by static analysis — converted into a **mandatory Task 0 verification spike** with an explicit decision gate (clipping confirmed → proceed with cost model; clipping unconfirmable → SDK migration to `@google/genai` or re-evaluate feature value). The spike's measured `usageMetadata` token count replaces the estimated cost figures before any further implementation.
+- **B3, B4, M1:** ✅ **RESOLVED by the Task 0 spike (2026-06-24).** Raw-REST probe (video `L2JKgj7WzU4`, 2-min clip): `video_metadata` clipping **honored** (`promptTokenCount=35,485` ≈ clip, not full video); timestamps **absolute**; measured cost **≈ $0.046/section**. Decision: dig call uses **direct REST `fetch`** — no SDK migration. Spec §0 records the result; §1 cost figures are now measured, not estimated.
