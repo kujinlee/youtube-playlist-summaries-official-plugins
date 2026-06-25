@@ -153,7 +153,12 @@ export function mergeDigDoc(
   // Any dug section not consumed by either step becomes an orphan.
   // preOrphans are duplicate-sectionId extras that were never put in the map;
   // they are unconsumed by definition and must also appear here.
-  const postOrphans = dug
+  //
+  // Build postOrphans from the de-duped dugBySectionId map values (NOT from the
+  // raw dug array) so that a sectionId shared by two inputs that both go
+  // unmatched is counted exactly once here — the duplicate is already in
+  // preOrphans and would otherwise be appended a second time below.
+  const postOrphans = [...dugBySectionId.values()]
     .filter((d) => !consumedIds.has(d.sectionId))
     .map((d) => ({
       sectionId: d.sectionId,

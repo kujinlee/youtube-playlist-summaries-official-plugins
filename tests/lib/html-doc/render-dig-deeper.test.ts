@@ -795,6 +795,32 @@ describe('renderDigDeeperDoc', () => {
   });
 
   // ──────────────────────────────────────────────────────────────────────────
+  // Behavior 7b: ▶ timestamp href uses trusted args.videoId, not summary.videoId
+  // Finding 2 [LOW]: render-dig-deeper.ts ~line 186 used `summary.videoId ?? ''`
+  // instead of the authoritative `args.videoId`, causing a broken `watch?v=&t=Ns`
+  // link when the summary .md is missing the `video_id` frontmatter field.
+  // ──────────────────────────────────────────────────────────────────────────
+  describe('Behavior 7b — ▶ href uses args.videoId even when summary.videoId is null', () => {
+    let html: string;
+
+    beforeAll(() => {
+      // summary.videoId intentionally null — simulates missing video_id frontmatter.
+      const summary = makeSummary({ videoId: null });
+      // Pass a trusted videoId via args.
+      html = renderDigDeeperDoc({ summary, envelope: null, dug: [], mdPath, videoId: 'trusted-vid' });
+    });
+
+    it('section ▶ link href contains the trusted args.videoId, not an empty v=', () => {
+      // Expect the trusted ID to appear in a YouTube watch URL with a timestamp.
+      expect(html).toMatch(/watch\?v=trusted-vid&amp;t=\d+s/);
+    });
+
+    it('does NOT produce a broken watch?v=&t= link', () => {
+      expect(html).not.toMatch(/watch\?v=&amp;t=/);
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
   // Behavior 8: Spacing CSS present
   // ──────────────────────────────────────────────────────────────────────────
   describe('Behavior 8 — spacing and toggle CSS present', () => {

@@ -155,7 +155,7 @@ export function renderDigDeeperDoc(args: {
   mdPath: string;
   videoId: string;
 }): string {
-  const { summary, envelope, dug, mdPath } = args;
+  const { summary, envelope, dug, mdPath, videoId } = args;
   const renderer = buildRenderer(mdPath);
 
   const { sections, orphans } = mergeDigDoc(summary, envelope, dug);
@@ -183,7 +183,7 @@ export function renderDigDeeperDoc(args: {
 
     // heading with muted ts link (when startSec known) + control
     const tsLink = startSec !== null
-      ? ` <a class="ts" href="https://www.youtube.com/watch?v=${esc(summary.videoId ?? '')}&amp;t=${startSec}s" target="_blank" rel="noopener noreferrer">${esc(ms.numeral ? `${ms.numeral}. ${sectionTitle}` : sectionTitle)} ▶</a>`
+      ? ` <a class="ts" href="https://www.youtube.com/watch?v=${esc(videoId)}&amp;t=${startSec}s" target="_blank" rel="noopener noreferrer">${esc(ms.numeral ? `${ms.numeral}. ${sectionTitle}` : sectionTitle)} ▶</a>`
       : '';
     // control: un-dug (with startSec) → dig-trigger; dug → dig-toggle; no startSec → neither
     let control = '';

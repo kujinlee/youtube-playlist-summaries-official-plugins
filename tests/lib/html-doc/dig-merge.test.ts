@@ -495,6 +495,54 @@ describe('MergedSection shape', () => {
   });
 });
 
+// ── Behavior 2c: duplicate sectionId, NEITHER matched → exactly 2 orphans ────
+//
+// Regression: when two DugSections share a sectionId that matches NO summary
+// section (neither by startSec nor by title), the earlier orphan-build path
+// pushed the first entry to postOrphans AND the duplicate to preOrphans,
+// resulting in 3 entries for 2 inputs.  The fix emits each input exactly once.
+
+describe('Behavior 2c: duplicate sectionId, all unmatched → exactly 2 orphans (no triplication)', () => {
+  it('produces orphans.length === 2 when both DugSections are unmatched', () => {
+    // Summary has sections that share NO sectionId or title with the dug input.
+    const titles = ['Intro', 'Conclusion'];
+    const startSecs = [0, 300];
+    const sections = titles.map((t, i) => makeSection(t, startSecs[i]));
+    const summary = makeSummary(sections);
+    const envelope = makeEnvelope(titles, titles.map(() => makeModelSection()));
+
+    const dugA: DugSection = {
+      sectionId: 999,          // does not match any startSec (0 or 300)
+      startSec: 999,
+      title: 'Ghost Section',  // does not match any summary title
+      bodyMarkdown: 'body-a',
+      generatedAt: '2024-01-01T00:00:00Z',
+    };
+    const dugB: DugSection = {
+      sectionId: 999,          // same id — duplicate
+      startSec: 999,
+      title: 'Ghost Section',
+      bodyMarkdown: 'body-b',
+      generatedAt: '2024-01-02T00:00:00Z',
+    };
+    const dug = [dugA, dugB];
+
+    const result = mergeDigDoc(summary, envelope, dug);
+
+    // Neither should attach to a summary section.
+    result.sections.forEach((ms) => expect(ms.dug).toBeNull());
+
+    // Exactly two orphan entries — one per input DugSection, not three.
+    expect(result.orphans).toHaveLength(2);
+
+    const bodies = result.orphans.map((o) => o.bodyMarkdown).sort();
+    expect(bodies).toEqual(['body-a', 'body-b']);
+
+    // Both share the same sectionId (preserved faithfully).
+    expect(result.orphans.every((o) => o.sectionId === 999)).toBe(true);
+  });
+});
+
 // ── Step-1 priority over step-2 ──────────────────────────────────────────────
 
 describe('sectionId match (step 1) takes priority over title match (step 2)', () => {
