@@ -1315,6 +1315,88 @@ test('E3 (expand-all cancel dialog): cancel → no POST fired', async ({ page })
 });
 
 // ---------------------------------------------------------------------------
+// E3b: backdrop click dismiss → dialog closes; ZERO POSTs fire
+// ---------------------------------------------------------------------------
+
+test('E3b (expand-all backdrop dismiss): click backdrop → dialog closes; no POST fired', async ({ page }) => {
+  const undugHtml = makeExpandAllHtml(0);
+  await page.route(`**/api/html/${VIDEO_ID_EA}**`, (route) =>
+    route.fulfill({ status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' }, body: undugHtml }),
+  );
+
+  const postsSeen: number[] = [];
+  for (const sec of [SEC_EA_1, SEC_EA_2, SEC_EA_3]) {
+    await page.route(`**/api/videos/${VIDEO_ID_EA}/dig/${sec}`, (route) => {
+      if (route.request().method() !== 'POST') { route.continue(); return; }
+      postsSeen.push(sec);
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ jobId: `ea-job-${sec}` }) });
+    });
+  }
+
+  const digDocUrl = `http://localhost:3000/api/html/${VIDEO_ID_EA}?outputFolder=${encodeURIComponent(OUTPUT_FOLDER)}&type=dig-deeper`;
+  await page.goto(digDocUrl);
+
+  // Click expand-all → dialog opens
+  await page.locator('.dg-expand-all').click();
+  const dialog = page.locator('#_dg-ea-dlg[data-open]');
+  await expect(dialog).toBeVisible({ timeout: 3000 });
+
+  // Click the backdrop (the dialog element itself, not its children)
+  const dialogEl = page.locator('#_dg-ea-dlg');
+  await dialogEl.click({ position: { x: 5, y: 5 } });
+
+  // Dialog should close
+  await expect(page.locator('#_dg-ea-dlg[data-open]')).toHaveCount(0, { timeout: 3000 });
+
+  // No progress overlay
+  await expect(page.locator('#_dg-ea-prog[data-open]')).toHaveCount(0);
+
+  // Wait to confirm no POST fires
+  await page.waitForTimeout(500);
+  expect(postsSeen).toHaveLength(0);
+});
+
+// ---------------------------------------------------------------------------
+// E3c: Escape key dismiss → dialog closes; ZERO POSTs fire
+// ---------------------------------------------------------------------------
+
+test('E3c (expand-all Escape dismiss): Escape key → dialog closes; no POST fired', async ({ page }) => {
+  const undugHtml = makeExpandAllHtml(0);
+  await page.route(`**/api/html/${VIDEO_ID_EA}**`, (route) =>
+    route.fulfill({ status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' }, body: undugHtml }),
+  );
+
+  const postsSeen: number[] = [];
+  for (const sec of [SEC_EA_1, SEC_EA_2, SEC_EA_3]) {
+    await page.route(`**/api/videos/${VIDEO_ID_EA}/dig/${sec}`, (route) => {
+      if (route.request().method() !== 'POST') { route.continue(); return; }
+      postsSeen.push(sec);
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ jobId: `ea-job-${sec}` }) });
+    });
+  }
+
+  const digDocUrl = `http://localhost:3000/api/html/${VIDEO_ID_EA}?outputFolder=${encodeURIComponent(OUTPUT_FOLDER)}&type=dig-deeper`;
+  await page.goto(digDocUrl);
+
+  // Click expand-all → dialog opens
+  await page.locator('.dg-expand-all').click();
+  await expect(page.locator('#_dg-ea-dlg[data-open]')).toBeVisible({ timeout: 3000 });
+
+  // Press Escape
+  await page.keyboard.press('Escape');
+
+  // Dialog should close
+  await expect(page.locator('#_dg-ea-dlg[data-open]')).toHaveCount(0, { timeout: 3000 });
+
+  // No progress overlay
+  await expect(page.locator('#_dg-ea-prog[data-open]')).toHaveCount(0);
+
+  // Wait to confirm no POST fires
+  await page.waitForTimeout(500);
+  expect(postsSeen).toHaveLength(0);
+});
+
+// ---------------------------------------------------------------------------
 // E4: cancel mid-batch → stops after current section; prior sections stay dug
 // ---------------------------------------------------------------------------
 

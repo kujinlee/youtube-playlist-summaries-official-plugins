@@ -273,36 +273,7 @@ export const NAV_SCRIPT = `<script>
     var _dg=document.querySelector('.dg');
     if(_dg){
       function _applyDigErr(el){el.textContent='\\u26a0 retry';el.dataset.state='error';el.removeAttribute('href');}
-      function _startDocDig(trigger){
-        var startSec=+trigger.dataset.section;
-        trigger.textContent='\\u23f3';trigger.dataset.state='loading';trigger.removeAttribute('href');
-        fetch('/api/videos/'+videoId+'/dig/'+startSec,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({outputFolder:outputFolder})})
-          .then(function(r){if(!r.ok)throw new Error('POST '+r.status);return r.json();})
-          .then(function(d){
-            var es=new EventSource('/api/videos/'+videoId+'/dig/'+startSec+'/stream?jobId='+encodeURIComponent(d.jobId));
-            es.onmessage=function(ev){
-              try{var msg=JSON.parse(ev.data);
-                if(msg.type==='done'){
-                  es.close();
-                  // Re-GET this page; parse; replace the section node in-place.
-                  fetch(location.href)
-                    .then(function(res){return res.text();})
-                    .then(function(html){
-                      var dp=new DOMParser();
-                      var fd=dp.parseFromString(html,'text/html');
-                      var fresh=fd.querySelector('[data-start="'+startSec+'"]');
-                      var cur=document.querySelector('[data-start="'+startSec+'"]');
-                      if(fresh&&cur&&cur.parentNode){cur.parentNode.replaceChild(document.adoptNode(fresh),cur);}
-                    })
-                    .catch(function(){_applyDigErr(trigger);});
-                }else if(msg.type==='error'){es.close();_applyDigErr(trigger);}
-              }catch(e){}
-            };
-            es.onerror=function(){es.close();_applyDigErr(trigger);};
-          })
-          .catch(function(){_applyDigErr(trigger);});
-      }
-      // ── Promise-based dig for expand-all serialized loop ─────────────────
+      // ── Promise-based dig: single POST→SSE→swap core ─────────────────────
       function _startDocDigAsync(trigger){
         return new Promise(function(resolve,reject){
           var startSec=+trigger.dataset.section;
@@ -334,6 +305,8 @@ export const NAV_SCRIPT = `<script>
             .catch(function(err){_applyDigErr(trigger);reject(err);});
         });
       }
+      // ── Single-click path: delegate to the async core ─────────────────────
+      function _startDocDig(trigger){_startDocDigAsync(trigger).catch(function(){});}
       // ── ⤢ expand all — confirm → serialized loop ──────────────────────────
       var _eaBtn=_dg.querySelector('.dg-expand-all');
       if(_eaBtn){
