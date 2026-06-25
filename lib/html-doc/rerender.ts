@@ -14,7 +14,7 @@ export type ReRenderResult =
   | { status: 'skipped-unparseable' }
   | { status: 'skipped-drift'; mdSections: string[]; modelSections: string[] };
 
-function sameTitles(a: string[], b: string[]): boolean {
+export function sameTitles(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((t, i) => t === b[i]);
 }
 
