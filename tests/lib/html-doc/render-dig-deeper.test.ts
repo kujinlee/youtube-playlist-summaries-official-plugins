@@ -839,9 +839,8 @@ describe('renderDigDeeperDoc', () => {
       expect(html).toMatch(/border-top:2px/);
     });
 
-    it('includes 1.2em margin around .dug img', () => {
-      expect(html).toContain('.dug img');
-      expect(html).toMatch(/1\.2em/);
+    it('includes generous margin (2em) around .dug img for screenshot breathing room', () => {
+      expect(html).toContain('.dug img{margin:2em 0}');
     });
 
     it('includes default hide-gist CSS for dug sections', () => {
@@ -851,6 +850,49 @@ describe('renderDigDeeperDoc', () => {
     it('includes .show-gist toggle CSS', () => {
       expect(html).toContain('.show-gist .gist{display:block}');
       expect(html).toContain('.show-gist .dug{display:none}');
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Behavior 9: PR-review styling fixes (numeral heading, no title repeat,
+  // muted control, gold lead). See screenshot feedback (1)–(4).
+  // ──────────────────────────────────────────────────────────────────────────
+  describe('Behavior 9 — review styling: numeral heading, muted control, gold lead, no title repeat', () => {
+    let html: string;
+
+    beforeAll(() => {
+      // makeSummary section 1 = "Introduction", numeral "1", startSec 60.
+      html = renderDigDeeperDoc({ summary: makeSummary(), envelope: makeEnvelope(), dug: [], mdPath, videoId: 'vid123' });
+    });
+
+    // (1) section number in front of the title, inside the h2 itself
+    it('prefixes the section numeral in front of the title in the h2', () => {
+      expect(html).toMatch(/<h2>1\. Introduction /);
+      expect(html).toMatch(/<h2>2\. Main Content /);
+    });
+
+    // (2) the muted .ts link no longer repeats the title — only the timestamp
+    it('.ts link shows only the clock timestamp, not a repeated title', () => {
+      expect(html).toContain('▶ (1:00)'); // fmtClock(60)
+      // The .ts anchor must not contain the section title text.
+      expect(html).not.toMatch(/class="ts"[^>]*>[^<]*Introduction/);
+    });
+
+    // (3) dig-trigger / dig-toggle styled as a muted small link (not big serif gold)
+    it('emits muted CSS for .dig-trigger and .dig-toggle (meta colour, .8rem)', () => {
+      expect(html).toContain('.dg .dig-trigger,.dg .dig-toggle{');
+      expect(html).toMatch(/\.dg \.dig-trigger,\.dg \.dig-toggle\{[^}]*color:var\(--meta\)/);
+      expect(html).toMatch(/\.dg \.dig-trigger,\.dg \.dig-toggle\{[^}]*font-size:\.8rem/);
+    });
+
+    // (4) gold emphasis restored on the gist lead (matches the original summary render)
+    it('renders the gist lead in gold (var(--gold)), matching the original summary style', () => {
+      expect(html).toMatch(/\.dg \.lead\{[^}]*color:var\(--gold\)/);
+    });
+
+    // control text is unchanged (E2E depends on exact text)
+    it('keeps the dig-trigger control text exactly "dig deeper ▶"', () => {
+      expect(html).toContain('dig deeper ▶');
     });
   });
 });

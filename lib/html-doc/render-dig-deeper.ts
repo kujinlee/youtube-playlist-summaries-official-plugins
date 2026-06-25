@@ -31,8 +31,7 @@ html.theme-ready .dg{transition:background-color .2s,color .2s}
 .dg h1{font-family:Georgia,'Nanum Myeongjo','Apple SD Gothic Neo','Times New Roman',serif;font-size:2rem;line-height:1.2;margin:0 0 .15em;color:var(--ink)}
 .dg h2{font-family:Georgia,'Nanum Myeongjo',serif;font-size:1.5rem;margin:2.2em 0 .35em;padding-top:1.5em;border-top:1px solid var(--rule);color:var(--ink)}
 .dg h2:first-of-type{border-top:0;padding-top:0;margin-top:.4em}
-.dg .lead{font-size:1.02rem;line-height:1.55;color:var(--ink);font-weight:400;margin:.3em 0 .9em;max-width:92%}
-.dg .lead-accent{color:var(--gold);font-weight:400}
+.dg .lead{font-size:1.02rem;line-height:1.55;color:var(--gold);font-weight:400;margin:.3em 0 .9em;max-width:92%}
 .dg .ts{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--meta);font-size:.85rem;font-weight:400;text-decoration:none;white-space:nowrap}
 .dg .ts:hover{text-decoration:underline}
 .dg h3{font-size:1.15rem;margin:1.6em 0 .3em;color:var(--h3)}
@@ -58,6 +57,15 @@ function esc(s: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+/** Format a second offset as a clock label: "m:ss" (or "h:mm:ss" past an hour). */
+function fmtClock(totalSec: number): string {
+  const s = totalSec % 60;
+  const m = Math.floor(totalSec / 60) % 60;
+  const h = Math.floor(totalSec / 3600);
+  const ss = String(s).padStart(2, '0');
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
 }
 
 /**
@@ -121,7 +129,9 @@ function buildRenderer(mdPath: string): MarkdownIt {
 const DIG_DOC_CSS = `
 section{padding:2.4em 0;border-top:2px solid var(--rule)}
 section:first-of-type{border-top:0}
-.dug img{margin:1.2em 0}
+.dug img{margin:2em 0}
+.dg .dig-trigger,.dg .dig-toggle{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--meta);font-size:.8rem;font-weight:400;text-decoration:none;white-space:nowrap;cursor:pointer}
+.dg .dig-trigger:hover,.dg .dig-toggle:hover{text-decoration:underline}
 section[data-dug="true"] .gist{display:none}
 section[data-dug="true"] .dug{display:block}
 section[data-dug="true"].show-gist .gist{display:block}
@@ -181,9 +191,11 @@ export function renderDigDeeperDoc(args: {
     const dugAttr = ` data-dug="${isDug}"`;
     const sectionOpen = `<section${startAttr}${dugAttr}>`;
 
-    // heading with muted ts link (when startSec known) + control
+    // heading text: numeral prefix in front of the title (shown once, in the heading itself).
+    const headingText = ms.numeral ? `${ms.numeral}. ${sectionTitle}` : sectionTitle;
+    // muted ts link (when startSec known): just the clickable play timestamp — no title repeat.
     const tsLink = startSec !== null
-      ? ` <a class="ts" href="https://www.youtube.com/watch?v=${esc(videoId)}&amp;t=${startSec}s" target="_blank" rel="noopener noreferrer">${esc(ms.numeral ? `${ms.numeral}. ${sectionTitle}` : sectionTitle)} ▶</a>`
+      ? ` <a class="ts" href="https://www.youtube.com/watch?v=${esc(videoId)}&amp;t=${startSec}s" target="_blank" rel="noopener noreferrer">▶ (${fmtClock(startSec)})</a>`
       : '';
     // control: un-dug (with startSec) → dig-trigger; dug → dig-toggle; no startSec → neither
     let control = '';
@@ -193,7 +205,7 @@ export function renderDigDeeperDoc(args: {
       control = ` <a class="dig-trigger" data-section="${startSec}">dig deeper ▶</a>`;
     }
 
-    const heading = `<h2>${esc(sectionTitle)}${tsLink}${control}</h2>`;
+    const heading = `<h2>${esc(headingText)}${tsLink}${control}</h2>`;
 
     // .gist block — only when gist != null (skeleton → omit)
     let gistHtml = '';
