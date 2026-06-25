@@ -93,7 +93,7 @@ it('serves a summary HTML whose filename has a Korean slug (B-1)', async () => {
   expect(res.status).toBe(200); // was 404 before the Unicode-regex fix
 });
 
-// --- type=dig-deeper (Behaviors 1–3) ---
+// --- type=dig-deeper (renderDigDeeperDoc behaviors) ---
 
 function digDeeperUrl() {
   return new Request(
@@ -101,31 +101,145 @@ function digDeeperUrl() {
   );
 }
 
-it('dig-deeper: 404 when digDeeperMd is absent (B-3)', async () => {
-  writeIndex(video({ digDeeperMd: null }));
-  const res = await GET(digDeeperUrl(), ctx);
-  expect(res.status).toBe(404);
-});
+// A minimal summary .md that parses without errors (parseSummaryMarkdown requires >= 1 ## section)
+const SUMMARY_MD = [
+  '---',
+  'lang: "EN"',
+  `video_id: "${VIDEO_ID}"`,
+  '---',
+  '# Test Video Title',
+  '',
+  '**Channel:** Test Channel | **Duration:** 10:00',
+  `**URL:** https://www.youtube.com/watch?v=${VIDEO_ID}`,
+  '',
+  '## 1. Introduction',
+  '',
+  'Section one prose.',
+  '',
+  '## 2. Conclusion',
+  '',
+  'Section two prose.',
+].join('\n');
 
-it('dig-deeper: 404 when digDeeperMd file is missing on disk (B-3)', async () => {
-  writeIndex(video({ digDeeperMd: 'wiki/missing-dig-deeper.md' }));
-  const res = await GET(digDeeperUrl(), ctx);
-  expect(res.status).toBe(404);
-});
-
-it('dig-deeper: 200 HTML rendered from digDeeperMd (B-1)', async () => {
+// Helper: write summary .md (in wiki/) and return the relative path.
+function writeSummaryMd(name = 'video.md'): string {
   fs.mkdirSync(path.join(dir, 'wiki'), { recursive: true });
-  fs.writeFileSync(
-    path.join(dir, 'wiki', 'dig-deeper.md'),
-    '# Dig Deeper\n\nSome deeper content here.\n'
-  );
-  writeIndex(video({ digDeeperMd: 'wiki/dig-deeper.md' }));
+  fs.writeFileSync(path.join(dir, 'wiki', name), SUMMARY_MD);
+  return `wiki/${name}`;
+}
+
+// Helper: write a valid companion doc
+function writeCompanionDoc(name: string, sectionId: number, startSec: number): void {
+  fs.mkdirSync(path.join(dir, 'wiki'), { recursive: true });
+  const content = [
+    '---',
+    'title: "Test Video Title"',
+    `videoId: "${VIDEO_ID}"`,
+    'language: "en"',
+    'sourceVideoUrl: "https://www.youtube.com/watch?v=vid12345"',
+    'digVersion: { major: 1, minor: 0 }',
+    'sections:',
+    `  - sectionId: ${sectionId}`,
+    `    startSec: ${startSec}`,
+    '    title: "Introduction"',
+    '    generatedAt: "2026-06-24T00:00:00.000Z"',
+    '---',
+    `<!-- dig-section: ${sectionId} -->`,
+    '## Introduction',
+    '',
+    'Dug content for this section.',
+    '<!-- /dig-section -->',
+  ].join('\n');
+  fs.writeFileSync(path.join(dir, 'wiki', name), content);
+}
+
+it('dig-deeper B1: dug+un-dug merged → all summary sections in output, 200', async () => {
+  const summaryRel = writeSummaryMd('video.md');
+  writeCompanionDoc('video-dig-deeper.md', 0, 0); // sectionId=0, won't match any section startSec
+  writeIndex(video({ summaryMd: summaryRel, digDeeperMd: 'wiki/video-dig-deeper.md' }));
   const res = await GET(digDeeperUrl(), ctx);
   expect(res.status).toBe(200);
   expect(res.headers.get('Content-Type')).toMatch(/text\/html/);
   const body = await res.text();
+  expect(body).toContain('Introduction');
+  expect(body).toContain('Conclusion');
   expect(body).toContain('<!DOCTYPE html');
-  expect(body).toContain('Dig Deeper');
+});
+
+it('dig-deeper B2: digDeeperMd null → skeleton 200 (all summary sections rendered)', async () => {
+  const summaryRel = writeSummaryMd('video.md');
+  writeIndex(video({ summaryMd: summaryRel, digDeeperMd: null }));
+  const res = await GET(digDeeperUrl(), ctx);
+  expect(res.status).toBe(200);
+  expect(res.headers.get('Content-Type')).toMatch(/text\/html/);
+  const body = await res.text();
+  expect(body).toContain('Introduction');
+  expect(body).toContain('Conclusion');
+});
+
+it('dig-deeper B3: summary .md missing on disk → "Summary unavailable" 200', async () => {
+  // summaryMd points to a file that does not exist on disk
+  writeIndex(video({ summaryMd: 'wiki/nonexistent.md', digDeeperMd: null }));
+  const res = await GET(digDeeperUrl(), ctx);
+  expect(res.status).toBe(200);
+  const body = await res.text();
+  expect(body).toContain('Summary unavailable');
+});
+
+it('dig-deeper B4: model missing → skeleton (no gist) but 200', async () => {
+  const summaryRel = writeSummaryMd('video.md');
+  // No model written → readModelEnvelope returns null → all gists null
+  writeIndex(video({ summaryMd: summaryRel, digDeeperMd: null }));
+  const res = await GET(digDeeperUrl(), ctx);
+  expect(res.status).toBe(200);
+  const body = await res.text();
+  // Should have section headings without gist blocks
+  expect(body).toContain('Introduction');
+  // No .gist div since model is absent
+  expect(body).not.toContain('class="gist"');
+});
+
+it('dig-deeper B5: path-traversal digDeeperMd → 400', async () => {
+  // The base derived from a crafted digDeeperMd with ".." would escape outputFolder
+  // Use a value that, when resolved, escapes the output folder
+  writeIndex(video({
+    summaryMd: 'wiki/video.md',
+    digDeeperMd: '../../../etc/video-dig-deeper.md',
+  }));
+  const res = await GET(digDeeperUrl(), ctx);
+  expect(res.status).toBe(400);
+});
+
+it('dig-deeper B6: orphan companion section → orphan region rendered, 200', async () => {
+  const summaryRel = writeSummaryMd('video.md');
+  // sectionId=999 matches no summary section by startSec and title mismatch → orphan
+  fs.mkdirSync(path.join(dir, 'wiki'), { recursive: true });
+  const orphanContent = [
+    '---',
+    'title: "Test Video Title"',
+    `videoId: "${VIDEO_ID}"`,
+    'language: "en"',
+    'sourceVideoUrl: "https://www.youtube.com/watch?v=vid12345"',
+    'digVersion: { major: 1, minor: 0 }',
+    'sections:',
+    '  - sectionId: 999',
+    '    startSec: 999',
+    '    title: "Orphan Section"',
+    '    generatedAt: "2026-06-24T00:00:00.000Z"',
+    '---',
+    '<!-- dig-section: 999 -->',
+    '## Orphan Section',
+    '',
+    'Orphaned body content.',
+    '<!-- /dig-section -->',
+  ].join('\n');
+  fs.writeFileSync(path.join(dir, 'wiki', 'video-dig-deeper.md'), orphanContent);
+  writeIndex(video({ summaryMd: summaryRel, digDeeperMd: 'wiki/video-dig-deeper.md' }));
+  const res = await GET(digDeeperUrl(), ctx);
+  expect(res.status).toBe(200);
+  const body = await res.text();
+  expect(body).toContain('dg-orphans');
+  expect(body).toContain('Orphan Section');
 });
 
 it('unknown type still 400 (B-2)', async () => {
