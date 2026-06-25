@@ -137,6 +137,10 @@ export function reconstructVideo(content: string, file: string, mdPath: string):
     ? (audienceRaw as Audience) : undefined;
 
   const summaryMd = file;
+
+  const serialMatch = file.match(/^(\d+)_/);
+  const serialNumber = serialMatch ? parseInt(serialMatch[1], 10) : undefined;
+
   const pdfFilename = file.replace(/\.md$/, '.pdf');
   const pdfPath = path.join(path.dirname(mdPath), 'pdfs', pdfFilename);
   const summaryPdf = fs.existsSync(pdfPath) ? `pdfs/${pdfFilename}` : null;
@@ -160,6 +164,7 @@ export function reconstructVideo(content: string, file: string, mdPath: string):
     ...(videoType !== undefined && { videoType }),
     ...(audience !== undefined && { audience }),
     ...(channelRaw ? { channel: channelRaw } : {}),
+    ...(serialNumber !== undefined && { serialNumber }),
   };
 }
 

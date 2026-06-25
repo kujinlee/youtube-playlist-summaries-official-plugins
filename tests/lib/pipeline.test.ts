@@ -957,6 +957,22 @@ describe('reconstructVideo', () => {
     const r = Math.max(1, Math.min(5, Math.round(4.6))); // 5
     expect(video!.ratings).toEqual({ usefulness: r, depth: r, originality: r, recency: r, completeness: r });
   });
+
+  it('reconstructVideo adopts the NNN_ serial from a prefixed filename', () => {
+    const file = '007_some-slug.md';
+    const mdPath2 = path.join(tempDir, file);
+    fs.writeFileSync(mdPath2, SAMPLE_MD, 'utf-8');
+    const video = reconstructVideo(SAMPLE_MD, file, mdPath2);
+    expect(video?.serialNumber).toBe(7);
+  });
+
+  it('reconstructVideo leaves serialNumber undefined for an unprefixed filename', () => {
+    const file = 'some-slug.md';
+    const mdPath2 = path.join(tempDir, file);
+    fs.writeFileSync(mdPath2, SAMPLE_MD, 'utf-8');
+    const video = reconstructVideo(SAMPLE_MD, file, mdPath2);
+    expect(video?.serialNumber).toBeUndefined();
+  });
 });
 
 describe('recoverOrphanedVideos', () => {
