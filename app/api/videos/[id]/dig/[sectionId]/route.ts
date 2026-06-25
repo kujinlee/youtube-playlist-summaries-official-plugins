@@ -12,7 +12,6 @@ import { generateDig } from '@/lib/dig/generate';
 import { resolveTranscriptTokens } from '@/lib/transcript-timestamps';
 import { resolveSlideTokens } from '@/lib/dig/slides';
 import { upsertDugSection } from '@/lib/dig/companion-doc';
-import { renderDigDeeperHtml } from '@/lib/html-doc/render-dig-deeper';
 import type { ProgressEvent } from '@/types';
 
 type Params = { params: Promise<{ id: string; sectionId: string }> };
@@ -167,22 +166,9 @@ async function runDigPipeline(
     },
   });
 
-  // Step 11: Render dig deeper HTML
-  const htmlsDir = path.join(outputFolder, 'htmls');
-  await fs.mkdir(htmlsDir, { recursive: true });
-
-  const digDeeperHtmlFilename = `${summaryBasename}-dig-deeper.html`;
-  const digDeeperHtmlPath = path.join(htmlsDir, digDeeperHtmlFilename);
-  const companionDocContent = await fs.readFile(digDeeperPath, 'utf8');
-  const htmlContent = renderDigDeeperHtml(companionDocContent, digDeeperPath);
-
-  // Step 12: Write HTML file
-  await fs.writeFile(digDeeperHtmlPath, htmlContent, 'utf8');
-
-  // Step 13: Update index with digDeeperMd and digDeeperHtml
+  // Step 11: Update index with digDeeperMd (HTML is rendered fresh by GET)
   updateVideoFields(outputFolder, videoId, {
     digDeeperMd: digDeeperFilename,
-    digDeeperHtml: digDeeperHtmlFilename,
   });
 
   emit({ type: 'done' });

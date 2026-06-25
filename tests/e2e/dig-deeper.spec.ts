@@ -5,8 +5,9 @@ import { expect, test } from '@playwright/test';
 // Relative imports (NOT '@/…'): the '@/' alias is unproven for RUNTIME (value) imports under
 // Playwright's loader — the only existing E2E '@/' import is `import type` (erased).
 import { renderMagazineHtml } from '../../lib/html-doc/render';
-import { renderDigDeeperHtml } from '../../lib/html-doc/render-dig-deeper';
+import { renderDigDeeperDoc } from '../../lib/html-doc/render-dig-deeper';
 import type { ParsedSummary, MagazineModel } from '../../lib/html-doc/types';
+import type { DugSection } from '../../lib/dig/companion-doc';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -66,8 +67,8 @@ function makeSummaryHtml(videoId: string, startSec: number): string {
 /**
  * Companion HTML WITH a base64-inlined slide image, produced by the real renderer.
  *
- * I1/I2 fix: build the companion HTML by calling renderDigDeeperHtml with a real
- * temp `.md` file that references `assets/<videoId>/<sectionId>-<sec>.jpg`, and a
+ * I1/I2 fix: build the companion HTML by calling renderDigDeeperDoc with a real
+ * temp `.md` path that references `assets/<videoId>/<sectionId>-<sec>.jpg`, and a
  * real tiny JPEG written to that assets path. The renderer's image rule base64-inlines
  * the file, so B1's `toContain('data:image/jpeg;base64,')` assertion exercises the
  * actual renderer pipeline end-to-end (not hand-crafted HTML).
@@ -83,37 +84,75 @@ function makeCompanionHtmlWithSlides(): string {
   const assetPath = path.join(assetDir, assetFilename);
   fs.writeFileSync(assetPath, Buffer.from(MINIMAL_B64, 'base64'));
 
-  // Write the companion .md that references the asset via relative `assets/` path.
-  const mdContent = `---
-video_id: "${VIDEO_ID_SLIDES}"
-lang: EN
----
+  const mdPath = path.join(tmpDir, `${VIDEO_ID_SLIDES}-dig-deeper.md`);
 
-# Dig Deeper — Section One
+  const summary: ParsedSummary = {
+    title: 'Dig Deeper — Section One',
+    channel: null,
+    duration: null,
+    url: `https://www.youtube.com/watch?v=${VIDEO_ID_SLIDES}`,
+    lang: 'EN',
+    videoId: VIDEO_ID_SLIDES,
+    tldr: null,
+    takeaways: [],
+    sourceMd: `${VIDEO_ID_SLIDES}.md`,
+    sections: [
+      {
+        numeral: '1',
+        title: 'Section One',
+        prose: 'Intro prose',
+        timeRange: { startSec: START_SEC_SLIDES, endSec: START_SEC_SLIDES + 60, label: '2:00–3:00', url: `https://www.youtube.com/watch?v=${VIDEO_ID_SLIDES}&t=${START_SEC_SLIDES}s` },
+      },
+    ],
+  };
 
-![slide](assets/${VIDEO_ID_SLIDES}/${assetFilename})
-
-Key insight about the slide content.
-`;
-  const mdPath = path.join(tmpDir, `${VIDEO_ID_SLIDES}-dig.md`);
-  fs.writeFileSync(mdPath, mdContent, 'utf-8');
+  const dug: DugSection[] = [
+    {
+      sectionId: START_SEC_SLIDES,
+      startSec: START_SEC_SLIDES,
+      title: 'Section One',
+      bodyMarkdown: `## Section One\n\n![slide](assets/${VIDEO_ID_SLIDES}/${assetFilename})\n\nKey insight about the slide content.\n`,
+      generatedAt: '2026-01-01T00:00:00.000Z',
+    },
+  ];
 
   // Call the real renderer — it will base64-inline the JPEG via its image rule.
-  return renderDigDeeperHtml(mdContent, mdPath);
+  return renderDigDeeperDoc({ summary, envelope: null, dug, mdPath, videoId: VIDEO_ID_SLIDES });
 }
 
 /** Companion HTML with NO images (text-only). */
 function makeCompanionHtmlNoSlides(): string {
-  const md = `---
-video_id: "${VIDEO_ID_NO_SLIDES}"
-lang: EN
----
+  const summary: ParsedSummary = {
+    title: 'Dig Deeper — Section One',
+    channel: null,
+    duration: null,
+    url: `https://www.youtube.com/watch?v=${VIDEO_ID_NO_SLIDES}`,
+    lang: 'EN',
+    videoId: VIDEO_ID_NO_SLIDES,
+    tldr: null,
+    takeaways: [],
+    sourceMd: `${VIDEO_ID_NO_SLIDES}.md`,
+    sections: [
+      {
+        numeral: '1',
+        title: 'Section One',
+        prose: 'Intro prose',
+        timeRange: { startSec: START_SEC_NO_SLIDES, endSec: START_SEC_NO_SLIDES + 60, label: '1:00–2:00', url: `https://www.youtube.com/watch?v=${VIDEO_ID_NO_SLIDES}&t=${START_SEC_NO_SLIDES}s` },
+      },
+    ],
+  };
 
-# Dig Deeper — Section One
+  const dug: DugSection[] = [
+    {
+      sectionId: START_SEC_NO_SLIDES,
+      startSec: START_SEC_NO_SLIDES,
+      title: 'Section One',
+      bodyMarkdown: '## Section One\n\nKey insight with no slides here.\n',
+      generatedAt: '2026-01-01T00:00:00.000Z',
+    },
+  ];
 
-Key insight with no slides here.
-`;
-  return renderDigDeeperHtml(md, '/tmp/fake-no-slides.md');
+  return renderDigDeeperDoc({ summary, envelope: null, dug, mdPath: '/tmp/fake-no-slides-dig-deeper.md', videoId: VIDEO_ID_NO_SLIDES });
 }
 
 // ---------------------------------------------------------------------------

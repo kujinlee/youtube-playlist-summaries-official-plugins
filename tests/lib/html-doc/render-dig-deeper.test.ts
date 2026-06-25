@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { renderDigDeeperHtml, renderDigDeeperDoc } from '@/lib/html-doc/render-dig-deeper';
+import { renderDigDeeperDoc } from '@/lib/html-doc/render-dig-deeper';
 import type { ParsedSummary } from '@/lib/html-doc/types';
 import type { ModelEnvelope } from '@/lib/html-doc/model-store';
 import type { DugSection } from '@/lib/dig/companion-doc';
@@ -13,9 +13,49 @@ function makeTempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'render-dig-deeper-'));
 }
 
-describe('renderDigDeeperHtml', () => {
+// ──────────────────────────────────────────────────────────────────────────────
+// buildRenderer — behaviors exercised via renderDigDeeperDoc's .dug block
+//
+// renderDigDeeperDoc renders dugData.bodyMarkdown through buildRenderer, so the
+// image-inlining, missing-asset, and containment behaviors are fully covered here.
+// Migrated from the old renderDigDeeperHtml describe block (Task 9 cleanup).
+// ──────────────────────────────────────────────────────────────────────────────
+
+function makeSummaryWithDugSection(startSec: number): ParsedSummary {
+  return {
+    title: 'Test Video',
+    channel: null,
+    duration: null,
+    url: 'https://www.youtube.com/watch?v=vid123',
+    lang: 'EN',
+    videoId: 'vid123',
+    tldr: null,
+    takeaways: [],
+    sourceMd: 'test.md',
+    sections: [
+      {
+        numeral: '1',
+        title: 'Test Section',
+        prose: 'Test prose',
+        timeRange: { startSec, endSec: startSec + 300, label: '0:00–5:00', url: `https://www.youtube.com/watch?v=vid123&t=${startSec}s` },
+      },
+    ],
+  };
+}
+
+function makeDugWithBody(startSec: number, bodyMarkdown: string): DugSection {
+  return {
+    sectionId: startSec,
+    startSec,
+    title: 'Test Section',
+    bodyMarkdown,
+    generatedAt: '2026-01-01T00:00:00.000Z',
+  };
+}
+
+describe('buildRenderer (via renderDigDeeperDoc .dug block)', () => {
   // -------------------------------------------------------------------------
-  // Behavior 1: Image inlined as base64 when file exists
+  // Behavior 1 (migrated): Image inlined as base64 when file exists
   // -------------------------------------------------------------------------
   describe('Behavior 1 — image inlined as base64', () => {
     let tmpDir: string;
@@ -29,9 +69,11 @@ describe('renderDigDeeperHtml', () => {
       fs.mkdirSync(assetsDir, { recursive: true });
       const jpegPath = path.join(assetsDir, '300-352.jpg');
       fs.writeFileSync(jpegPath, MINIMAL_JPEG);
-      mdPath = path.join(tmpDir, 'test.md');
-      const mdContent = `# Slide deck\n\n![A caption](assets/v/300-352.jpg)\n\nSome prose after.\n`;
-      html = renderDigDeeperHtml(mdContent, mdPath);
+      mdPath = path.join(tmpDir, 'test-dig-deeper.md');
+      const bodyMd = `## Test Section\n\n![A caption](assets/v/300-352.jpg)\n\nSome prose after.\n`;
+      const summary = makeSummaryWithDugSection(60);
+      const dug = [makeDugWithBody(60, bodyMd)];
+      html = renderDigDeeperDoc({ summary, envelope: null, dug, mdPath, videoId: 'vid123' });
     });
 
     afterAll(() => {
@@ -56,30 +98,24 @@ describe('renderDigDeeperHtml', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Behavior 2: Missing asset → img omitted entirely, no relative src, no throw
+  // Behavior 2 (migrated): Missing asset → span placeholder, no relative src, no throw
   // -------------------------------------------------------------------------
-  describe('Behavior 2 — missing asset dropped, no relative src, no throw', () => {
+  describe('Behavior 2 — missing asset shows placeholder span', () => {
     let tmpDir: string;
     let mdPath: string;
     let html: string;
 
     beforeAll(() => {
       tmpDir = makeTempDir();
-      mdPath = path.join(tmpDir, 'test.md');
-      // Reference a file that does NOT exist
-      const mdContent = `# Missing slide\n\n![No file](assets/v/missing-999.jpg)\n\nProse continues.\n`;
-      html = renderDigDeeperHtml(mdContent, mdPath);
+      mdPath = path.join(tmpDir, 'test-dig-deeper.md');
+      const bodyMd = `## Test Section\n\n![No file](assets/v/missing-999.jpg)\n\nProse continues.\n`;
+      const summary = makeSummaryWithDugSection(60);
+      const dug = [makeDugWithBody(60, bodyMd)];
+      html = renderDigDeeperDoc({ summary, envelope: null, dug, mdPath, videoId: 'vid123' });
     });
 
     afterAll(() => {
       fs.rmSync(tmpDir, { recursive: true, force: true });
-    });
-
-    it('does NOT throw when the asset file is missing', () => {
-      expect(() => renderDigDeeperHtml(
-        `# x\n\n![x](assets/v/no-exist.jpg)\n`,
-        path.join(tmpDir, 'x.md'),
-      )).not.toThrow();
     });
 
     it('does NOT emit a relative src="assets/..." for the missing image', () => {
@@ -96,132 +132,7 @@ describe('renderDigDeeperHtml', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Behavior 3: HTML escaped (markdown-it html:false)
-  // -------------------------------------------------------------------------
-  describe('Behavior 3 — HTML escaped (html:false)', () => {
-    const mdContent = `# XSS test\n\n<script>alert('xss')</script>\n\n![cap <script>](assets/safe.jpg)\n`;
-    let tmpDir: string;
-    let html: string;
-
-    beforeAll(() => {
-      tmpDir = makeTempDir();
-      html = renderDigDeeperHtml(mdContent, path.join(tmpDir, 'test.md'));
-    });
-
-    afterAll(() => {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    });
-
-    it('escapes raw <script> tags in the body (html:false)', () => {
-      expect(html).not.toContain('<script>alert(');
-      expect(html).toContain('&lt;script&gt;');
-    });
-
-    it('escapes < in the image alt attribute', () => {
-      // The alt should be HTML-escaped — no raw < in alt
-      expect(html).not.toMatch(/alt="cap <script>/);
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Behavior 4: data-t anchors preserved
-  // -------------------------------------------------------------------------
-  describe('Behavior 4 — data-t anchors preserved', () => {
-    const mdContent = `# Slides\n\nProse with a <a class="dig" data-type="summary" data-t="90">↑ summary</a> control.\n`;
-    // Note: html:false means raw HTML is escaped, but markdown handles links normally.
-    // We test via a markdown link that outputs data attributes.
-    const mdWithLink = `# Slides\n\n[section](https://youtube.com/watch?v=abc&t=90s)\n`;
-    let tmpDir: string;
-    let html: string;
-
-    beforeAll(() => {
-      tmpDir = makeTempDir();
-      html = renderDigDeeperHtml(mdWithLink, path.join(tmpDir, 'test.md'));
-    });
-
-    afterAll(() => {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    });
-
-    it('renders a YouTube link with t= param in the href', () => {
-      expect(html).toContain('t=90s');
-    });
-
-    it('includes the NAV_SCRIPT (a.dig handling)', () => {
-      expect(html).toContain('a.dig');
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Behavior 5: Self-contained output
-  // -------------------------------------------------------------------------
-  describe('Behavior 5 — self-contained output', () => {
-    const mdContent = `# Self-contained test\n\nSome body text.\n`;
-    let tmpDir: string;
-    let html: string;
-
-    beforeAll(() => {
-      tmpDir = makeTempDir();
-      html = renderDigDeeperHtml(mdContent, path.join(tmpDir, 'test.md'));
-    });
-
-    afterAll(() => {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    });
-
-    it('is a valid HTML document starting with <!DOCTYPE html>', () => {
-      expect(html).toMatch(/^<!DOCTYPE html>/);
-    });
-
-    it('has no external <link> stylesheet references', () => {
-      expect(html).not.toContain('<link');
-    });
-
-    it('inlines CSS inside a <style> block', () => {
-      expect(html).toContain('<style>');
-    });
-
-    it('inlines the magazine light palette (cream card, gold, ghost vars)', () => {
-      expect(html).toContain('--card:#fbf9f6');
-      expect(html).toContain('--gold:#b07700');
-      expect(html).toContain('--ghost:#f0e7d6');
-    });
-
-    it('includes the dark palette + system-dark media query', () => {
-      expect(html).toContain('[data-theme="dark"]');
-      expect(html).toContain('@media(prefers-color-scheme:dark)');
-    });
-
-    it('includes the theme toggle button and scripts', () => {
-      expect(html).toContain('id="theme-toggle"');
-      expect(html).toContain("localStorage.getItem('html-doc-theme')");
-    });
-
-    it('includes the Print button', () => {
-      expect(html).toContain('id="print-btn"');
-      expect(html).toContain('onclick="window.print()"');
-    });
-
-    it('includes the NAV_CSS (.dig rule)', () => {
-      expect(html).toContain('.dig{');
-    });
-
-    it('includes the NAV_SCRIPT (wireDigLinks + scrollToHashSection)', () => {
-      expect(html).toContain('a.dig');
-    });
-
-    it('renders the body content', () => {
-      expect(html).toContain('Self-contained test');
-      expect(html).toContain('Some body text.');
-    });
-
-    it('uses the generator meta tag', () => {
-      expect(html).toContain('<meta name="generator" content="dig-deeper-html v1">');
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Behavior 5b: path traversal in image src → img dropped, no file disclosed
+  // Behavior 5b (migrated): path traversal in image src → img dropped, no file disclosed
   // -------------------------------------------------------------------------
   describe('Behavior 5b — path traversal dropped, no arbitrary file disclosure', () => {
     let tmpDir: string;
@@ -231,16 +142,14 @@ describe('renderDigDeeperHtml', () => {
 
     beforeAll(() => {
       tmpDir = makeTempDir();
-      // Place a "secret" file two levels above tmpDir (in os.tmpdir()).
-      // assets/../../<basename> passes startsWith('assets/') but resolves
-      // OUTSIDE docDir/assets/ → should be blocked by the containment check.
       secretPath = path.join(os.tmpdir(), `secret-traversal-${path.basename(tmpDir)}.txt`);
       fs.writeFileSync(secretPath, 'supersecret');
-      mdPath = path.join(tmpDir, 'test.md');
-      // assets/../../<file> resolves to os.tmpdir()/<file> — outside docDir
+      mdPath = path.join(tmpDir, 'test-dig-deeper.md');
       const traversalSrc = `assets/../../${path.basename(secretPath)}`;
-      const mdContent = `# Traversal test\n\n![x](${traversalSrc})\n\nProse.\n`;
-      html = renderDigDeeperHtml(mdContent, mdPath);
+      const bodyMd = `## Test Section\n\n![x](${traversalSrc})\n\nProse.\n`;
+      const summary = makeSummaryWithDugSection(60);
+      const dug = [makeDugWithBody(60, bodyMd)];
+      html = renderDigDeeperDoc({ summary, envelope: null, dug, mdPath, videoId: 'vid123' });
     });
 
     afterAll(() => {
@@ -257,220 +166,13 @@ describe('renderDigDeeperHtml', () => {
       expect(html).not.toContain(secretB64);
     });
 
-    it('does not throw', () => {
+    it('does not throw and still renders prose', () => {
       expect(html).toContain('Prose.');
     });
   });
 
   // -------------------------------------------------------------------------
-  // Behavior 5c: markdown timestamp links render to clickable href anchors
-  // -------------------------------------------------------------------------
-  describe('Behavior 5c — markdown timestamp links render as href anchors', () => {
-    // Dig-deeper bodies use markdown timestamp LINKS like
-    //   ▶ [11:00–21:19](https://www.youtube.com/watch?v=abc&t=660s)
-    // (output of resolveTranscriptTokens), NOT raw inline <a data-t> HTML.
-    // html:false would escape raw HTML anchors, but markdown links are rendered
-    // normally by markdown-it → href anchors with the t= param preserved.
-    let tmpDir: string;
-    let html: string;
-
-    beforeAll(() => {
-      tmpDir = makeTempDir();
-      const mdContent = `# Timestamps\n\n▶ [11:00–21:19](https://www.youtube.com/watch?v=abc&t=660s)\n`;
-      html = renderDigDeeperHtml(mdContent, path.join(tmpDir, 'test.md'));
-    });
-
-    afterAll(() => {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    });
-
-    it('renders a markdown timestamp link as a clickable <a> with t= in href', () => {
-      expect(html).toContain('href="https://www.youtube.com/watch?v=abc&amp;t=660s"');
-    });
-
-    it('preserves the link text including timestamp range', () => {
-      expect(html).toContain('11:00');
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Behavior 7 (H-1): sentinel-delimited companion doc → section data-start attrs
-  // -------------------------------------------------------------------------
-  describe('Behavior 7 — sentinel blocks render as <section data-start="N">', () => {
-    let tmpDir: string;
-    let html: string;
-
-    beforeAll(() => {
-      tmpDir = makeTempDir();
-      const mdContent = [
-        '---',
-        'title: "Test Video"',
-        'videoId: "abc12345678"',
-        '---',
-        '# Test Video',
-        '',
-        '<!-- dig-section: 312 -->',
-        '## Introduction',
-        '',
-        'Body text for section 312.',
-        '<!-- /dig-section -->',
-        '',
-        '<!-- dig-section: 600 -->',
-        '## Advanced Topics',
-        '',
-        'Body text for section 600.',
-        '<!-- /dig-section -->',
-      ].join('\n');
-      html = renderDigDeeperHtml(mdContent, path.join(tmpDir, 'test-dig-deeper.md'));
-    });
-
-    afterAll(() => {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    });
-
-    it('contains <section data-start="312"', () => {
-      expect(html).toContain('<section data-start="312"');
-    });
-
-    it('contains <section data-start="600"', () => {
-      expect(html).toContain('<section data-start="600"');
-    });
-
-    it('renders the section body text inside the section element', () => {
-      expect(html).toContain('Body text for section 312');
-      expect(html).toContain('Body text for section 600');
-    });
-
-    it('pre-sentinel content (title) renders normally outside sections', () => {
-      expect(html).toContain('Test Video');
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Behavior 8 (Issue #1): style parity — muted ▶ ts links and lead accent
-  // -------------------------------------------------------------------------
-  describe('Behavior 8 — style parity: muted ▶ ts link + lead accent per sentinel section', () => {
-    let tmpDir: string;
-    let assetsDir: string;
-    let mdPath: string;
-    let html: string;
-
-    beforeAll(() => {
-      tmpDir = makeTempDir();
-      assetsDir = path.join(tmpDir, 'assets', 'v');
-      fs.mkdirSync(assetsDir, { recursive: true });
-      fs.writeFileSync(path.join(assetsDir, 'slide.jpg'), MINIMAL_JPEG);
-      mdPath = path.join(tmpDir, 'test-style.md');
-      const mdContent = [
-        '---',
-        'title: "Style Parity Test"',
-        '---',
-        '# Style Parity Test',
-        '',
-        '<!-- dig-section: 312 -->',
-        '## Introduction',
-        '',
-        '▶ [05:12–10:30](https://www.youtube.com/watch?v=abc&t=312s)',
-        '',
-        'This is the first sentence of the lead. And more prose follows here.',
-        '',
-        '- Bullet one',
-        '- Bullet two',
-        '',
-        '![slide](assets/v/slide.jpg)',
-        '<!-- /dig-section -->',
-        '',
-        '<!-- dig-section: 630 -->',
-        '## Second Section',
-        '',
-        '▶ [10:30–15:00](https://www.youtube.com/watch?v=abc&t=630s)',
-        '',
-        'Second section lead sentence. More text here.',
-        '<!-- /dig-section -->',
-      ].join('\n');
-      html = renderDigDeeperHtml(mdContent, mdPath);
-    });
-
-    afterAll(() => {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    });
-
-    it('section data-start uses sentinel sectionId (312), not ▶ url time', () => {
-      expect(html).toContain('<section data-start="312"');
-      expect(html).toContain('<section data-start="630"');
-    });
-
-    it('renders ▶ link with class="ts" and target="_blank"', () => {
-      expect(html).toContain('class="ts"');
-      expect(html).toContain('target="_blank"');
-    });
-
-    it('renders ▶ link with rel="noopener noreferrer"', () => {
-      expect(html).toContain('rel="noopener noreferrer"');
-    });
-
-    it('renders lead paragraph with class="lead" for first prose paragraph', () => {
-      expect(html).toContain('class="lead"');
-    });
-
-    it('renders lead-accent span around the first sentence', () => {
-      expect(html).toContain('class="lead-accent"');
-    });
-
-    it('inlines slide image as base64 (image inlining preserved under style-parity path)', () => {
-      expect(html).toContain('src="data:image/jpeg;base64,');
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Behavior 9 (Issue #2): ↑ summary back-link per sentinel section
-  // -------------------------------------------------------------------------
-  describe('Behavior 9 — ↑ summary back-link per sentinel section', () => {
-    let tmpDir: string;
-    let html: string;
-
-    beforeAll(() => {
-      tmpDir = makeTempDir();
-      const mdContent = [
-        '# Nav Test',
-        '',
-        '<!-- dig-section: 312 -->',
-        '## Introduction',
-        '',
-        'Body text for section 312.',
-        '<!-- /dig-section -->',
-        '',
-        '<!-- dig-section: 600 -->',
-        '## Advanced Topics',
-        '',
-        'Body text for section 600.',
-        '<!-- /dig-section -->',
-      ].join('\n');
-      html = renderDigDeeperHtml(mdContent, path.join(tmpDir, 'test-nav.md'));
-    });
-
-    afterAll(() => {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    });
-
-    it('contains a ↑ summary control with data-type="summary" for section 312', () => {
-      expect(html).toContain('data-type="summary"');
-      expect(html).toContain('data-t="312"');
-      expect(html).toContain('↑ summary');
-    });
-
-    it('contains a ↑ summary control with data-t="600" for second section', () => {
-      expect(html).toContain('data-t="600"');
-    });
-
-    it('back-link anchors have class="dig"', () => {
-      // digControl('summary', N) returns <a class="dig" data-type="summary" data-t="N">
-      expect(html).toContain('class="dig"');
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Task 7 — Behavior T7-1: present asset → base64 img (explicit)
+  // T7-1 (migrated): present asset → base64 img
   // -------------------------------------------------------------------------
   describe('T7-1 — present asset → base64 <img>', () => {
     let tmpDir: string;
@@ -483,8 +185,11 @@ describe('renderDigDeeperHtml', () => {
       assetsDir = path.join(tmpDir, 'assets', 'v');
       fs.mkdirSync(assetsDir, { recursive: true });
       fs.writeFileSync(path.join(assetsDir, 'frame.jpg'), MINIMAL_JPEG);
-      mdPath = path.join(tmpDir, 't7-present.md');
-      html = renderDigDeeperHtml('# T7\n\n![A slide caption](assets/v/frame.jpg)\n', mdPath);
+      mdPath = path.join(tmpDir, 't7-present-dig-deeper.md');
+      const bodyMd = `## T7\n\n![A slide caption](assets/v/frame.jpg)\n`;
+      const summary = makeSummaryWithDugSection(60);
+      const dug = [makeDugWithBody(60, bodyMd)];
+      html = renderDigDeeperDoc({ summary, envelope: null, dug, mdPath, videoId: 'vid123' });
     });
 
     afterAll(() => {
@@ -505,7 +210,7 @@ describe('renderDigDeeperHtml', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Task 7 — Behavior T7-2: benign missing file → visible placeholder span
+  // T7-2 (migrated): benign missing file → visible placeholder span
   // -------------------------------------------------------------------------
   describe('T7-2 — benign missing file → <span class="missing-slide"> placeholder', () => {
     let tmpDir: string;
@@ -514,8 +219,11 @@ describe('renderDigDeeperHtml', () => {
 
     beforeAll(() => {
       tmpDir = makeTempDir();
-      mdPath = path.join(tmpDir, 't7-missing.md');
-      html = renderDigDeeperHtml('# T7\n\n![Slide caption](assets/v/gone.jpg)\n\nProse after.\n', mdPath);
+      mdPath = path.join(tmpDir, 't7-missing-dig-deeper.md');
+      const bodyMd = `## T7\n\n![Slide caption](assets/v/gone.jpg)\n\nProse after.\n`;
+      const summary = makeSummaryWithDugSection(60);
+      const dug = [makeDugWithBody(60, bodyMd)];
+      html = renderDigDeeperDoc({ summary, envelope: null, dug, mdPath, videoId: 'vid123' });
     });
 
     afterAll(() => {
@@ -544,7 +252,7 @@ describe('renderDigDeeperHtml', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Task 7 — Behavior T7-3: containment violation → silent drop (no placeholder)
+  // T7-3 (migrated): containment violation → silent drop (no placeholder)
   // -------------------------------------------------------------------------
   describe('T7-3 — containment violation → silent drop, no placeholder, no alt', () => {
     let tmpDir: string;
@@ -556,9 +264,12 @@ describe('renderDigDeeperHtml', () => {
       tmpDir = makeTempDir();
       secretPath = path.join(os.tmpdir(), `secret-t7-${path.basename(tmpDir)}.txt`);
       fs.writeFileSync(secretPath, 'supersecret-t7');
-      mdPath = path.join(tmpDir, 't7-traversal.md');
+      mdPath = path.join(tmpDir, 't7-traversal-dig-deeper.md');
       const traversalSrc = `assets/../../${path.basename(secretPath)}`;
-      html = renderDigDeeperHtml(`# T7\n\n![attacker alt](${traversalSrc})\n\nProse.\n`, mdPath);
+      const bodyMd = `## T7\n\n![attacker alt](${traversalSrc})\n\nProse.\n`;
+      const summary = makeSummaryWithDugSection(60);
+      const dug = [makeDugWithBody(60, bodyMd)];
+      html = renderDigDeeperDoc({ summary, envelope: null, dug, mdPath, videoId: 'vid123' });
     });
 
     afterAll(() => {
@@ -585,7 +296,7 @@ describe('renderDigDeeperHtml', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Task 7 — Behavior T7-4: alt text with special chars → HTML-escaped in placeholder
+  // T7-4 (migrated): alt text with special chars → HTML-escaped in placeholder
   // -------------------------------------------------------------------------
   describe('T7-4 — alt text with special chars escaped in missing-slide placeholder', () => {
     let tmpDir: string;
@@ -594,9 +305,12 @@ describe('renderDigDeeperHtml', () => {
 
     beforeAll(() => {
       tmpDir = makeTempDir();
-      mdPath = path.join(tmpDir, 't7-escape.md');
+      mdPath = path.join(tmpDir, 't7-escape-dig-deeper.md');
       // Alt text contains " and < — must be HTML-escaped in the placeholder
-      html = renderDigDeeperHtml('# T7\n\n![Say "hello" <world>](assets/v/no-exist.jpg)\n', mdPath);
+      const bodyMd = `## T7\n\n![Say "hello" <world>](assets/v/no-exist.jpg)\n`;
+      const summary = makeSummaryWithDugSection(60);
+      const dug = [makeDugWithBody(60, bodyMd)];
+      html = renderDigDeeperDoc({ summary, envelope: null, dug, mdPath, videoId: 'vid123' });
     });
 
     afterAll(() => {
@@ -616,7 +330,6 @@ describe('renderDigDeeperHtml', () => {
     });
 
     it('does NOT contain raw < or unescaped " in the placeholder', () => {
-      // The span should have no raw < after the opening tag (only escaped)
       const spanMatch = html.match(/<span class="missing-slide">([^<]*)<\/span>/);
       expect(spanMatch).not.toBeNull();
       expect(spanMatch![1]).not.toMatch(/[<>"]/);
@@ -624,7 +337,7 @@ describe('renderDigDeeperHtml', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Task 7 — Behavior T7-5: .missing-slide CSS rule present in output
+  // T7-5 (migrated): .missing-slide CSS rule present in output
   // -------------------------------------------------------------------------
   describe('T7-5 — .missing-slide CSS rule present in rendered HTML', () => {
     let tmpDir: string;
@@ -632,7 +345,14 @@ describe('renderDigDeeperHtml', () => {
 
     beforeAll(() => {
       tmpDir = makeTempDir();
-      html = renderDigDeeperHtml('# T7\n\nBody.\n', path.join(tmpDir, 't7-css.md'));
+      const summary = makeSummaryWithDugSection(60);
+      html = renderDigDeeperDoc({
+        summary,
+        envelope: null,
+        dug: [],
+        mdPath: path.join(tmpDir, 't7-css-dig-deeper.md'),
+        videoId: 'vid123',
+      });
     });
 
     afterAll(() => {
@@ -645,9 +365,9 @@ describe('renderDigDeeperHtml', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Behavior 6: multiple images — present one inlined, missing one dropped
+  // mixed present + missing assets in one dug block
   // -------------------------------------------------------------------------
-  describe('mixed present + missing assets in one doc', () => {
+  describe('mixed present + missing assets in one dug block', () => {
     let tmpDir: string;
     let assetsDir: string;
     let mdPath: string;
@@ -658,9 +378,9 @@ describe('renderDigDeeperHtml', () => {
       assetsDir = path.join(tmpDir, 'assets', 'v');
       fs.mkdirSync(assetsDir, { recursive: true });
       fs.writeFileSync(path.join(assetsDir, 'present.jpg'), MINIMAL_JPEG);
-      mdPath = path.join(tmpDir, 'test.md');
-      const mdContent = [
-        '# Mixed',
+      mdPath = path.join(tmpDir, 'mixed-dig-deeper.md');
+      const bodyMd = [
+        '## Mixed',
         '',
         '![present](assets/v/present.jpg)',
         '',
@@ -668,7 +388,9 @@ describe('renderDigDeeperHtml', () => {
         '',
         'End.',
       ].join('\n');
-      html = renderDigDeeperHtml(mdContent, mdPath);
+      const summary = makeSummaryWithDugSection(60);
+      const dug = [makeDugWithBody(60, bodyMd)];
+      html = renderDigDeeperDoc({ summary, envelope: null, dug, mdPath, videoId: 'vid123' });
     });
 
     afterAll(() => {

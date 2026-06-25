@@ -18,7 +18,6 @@ import * as sectionWindowMod from '../../lib/dig/section-window';
 import * as generateMod from '../../lib/dig/generate';
 import * as slidesMod from '../../lib/dig/slides';
 import * as companionDocMod from '../../lib/dig/companion-doc';
-import * as renderDigMod from '../../lib/html-doc/render-dig-deeper';
 import * as transcriptTimestamps from '../../lib/transcript-timestamps';
 import * as parseMod from '../../lib/html-doc/parse';
 import * as transcriptSource from '../../lib/transcript-source';
@@ -32,7 +31,6 @@ jest.mock('../../lib/dig/section-window');
 jest.mock('../../lib/dig/generate');
 jest.mock('../../lib/dig/slides');
 jest.mock('../../lib/dig/companion-doc');
-jest.mock('../../lib/html-doc/render-dig-deeper');
 jest.mock('../../lib/transcript-timestamps');
 jest.mock('../../lib/html-doc/parse');
 jest.mock('../../lib/transcript-source');
@@ -63,7 +61,6 @@ const mockWindowForSection = sectionWindowMod.windowForSection as jest.Mock;
 const mockGenerateDig = generateMod.generateDig as jest.Mock;
 const mockResolveSlideTokens = slidesMod.resolveSlideTokens as jest.Mock;
 const mockUpsertDugSection = companionDocMod.upsertDugSection as jest.Mock;
-const mockRenderDigDeeperHtml = renderDigMod.renderDigDeeperHtml as jest.Mock;
 const mockResolveTranscriptTokens = transcriptTimestamps.resolveTranscriptTokens as jest.Mock;
 const mockParseSummaryMarkdown = parseMod.parseSummaryMarkdown as jest.Mock;
 const mockResolveTranscriptSegments = transcriptSource.resolveTranscriptSegments as jest.Mock;
@@ -73,7 +70,6 @@ const mockReadIndex = jest.mocked(indexStore.readIndex);
 const mockUpdateVideoFields = jest.mocked(indexStore.updateVideoFields);
 const mockReadFile = fs.readFile as jest.Mock;
 const mockWriteFile = fs.writeFile as jest.Mock;
-const mockMkdir = fs.mkdir as jest.Mock;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -158,7 +154,6 @@ beforeEach(() => {
 
   mockReadIndex.mockReturnValue({ playlistUrl: '', outputFolder: HOME, videos: [MOCK_VIDEO] });
   mockReadFile.mockResolvedValue('## Summary Markdown Content');
-  mockMkdir.mockResolvedValue(undefined);
 
   mockParseSummaryMarkdown.mockReturnValue({ sections: [MOCK_SECTION] });
   mockResolveTranscriptSegments.mockResolvedValue({ segments: MOCK_SEGMENTS, source: 'captions' });
@@ -167,8 +162,6 @@ beforeEach(() => {
   mockResolveTranscriptTokens.mockReturnValue('# Dig Deeper\n\nWith timestamps.');
   mockResolveSlideTokens.mockResolvedValue('# Dig Deeper\n\nFinal markdown.');
   mockUpsertDugSection.mockResolvedValue(undefined);
-  mockRenderDigDeeperHtml.mockReturnValue('<html>dig deeper</html>');
-  mockWriteFile.mockResolvedValue(undefined);
   mockUpdateVideoFields.mockImplementation(() => {});
 });
 
@@ -306,14 +299,13 @@ describe('B1: happy path', () => {
     );
   });
 
-  it('calls renderDigDeeperHtml and writes the HTML file', async () => {
+  it('does NOT write any HTML file (GET renders fresh; POST only upserts companion)', async () => {
     await post(VIDEO_ID, SECTION_ID, { outputFolder: HOME });
     await new Promise((r) => setTimeout(r, 10));
-    expect(mockRenderDigDeeperHtml).toHaveBeenCalled();
-    expect(mockWriteFile).toHaveBeenCalled();
+    expect(mockWriteFile).not.toHaveBeenCalled();
   });
 
-  it('calls updateVideoFields with digDeeperMd and digDeeperHtml', async () => {
+  it('calls updateVideoFields with digDeeperMd only (no digDeeperHtml stamp)', async () => {
     await post(VIDEO_ID, SECTION_ID, { outputFolder: HOME });
     await new Promise((r) => setTimeout(r, 10));
     expect(mockUpdateVideoFields).toHaveBeenCalledWith(
@@ -321,9 +313,11 @@ describe('B1: happy path', () => {
       VIDEO_ID,
       expect.objectContaining({
         digDeeperMd: expect.any(String),
-        digDeeperHtml: expect.any(String),
       }),
     );
+    // digDeeperHtml must NOT be stamped — GET renders the HTML fresh on every request
+    const call = (mockUpdateVideoFields as jest.Mock).mock.calls[0][2];
+    expect(call).not.toHaveProperty('digDeeperHtml');
   });
 });
 
@@ -439,10 +433,9 @@ describe('B8: yt-dlp gated', () => {
 
     await new Promise((r) => setTimeout(r, 10));
 
-    // Pipeline continues normally with text-only md
+    // Pipeline continues normally with text-only md; no HTML file written
     expect(mockUpsertDugSection).toHaveBeenCalled();
-    expect(mockRenderDigDeeperHtml).toHaveBeenCalled();
-    expect(mockWriteFile).toHaveBeenCalled();
+    expect(mockWriteFile).not.toHaveBeenCalled();
     expect(mockUpdateVideoFields).toHaveBeenCalled();
   });
 });

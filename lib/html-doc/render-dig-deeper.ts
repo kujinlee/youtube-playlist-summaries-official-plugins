@@ -8,12 +8,6 @@ import {
   type Palette,
 } from './theme';
 import { digControl, NAV_SCRIPT, NAV_CSS } from './nav';
-import {
-  extractTimestamp,
-  takeFirstParagraph,
-  splitFirstSentence,
-  tsAnchor,
-} from './render-deep-dive';
 import type { ParsedSummary } from './types';
 import type { ModelEnvelope } from './model-store';
 import type { DugSection } from '../dig/companion-doc';
@@ -123,114 +117,6 @@ function buildRenderer(mdPath: string): MarkdownIt {
   return renderer;
 }
 
-/**
- * Render a dig-deeper `.md` into a self-contained HTML page with slide screenshots inlined as
- * base64. Mirrors `renderDeepDiveHtml`'s CSS/theme/NAV pattern.
- *
- * @param mdContent  Raw markdown string (may include YAML frontmatter — stripped).
- * @param mdPath     Absolute path to the source `.md` file (used to resolve `assets/` images).
- */
-export function renderDigDeeperHtml(mdContent: string, mdPath: string): string {
-  const renderer = buildRenderer(mdPath);
-
-  // Strip the leading YAML frontmatter block and normalize line endings.
-  const body = mdContent
-    .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '')
-    .replace(/\r\n/g, '\n');
-
-  const title = body.match(/^#\s+(.+)$/m)?.[1]?.trim() ?? 'Dig Deeper';
-
-  // Parse sentinel-delimited blocks from the body.
-  // If the body contains sentinel blocks, render each as <section data-start="N">.
-  // Pre-sentinel content (e.g. the H1 title) renders normally.
-  const sentinelRe = /<!-- dig-section: (\d+) -->\n([\s\S]*?)<!-- \/dig-section -->/g;
-  const parts: string[] = [];
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = sentinelRe.exec(body)) !== null) {
-    // Render content before this sentinel block
-    if (match.index > lastIndex) {
-      parts.push(renderer.render(body.slice(lastIndex, match.index)));
-    }
-    // Render the sentinel block with deep-dive style treatment:
-    // - Extract ## heading line
-    // - Extract optional leading ▶ timestamp line → muted trailing link on <h2>
-    // - Extract first prose paragraph → lead accent (gold first sentence)
-    // - ↑ summary back-link (digControl) on the heading
-    // - data-start uses the sentinel sectionId (H-1: NOT the ▶ url time)
-    const sectionId = match[1];
-    const blockContent = match[2];
-
-    const blockLines = blockContent.split('\n');
-    // Extract the ## heading (first non-blank line starting with ##)
-    const h2Idx = blockLines.findIndex((l) => /^##\s+/.test(l));
-    let heading = '';
-    let bodyLines: string[];
-    if (h2Idx !== -1) {
-      heading = blockLines[h2Idx].replace(/^##\s+/, '').trim();
-      bodyLines = blockLines.slice(h2Idx + 1);
-    } else {
-      bodyLines = blockLines;
-    }
-
-    // Extract optional leading ▶ timestamp line (mutates bodyLines)
-    const ts = extractTimestamp(bodyLines);
-    const tsHtml = tsAnchor(ts);
-
-    // Build ↑ summary back-link (Issue #2)
-    const backLink = digControl('summary', Number(sectionId));
-
-    // Render <h2> with muted ts link + back-link
-    const headingHtml = heading
-      ? `<h2>${renderer.renderInline(heading)}${tsHtml}${backLink}</h2>`
-      : '';
-
-    // Extract lead paragraph and render with gold first-sentence accent (Issue #1)
-    const { para, rest } = takeFirstParagraph(bodyLines);
-    let leadHtml = '';
-    if (para) {
-      const { first, rest: tail } = splitFirstSentence(para);
-      const firstHtml = renderer.renderInline(first);
-      const tailHtml = tail ? ` ${renderer.renderInline(tail)}` : '';
-      leadHtml = `<p class="lead"><span class="lead-accent">${firstHtml}</span>${tailHtml}</p>`;
-    }
-
-    // Render the rest via the image-aware renderer (preserves base64 inlining)
-    const restHtml = rest.trim() ? renderer.render(rest) : '';
-
-    const sectionInner = [headingHtml, leadHtml, restHtml].filter(Boolean).join('\n');
-    parts.push(`<section data-start="${sectionId}">\n${sectionInner}\n</section>\n`);
-    lastIndex = match.index + match[0].length;
-  }
-
-  // Render any remaining content after the last sentinel block (or the whole body if no sentinels)
-  if (lastIndex < body.length) {
-    parts.push(renderer.render(body.slice(lastIndex)));
-  }
-
-  const bodyHtml = parts.join('');
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="generator" content="dig-deeper-html v1">
-<meta name="source-md" content="${esc(path.basename(mdPath))}">
-<title>${esc(title)}</title>
-${THEME_HEAD_SCRIPT}
-<style>${themeStyleBlock(LIGHT, DARK)}${STRUCTURAL_CSS}${NAV_CSS}</style>
-</head>
-<body>
-${THEME_TOGGLE_BUTTON}${PRINT_BUTTON}
-<article class="dg">
-${bodyHtml}</article>
-${NAV_SCRIPT}${THEME_TOGGLE_SCRIPT}
-</body>
-</html>`;
-}
-
 // ── Dig-deeper merge renderer CSS additions (Task 6) ─────────────────────────
 const DIG_DOC_CSS = `
 section{padding:2.4em 0;border-top:2px solid var(--rule)}
@@ -252,7 +138,7 @@ section[data-dug="true"] .gist{display:none}
  * emits a full HTML page where each MergedSection is rendered with its gist
  * and/or dug-content in the correct state.
  *
- * This function is ADDITIVE — the old renderDigDeeperHtml is left intact.
+ * This is the sole public render function — renderDigDeeperHtml was removed in Task 9.
  */
 export function renderDigDeeperDoc(args: {
   summary: ParsedSummary;
