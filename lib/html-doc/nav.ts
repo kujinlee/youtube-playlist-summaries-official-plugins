@@ -318,7 +318,7 @@ export const NAV_SCRIPT = `<script>
       _dg.addEventListener('click',function(e){
         // Toggle (dug → show gist or dug) — zero fetch
         var tog=(e.target.closest?e.target.closest('.dig-toggle'):null);
-        if(tog){e.preventDefault();var s=tog.closest('section');if(s)s.classList.toggle('show-gist');return;}
+        if(tog){e.preventDefault();var s=tog.closest('section');if(s){s.classList.toggle('show-gist');tog.textContent=s.classList.contains('show-gist')?'show dig deeper \\u25b6':'show summary \\u2303';}return;}
         // Trigger (un-dug → expand in place)
         var trig=(e.target.closest?e.target.closest('.dig-trigger[data-section]'):null);
         if(!trig)return;
