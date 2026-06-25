@@ -251,6 +251,41 @@ describe('runIngestion', () => {
     );
   });
 
+  it('increments serialNumber for each new video within the same run (stateful mock)', async () => {
+    // Arrange: stateful in-memory store so the second readIndex call sees the first upserted video.
+    const inMemoryVideos: Video[] = [];
+    mockUpsertVideo.mockImplementation((_folder: string, video: Video) => {
+      const idx = inMemoryVideos.findIndex((v) => v.id === video.id);
+      if (idx >= 0) {
+        inMemoryVideos[idx] = video;
+      } else {
+        inMemoryVideos.push(video);
+      }
+    });
+    mockReadIndex.mockImplementation(() => ({
+      playlistUrl: PLAYLIST_URL,
+      outputFolder,
+      videos: [...inMemoryVideos],
+    }));
+
+    const meta1 = { ...makeVideoMeta('vid1'), title: 'Alpha Video' };
+    const meta2 = { ...makeVideoMeta('vid2'), title: 'Beta Video' };
+    mockFetchPlaylistVideos.mockResolvedValue([meta1, meta2]);
+    mockFetchTranscriptSegments.mockResolvedValue([{ text: 'transcript', offset: 0, duration: 5 }]);
+    mockGenerateSummary.mockResolvedValue(makeSummaryResponse());
+
+    await runIngestion(PLAYLIST_URL, outputFolder, () => {});
+
+    expect(mockUpsertVideo).toHaveBeenCalledWith(
+      outputFolder,
+      expect.objectContaining({ id: 'vid1', serialNumber: 1, summaryMd: '001_alpha-video.md' }),
+    );
+    expect(mockUpsertVideo).toHaveBeenCalledWith(
+      outputFolder,
+      expect.objectContaining({ id: 'vid2', serialNumber: 2, summaryMd: '002_beta-video.md' }),
+    );
+  });
+
   it('appends -2 suffix when serial-prefixed slug filename already exists on disk', async () => {
     // Simulate a pre-existing file with the same serial-prefixed slug
     fs.writeFileSync(path.join(outputFolder, '001_hello-world.md'), 'existing content');
