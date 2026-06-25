@@ -1,7 +1,7 @@
 # Design — Dig-Deeper Slide Selectivity (graphics-only screenshots)
 
 **Date:** 2026-06-25
-**Status:** Approved (design, decisions locked) — pending spec review → implementation plan
+**Status:** Adversarial-reviewed (Claude fallback; no Blocking — H1/H2/M1/M3/L1/L2 absorbed into spec — see `docs/reviews/spec-dig-slide-selectivity-review.md`) — pending user spec-review → implementation plan
 **Related:** [`2026-06-24-section-dig-deeper-screenshots-design.md`](2026-06-24-section-dig-deeper-screenshots-design.md) (the dig-deeper + slide-screenshot feature this refines — the deferred "#4 slide-crop" item)
 
 ---
@@ -54,24 +54,40 @@ No pipeline change is required for Part 1 — `slide-tokens.ts` / `slides.ts` al
 Introduce `DIG_GENERATOR_VERSION` (integer; this change sets it to its first meaningful value, e.g. `2`). Bumped whenever the dig generation policy changes.
 
 ### 4.2 Per-section version (persisted)
-Add `genVersion: number` to `DugSection` (`lib/dig/companion-doc.ts`):
-- **Serialize** it in the per-section frontmatter (alongside `sectionId/startSec/title/generatedAt`).
-- **Parse** it back in `parseFrontmatter`/`parseDugSections`.
-- **Stamp** it at generation time: the dig route sets `section.genVersion = DIG_GENERATOR_VERSION` when it upserts a freshly-generated section.
-- **Backward-compat:** an existing companion doc has no per-section `genVersion`; parse a missing value as `0` ⇒ treated as stale.
+Add `genVersion: number` to `DugSection` (`lib/dig/companion-doc.ts`). This touches **several hard-coded-4-field sites** that the parser/serializer enumerate — the plan must list each (review M3/L1):
+- **Type:** add `genVersion` to the `DugSection` interface (`:30`) and the internal `ParsedFrontmatter.sections` shape (`:145`) and the `currentSection` `Partial<…>` (`:159`).
+- **Serialize:** emit `    genVersion: <n>` in `serializeFrontmatter` (`:77-80`), placed **after `generatedAt`** (fixed position for test determinism; parse is regex-keyed so position is otherwise free).
+- **Parse:** add `^\s{4}genVersion\s*:\s*(\d+)` mirroring the `startSec` regex (`:188`), and set it in `currentSection`.
+- **Commit (two sites):** the list-item commit block (`:176-183`) and the trailing-section commit (`:239-245`) both hard-list the 4 fields — add `genVersion: currentSection.genVersion ?? 0` to **both**.
+- **Return:** `parseDugSections` constructs the returned `DugSection` literal (`:315-323`) — add `genVersion: s.genVersion ?? 0`.
+- **Stamp:** the dig route sets `section.genVersion = DIG_GENERATOR_VERSION` in the section literal it upserts (`route.ts:160-166`); it flows through `upsertDugSection`/`doUpsert` unchanged.
+- **Backward-compat (review L3, confirmed):** a legacy doc has no per-section `genVersion` ⇒ `?? 0` ⇒ stale. Safe.
 
-(The dead doc-level `digVersion: { major:1, minor:0 }` literal at `companion-doc.ts:69` — currently written but never parsed — is removed/replaced by this per-section field to avoid two competing notions of version.)
+(The dead doc-level `digVersion: { major:1, minor:0 }` literal at `companion-doc.ts:69` — written but never parsed — is removed. **This breaks 3 tests that embed the literal** (`tests/api/html-serve.test.ts:140,223`, `tests/lib/dig/companion-doc.test.ts:345`) — they must be updated in the same task.)
 
 ### 4.3 Staleness detection (render time)
-`mergeDigDoc` / `renderDigDeeperDoc` compares each dug section's `genVersion` against `DIG_GENERATOR_VERSION`. `genVersion < DIG_GENERATOR_VERSION` ⇒ **stale**. The merged section carries an `isStale` flag.
+**`mergeDigDoc` owns the comparison** and imports `DIG_GENERATOR_VERSION`. `genVersion < DIG_GENERATOR_VERSION` ⇒ **stale**.
+
+Critical (review H2): `MergedSection.dug` is currently typed `{ bodyMarkdown: string } | null` (`dig-merge.ts:31`), and the merge **discards every other `DugSection` field** at its two construction sites (`:100` and `:148`) — so `genVersion` is *not* available downstream as-is. The plan must:
+1. Add `isStale: boolean` to `MergedSection` (cleaner than widening `dug`).
+2. Compute `isStale` in `mergeDigDoc` from `matched.genVersion < DIG_GENERATOR_VERSION` at **both** `:100` and `:148`.
+3. Thread `isStale` into `renderDigDeeperDoc` (`render-dig-deeper.ts:175+`) to emit the refresh control.
+The orphan path (`:163-167`) is independent of staleness (orphans already show a re-dig note).
 
 ### 4.4 Refresh UX (deliberate, no auto-spend)
-A **stale** dug section renders its existing content **plus** an `↻ outdated` control in the heading (next to the `show summary ⌃` toggle):
-- Clicking `↻ outdated` re-digs **that one section** — reusing the existing client `_startDocDig` POST→SSE→swap path (the dig POST already replaces the section via `upsertDugSection`, now stamping the new `genVersion`). On completion the section swaps to fresh content (transcribed code, graphics-only slides) and the badge clears.
-- **No Gemini call fires on page load.** Opening a doc with stale sections shows them as-is with the badge; cost is incurred only when the user clicks.
-- **Refresh-all:** the existing `⤢ expand all` control is extended to a "refresh outdated" affordance that serially re-digs all stale sections (reusing the existing serialized batch + cancel + cost-estimate dialog). Optional but cheap to add since the batch machinery exists.
+A **stale** dug section renders its existing content **plus** a refresh control in the heading, using a **distinct class `.dig-refresh[data-section]`** (review M1 — *not* `.dig-trigger` or `.dig-toggle`, so the `nav.ts` click delegation stays unambiguous: toggle ≠ trigger ≠ refresh):
+- The control reuses the existing client `_startDocDigAsync` POST→SSE→swap path keyed on `data-section`. The dig POST replaces the section via `upsertDugSection` (now stamping the new `genVersion`). **The click delegation (`nav.ts:318-329`) must add a `.dig-refresh` branch** that calls `_startDocDig` (the `?dig` already-dug guard at `:363-366` does NOT block this — it only gates the URL auto-trigger; confirmed review F5).
+- **Badge clears via re-GET swap, not client mutation** (review M2): on `done`, `_startDocDigAsync` re-fetches `location.href` → server re-renders with the freshly-written `genVersion=current` → `isStale=false` → the swapped-in section has no refresh control. Relies on the existing upsert-before-`done` ordering (`route.ts:154` upsert, `:174` emit done). E2E must assert the badge is **gone after swap**, not merely that a POST fired.
+- **No Gemini call fires on page load.** Opening a doc with stale sections shows them with the badge; cost only on click (confirmed review F8).
 
-### 4.5 Fresh (non-stale) sections
+### 4.5 Refresh-all (separate task, NOT a freebie — review H1)
+The existing `⤢ expand all` batch selects **`.dig-trigger[data-section]` only** (`nav.ts:273,297`) — stale dug sections have **no** `.dig-trigger`, so reusing it as-is would refresh **nothing**. A "refresh outdated" therefore requires explicit changes, enumerated as its own plan task:
+- Batch selector must include `.dig-refresh` (e.g. `.dig-trigger, .dig-refresh`) in `_eaRunBatch`/`_next` (`:273`) and the count (`:297`).
+- The cost estimate (`:300-302`, `N*0.05`, `N*30/60`) must count stale sections.
+- The `_next` loop filters `state==='error'/'loading'`; a refreshed section's control must end in a non-re-selectable state (it disappears on swap → naturally drops out).
+- **Sequencing:** ship per-section `↻` first; refresh-all as a fast-follow task. Do **not** frame it as "cheap reuse."
+
+### 4.6 Fresh (non-stale) sections
 Render exactly as today — no badge, no behavior change.
 
 ---
@@ -81,11 +97,11 @@ Render exactly as today — no badge, no behavior change.
 | Unit | Change |
 |---|---|
 | `lib/dig/generate.ts` | Rewrite slide instruction (§3); export/define `DIG_GENERATOR_VERSION` |
-| `lib/dig/companion-doc.ts` | Add `genVersion` to `DugSection` + serialize + parse; remove dead doc-level `digVersion` literal |
-| dig route (`app/api/videos/[id]/dig/[sectionId]/route.ts`) | Stamp `section.genVersion = DIG_GENERATOR_VERSION` on upsert |
-| `lib/html-doc/dig-merge.ts` | Carry `genVersion`; compute `isStale` per merged section |
-| `lib/html-doc/render-dig-deeper.ts` | Render `↻ outdated` control for stale sections; CSS (muted, like `.dig-toggle`) |
-| `lib/html-doc/nav.ts` (NAV_SCRIPT) | Wire `↻ outdated` click → `_startDocDig` for that section; extend expand-all to "refresh outdated" |
+| `lib/dig/companion-doc.ts` | Add `genVersion` to `DugSection` + serialize + parse (multi-site: type, regex, 2 commit blocks, parseDugSections return — §4.2); remove dead doc-level `digVersion` literal + fix its 3 tests |
+| dig route (`app/api/videos/[id]/dig/[sectionId]/route.ts`) | Stamp `section.genVersion = DIG_GENERATOR_VERSION` in the upserted section literal (`:160-166`) |
+| `lib/html-doc/dig-merge.ts` | Add `isStale` to `MergedSection`; compute from `genVersion` at **both** construction sites (`:100`, `:148`); import `DIG_GENERATOR_VERSION` |
+| `lib/html-doc/render-dig-deeper.ts` | Render distinct `.dig-refresh[data-section]` control for `isStale` sections; CSS (muted, like `.dig-toggle`) |
+| `lib/html-doc/nav.ts` (NAV_SCRIPT) | Add a `.dig-refresh` branch to click delegation → `_startDocDig`; **separate task**: extend expand-all selector + cost to include `.dig-refresh` (§4.5) |
 
 ---
 
@@ -107,18 +123,18 @@ Render exactly as today — no badge, no behavior change.
 ## 7. Testing
 
 - **Unit (`slide-tokens`/`slides`):** unchanged behavior given tokens; confirm zero tokens → no exec calls (already covered).
-- **Unit (`companion-doc`):** `genVersion` round-trips (serialize→parse); missing `genVersion` parses as `0`; upsert stamps current version.
-- **Unit (`dig-merge`):** `isStale` true when `genVersion < current`, false when equal; missing → stale.
-- **Unit (`render-dig-deeper`):** stale section emits `↻ outdated` control; fresh section does not; control text/markup stable.
+- **Unit (`companion-doc`):** `genVersion` round-trips (serialize→parse); **legacy doc with old doc-level `digVersion` line still parses (line ignored) and per-section `genVersion` defaults to `0`**; missing `genVersion` → `0`; upsert stamps current version. Update the 3 fixtures embedding the old `digVersion` literal (L2).
+- **Unit (`dig-merge`):** `isStale` true when `genVersion < current`, false when equal; missing → stale; verify computed at **both** construction sites (matched at `:100` and `:148`).
+- **Unit (`render-dig-deeper`):** stale section emits `.dig-refresh` control; fresh section does not; control class distinct from `.dig-toggle`/`.dig-trigger`.
 - **Prompt:** `buildDigPrompt` contains the transcribe-code instruction and the graphics-only restriction; does NOT contain "code screen"; states zero-slides-normal.
-- **E2E:** stale section shows `↻ outdated`; clicking re-digs (stubbed POST→SSE) and clears the badge; opening a doc fires **no** dig POST until the click; expand-all "refresh outdated" serially refreshes stale sections.
+- **E2E:** stale section shows `.dig-refresh`; clicking re-digs (stubbed POST→SSE) and the **badge is gone after the swap** (assert absence post-swap, not just that a POST fired); opening a doc fires **no** dig POST until the click; (refresh-all task) expand-all selects + refreshes `.dig-refresh` sections.
 
 ---
 
 ## 8. Open Questions
 
 - **O-1 (prompt sufficiency):** Part 1 relies on Gemini's judgment of "true graphic vs text." Since Gemini is clip-grounded this is expected to work; if real output still over-captures, a post-capture heuristic (OCR text-density drop) is a **deferred** fallback — not in this scope (YAGNI).
-- **O-2 (refresh-all):** extending `⤢ expand all` to "refresh outdated" is included as low-cost reuse; if it complicates the plan, it can ship as a fast-follow while per-section `↻` ships first.
+- **O-2 (refresh-all):** ships as a **separate fast-follow task after** per-section `↻` (§4.5). It is **not** free reuse — the expand-all batch selects `.dig-trigger` only and would miss stale sections (review H1); selector + cost-estimate must change.
 
 ---
 
