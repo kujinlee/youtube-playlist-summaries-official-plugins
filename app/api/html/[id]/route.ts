@@ -105,6 +105,19 @@ export async function GET(request: Request, { params }: Params) {
   }
 
   if (type === 'dig-deeper') {
+    // Companion doc path containment — checked first so it has independent coverage.
+    // This must fire before we derive summaryMdPath (which shares relDir), giving the
+    // companion-path assertWithin its own reachable 400 path.
+    let digDeeperPath: string | null = null;
+    if (video.digDeeperMd) {
+      digDeeperPath = path.resolve(outputFolder, video.digDeeperMd);
+      try {
+        assertWithin(outputFolder, digDeeperPath);
+      } catch {
+        return new Response(JSON.stringify({ error: 'invalid path' }), { status: 400 });
+      }
+    }
+
     // Derive base from index fields only (never from URL).
     // If digDeeperMd is set: strip trailing "-dig-deeper.md"; else use summaryMd sans ".md".
     let base: string;
@@ -144,17 +157,6 @@ export async function GET(request: Request, { params }: Params) {
       return new Response(JSON.stringify({ error: 'invalid path' }), { status: 400 });
     }
 
-    // Companion doc path containment (only when digDeeperMd is set).
-    let digDeeperPath: string | null = null;
-    if (video.digDeeperMd) {
-      digDeeperPath = path.resolve(outputFolder, video.digDeeperMd);
-      try {
-        assertWithin(outputFolder, digDeeperPath);
-      } catch {
-        return new Response(JSON.stringify({ error: 'invalid path' }), { status: 400 });
-      }
-    }
-
     // Read summary markdown — missing → graceful "unavailable" page.
     let summaryMdContent: string;
     try {
@@ -178,10 +180,17 @@ export async function GET(request: Request, { params }: Params) {
     // Read model envelope (null when absent).
     const envelope = readModelEnvelope(outputFolder, base);
 
-    // Read dug sections (empty when companion absent or digDeeperMd null).
-    const dug = (digDeeperPath !== null)
-      ? parseDugSections(fs.readFileSync(digDeeperPath, 'utf-8'))
-      : [];
+    // Read dug sections (empty when companion absent, digDeeperMd null, or file missing on disk).
+    // A stale index entry pointing to a deleted file is treated as "nothing dug yet" — skeleton 200.
+    let dug: ReturnType<typeof parseDugSections> = [];
+    if (digDeeperPath !== null) {
+      try {
+        dug = parseDugSections(fs.readFileSync(digDeeperPath, 'utf8'));
+      } catch {
+        // ENOENT or other read error: companion is missing → render skeleton (dug = []).
+        // containment was already asserted above, so this cannot be a traversal violation.
+      }
+    }
 
     return serveHtml(renderDigDeeperDoc({ summary: parsed, envelope, dug, mdPath: summaryMdPath, videoId }));
   }

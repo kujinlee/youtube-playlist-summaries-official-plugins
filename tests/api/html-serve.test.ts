@@ -242,6 +242,35 @@ it('dig-deeper B6: orphan companion section → orphan region rendered, 200', as
   expect(body).toContain('Orphan Section');
 });
 
+it('dig-deeper B7: digDeeperMd set but file absent on disk → skeleton 200 (not 500)', async () => {
+  // Index says companion exists, but the file has been deleted from disk.
+  // Route must NOT throw ENOENT → must return a valid skeleton HTML with all summary sections.
+  const summaryRel = writeSummaryMd('video.md');
+  writeIndex(video({
+    summaryMd: summaryRel,
+    digDeeperMd: 'wiki/video-dig-deeper.md', // set in index, but NOT written to disk
+  }));
+  const res = await GET(digDeeperUrl(), ctx);
+  expect(res.status).toBe(200);
+  const body = await res.text();
+  expect(body).toContain('Introduction');
+  expect(body).toContain('Conclusion');
+  expect(body).toContain('<!DOCTYPE html');
+});
+
+it('dig-deeper B8: companion-path ALONE escapes outputFolder → 400 (companion assertWithin fires first)', async () => {
+  // The route now checks digDeeperPath containment BEFORE deriving summaryMdPath,
+  // so this test exercises the companion-path assertWithin independently.
+  // summaryMd is safe; digDeeperMd escapes → companion assertWithin fires → 400.
+  const summaryRel = writeSummaryMd('video.md');
+  writeIndex(video({
+    summaryMd: summaryRel,                         // safe: wiki/video.md → stays inside dir
+    digDeeperMd: '../../../etc/companion.md',      // escapes outputFolder immediately
+  }));
+  const res = await GET(digDeeperUrl(), ctx);
+  expect(res.status).toBe(400);
+});
+
 it('unknown type still 400 (B-2)', async () => {
   writeIndex(video({ summaryHtml: 'htmls/a.html' }));
   const base = `http://localhost/api/html/${VIDEO_ID}?outputFolder=${encodeURIComponent(dir)}`;
