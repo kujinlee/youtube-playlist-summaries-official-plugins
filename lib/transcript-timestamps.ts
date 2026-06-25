@@ -63,6 +63,7 @@ export function resolveTranscriptTokens(
   markdown: string,
   segments: TranscriptSegment[],
   videoId: string | null,
+  videoDuration_param?: number,
 ): string {
   const lines = markdown.split('\n');
 
@@ -82,7 +83,7 @@ export function resolveTranscriptTokens(
   const tokenSet = new Set(tokens.map((t) => t.lineIndex));
 
   const lastSeg = segments[segments.length - 1];
-  const videoDuration = segments.length > 0 ? Math.floor(lastSeg.offset + lastSeg.duration) : NaN;
+  const videoDuration = videoDuration_param ?? (segments.length > 0 ? Math.floor(lastSeg.offset + lastSeg.duration) : NaN);
   const globalOk = N > 0 && !!videoId && segments.length > 0 && Number.isFinite(videoDuration);
 
   // Select the kept tokens (candidate filter + longest strictly-increasing-offset subsequence).

@@ -58,6 +58,8 @@ export const VideoSchema = z.object({
   deepDivePdf: z.string().nullable(),
   summaryHtml: z.string().nullable().optional(),
   deepDiveHtml: z.string().nullable().optional(),
+  digDeeperMd: z.string().nullable().optional(),
+  digDeeperHtml: z.string().nullable().optional(),
   deepDiveVersion: DocVersionSchema.optional(), // absent ⇒ pre-feature {1,0}; stamped to CURRENT_DEEP_DIVE_VERSION on (re)generation
   processedAt: z.string().datetime(),
   videoType: VideoTypeSchema.optional(),

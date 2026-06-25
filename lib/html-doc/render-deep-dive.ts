@@ -145,7 +145,7 @@ html.theme-ready .dd{transition:background-color .2s,color .2s}
 @media print{body{background:#fff}.dd{box-shadow:none}#theme-toggle{display:none}}
 `;
 
-function tsAnchor(ts: { label: string; url: string } | null): string {
+export function tsAnchor(ts: { label: string; url: string } | null): string {
   return ts
     ? ` <a class="ts" href="${esc(ts.url)}" target="_blank" rel="noopener noreferrer">(${esc(ts.label)})</a>`
     : '';

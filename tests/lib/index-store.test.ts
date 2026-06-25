@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import { readIndex, updateVideoFields, upsertVideo, writeIndex } from '../../lib/index-store';
 import type { PlaylistIndex, Video } from '../../types';
+import { VideoSchema } from '../../types';
 
 const TEST_DIR = path.join(os.homedir(), `.test-index-store-${crypto.randomUUID()}`);
 
@@ -160,5 +161,18 @@ describe('updateVideoFields', () => {
     expect(() => updateVideoFields(dir, '../passwd', {})).toThrow(
       expect.objectContaining({ statusCode: 400 }),
     );
+  });
+});
+
+describe('VideoSchema', () => {
+  it('carries digDeeperMd/digDeeperHtml fields', () => {
+    const baseVideo = makeVideo();
+    const parsed = VideoSchema.parse({
+      ...baseVideo,
+      digDeeperMd: 'x-dig-deeper.md',
+      digDeeperHtml: 'x-dig-deeper.html',
+    });
+    expect(parsed.digDeeperMd).toBe('x-dig-deeper.md');
+    expect(parsed.digDeeperHtml).toBe('x-dig-deeper.html');
   });
 });

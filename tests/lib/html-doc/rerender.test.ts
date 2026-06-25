@@ -74,13 +74,31 @@ describe('reRenderSummaryHtml', () => {
   it('re-renders from the cached model without calling Gemini', () => {
     writeModelEnvelope(dir, 'a-title', envelope());
     const res = reRenderSummaryHtml(VIDEO_ID, dir);
-    expect(res).toEqual({ status: 'rerendered', htmlPath: 'htmls/a-title.html' });
+    expect(res.status).toBe('rerendered');
+    expect(res).toHaveProperty('htmlPath', 'htmls/a-title.html');
+    expect(res).toHaveProperty('html');
     const html = fs.readFileSync(path.join(dir, 'htmls', 'a-title.html'), 'utf-8');
     expect(html).toContain('Lead one.');
     expect(html).toContain('A Title');   // from parsed .md (title)
     expect(html).toContain('Core idea.'); // from parsed .md (TL;DR)
     expect(html).toContain('id="theme-toggle"'); // current renderer applied
     expect(gemini.generateMagazineModel as jest.Mock).not.toHaveBeenCalled();
+  });
+
+  it('includes rendered html in the rerendered result', () => {
+    writeModelEnvelope(dir, 'a-title', envelope());
+    const res = reRenderSummaryHtml(VIDEO_ID, dir);
+    expect(res.status).toBe('rerendered');
+    expect(res).toHaveProperty('html');
+    if (res.status === 'rerendered') {
+      expect(res.html).toBeDefined();
+      expect(typeof res.html).toBe('string');
+      expect(res.html.length).toBeGreaterThan(0);
+      expect(res.html).toContain('magazine-skim v2');
+      // Verify result.html matches what's on disk
+      const diskHtml = fs.readFileSync(path.join(dir, 'htmls', 'a-title.html'), 'utf-8');
+      expect(res.html).toBe(diskHtml);
+    }
   });
 
   it('skips when no model file exists', () => {

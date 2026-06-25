@@ -6,6 +6,8 @@ import {
 } from './theme';
 import { digControl, NAV_SCRIPT, NAV_CSS } from './nav';
 
+export const GENERATOR_VERSION = 'magazine-skim v2';
+
 const SERIF = `Georgia, 'Nanum Myeongjo', 'Apple SD Gothic Neo', 'Times New Roman', serif`;
 
 // render.ts has `meta` between `ink` and `rule`; spread the shared pre/post around it.
@@ -80,7 +82,7 @@ export function renderMagazineHtml(parsed: ParsedSummary, model: MagazineModel, 
         : '';
       const startSec = s.timeRange ? s.timeRange.startSec : null;
       const dataStart = startSec != null ? ` data-start="${startSec}"` : '';
-      const dig = (hasDeepDive && startSec != null) ? digControl('deep-dive', startSec) : '';
+      const dig = startSec != null ? digControl(startSec) : '';
       const bullets = m.bullets
         .map((b) => `<li>${esc(b.text)}</li>`)
         .join('');
@@ -101,7 +103,7 @@ export function renderMagazineHtml(parsed: ParsedSummary, model: MagazineModel, 
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="generator" content="magazine-skim v1">
+<meta name="generator" content="${GENERATOR_VERSION}">
 <meta name="source-md" content="${esc(sourceMd)}">
 <meta name="video-id" content="${esc(parsed.videoId ?? '')}">
 <title>${esc(parsed.title)}</title>
