@@ -1,7 +1,7 @@
 import { mkdtemp, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { upsertDugSection, readDugSectionIds } from '@/lib/dig/companion-doc';
+import { upsertDugSection, readDugSectionIds, parseDugSections } from '@/lib/dig/companion-doc';
 
 const base = (p: string, section: any) => ({
   digDeeperPath: p,
@@ -267,4 +267,124 @@ test('M-4: bodyMarkdown containing sentinel strings survives round-trip without 
 
   const md = await readFile(p, 'utf8');
   expect(md).toContain('clean');
+});
+
+// ── parseDugSections tests (pure string → DugSection[]) ──────────────────────
+// Fixtures are built using upsertDugSection (real serializer), then read from
+// disk as strings — not hand-rolled. (review L2 compliance)
+
+describe('parseDugSections', () => {
+  // Helper: write N sections via upsertDugSection, return the raw file string.
+  async function buildFixture(
+    sections: Array<{ sectionId: number; startSec: number; title: string; bodyMarkdown: string; generatedAt: string }>,
+  ): Promise<string> {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'dig-parse-'));
+    const p = path.join(dir, 'v-dig-deeper.md');
+    for (const s of sections) {
+      await upsertDugSection(base(p, s));
+    }
+    return readFile(p, 'utf8');
+  }
+
+  // Behavior 1: multi-block → N DugSections, ids in order, each with
+  //             frontmatter startSec+generatedAt AND body title+bodyMarkdown.
+  test('B1: multi-block → N sections, ids ordered, all fields populated', async () => {
+    const content = await buildFixture([
+      { sectionId: 312, startSec: 312, title: 'Loop', bodyMarkdown: 'loop body', generatedAt: '2024-01-01T00:00:00Z' },
+      { sectionId: 100, startSec: 100, title: 'Intro', bodyMarkdown: 'intro body', generatedAt: '2024-01-02T00:00:00Z' },
+    ]);
+
+    const sections = parseDugSections(content);
+
+    // ids in ascending startSec order (serializer sorts by startSec)
+    expect(sections.map((s) => s.sectionId)).toEqual([100, 312]);
+
+    // sectionId=100 (Intro)
+    const intro = sections.find((s) => s.sectionId === 100)!;
+    expect(intro.startSec).toBe(100);
+    expect(intro.title).toBe('Intro');
+    expect(intro.bodyMarkdown).toBe('intro body');
+    expect(intro.generatedAt).toBe('2024-01-02T00:00:00Z');
+
+    // sectionId=312 (Loop)
+    const loop = sections.find((s) => s.sectionId === 312)!;
+    expect(loop.startSec).toBe(312);
+    expect(loop.title).toBe('Loop');
+    expect(loop.bodyMarkdown).toBe('loop body');
+    expect(loop.generatedAt).toBe('2024-01-01T00:00:00Z');
+  });
+
+  // Behavior 2: bodyMarkdown excludes the `## ` title line itself.
+  test('B2: bodyMarkdown excludes the ## title line', async () => {
+    const content = await buildFixture([
+      { sectionId: 50, startSec: 50, title: 'MySection', bodyMarkdown: 'actual content here', generatedAt: 'T' },
+    ]);
+
+    const [section] = parseDugSections(content);
+    expect(section.bodyMarkdown).not.toMatch(/^## MySection/m);
+    expect(section.bodyMarkdown).toContain('actual content here');
+  });
+
+  // Behavior 3: ### subheadings inside bodyMarkdown are preserved.
+  test('B3: ### subheadings inside bodyMarkdown are preserved', async () => {
+    const bodyWithSubheadings = 'Intro.\n\n### Sub A\n\nContent A.\n\n### Sub B\n\nContent B.';
+    const content = await buildFixture([
+      { sectionId: 200, startSec: 200, title: 'Parent', bodyMarkdown: bodyWithSubheadings, generatedAt: 'T' },
+    ]);
+
+    const [section] = parseDugSections(content);
+    expect(section.bodyMarkdown).toContain('### Sub A');
+    expect(section.bodyMarkdown).toContain('### Sub B');
+    expect(section.bodyMarkdown).toContain('Content A.');
+    expect(section.bodyMarkdown).toContain('Content B.');
+  });
+
+  // Behavior 4: no sentinel blocks → returns [].
+  test('B4: no sentinels → returns []', async () => {
+    // A file without any sections key: frontmatter only, no dig-section sentinels
+    const content = '---\ntitle: "X"\nvideoId: "abc"\nlanguage: "en"\nsourceVideoUrl: "https://yt/x"\ndigVersion: { major: 1, minor: 0 }\nsections: []\n---\n';
+    const sections = parseDugSections(content);
+    expect(sections).toEqual([]);
+  });
+
+  // Behavior 5: unclosed sentinel → that block is skipped, no throw.
+  test('B5: unclosed sentinel is skipped, no throw', async () => {
+    // Build a valid 2-section fixture first, then corrupt one sentinel to be unclosed
+    const validContent = await buildFixture([
+      { sectionId: 100, startSec: 100, title: 'Good', bodyMarkdown: 'good body', generatedAt: 'T1' },
+      { sectionId: 200, startSec: 200, title: 'Bad', bodyMarkdown: 'bad body', generatedAt: 'T2' },
+    ]);
+
+    // Remove the closing sentinel of section 200 to make it unclosed
+    // The serializer produces: <!-- /dig-section --> after each block
+    // We'll remove the second closing sentinel
+    const corrupted = validContent.replace(
+      /<!-- dig-section: 200 -->([\s\S]*?)<!-- \/dig-section -->/,
+      '<!-- dig-section: 200 -->\n## Bad\n\nbad body without closing sentinel',
+    );
+
+    // Should not throw; section 200 skipped (unclosed); section 100 still parsed
+    let sections: ReturnType<typeof parseDugSections> = [];
+    expect(() => { sections = parseDugSections(corrupted); }).not.toThrow();
+    // Section 100 (properly closed) should still be returned
+    const ids = sections.map((s) => s.sectionId);
+    expect(ids).toContain(100);
+    expect(ids).not.toContain(200);
+  });
+
+  // Behavior 6: parseDugSections(content).map(s=>s.sectionId) === readDugSectionIds content
+  test('B6: sectionIds from parseDugSections match readDugSectionIds', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'dig-parse-'));
+    const p = path.join(dir, 'v-dig-deeper.md');
+
+    await upsertDugSection(base(p, { sectionId: 50, startSec: 50, title: 'A', bodyMarkdown: 'a', generatedAt: 'T1' }));
+    await upsertDugSection(base(p, { sectionId: 300, startSec: 300, title: 'C', bodyMarkdown: 'c', generatedAt: 'T2' }));
+    await upsertDugSection(base(p, { sectionId: 150, startSec: 150, title: 'B', bodyMarkdown: 'b', generatedAt: 'T3' }));
+
+    const content = await readFile(p, 'utf8');
+    const fromParser = parseDugSections(content).map((s) => s.sectionId);
+    const fromReader = await readDugSectionIds(p);
+
+    expect(fromParser).toEqual(fromReader);
+  });
 });

@@ -286,6 +286,45 @@ function parseBodySections(
   return result;
 }
 
+// ── Pure parser ───────────────────────────────────────────────────────────────
+
+/**
+ * Parse the raw string content of a companion doc into an array of DugSections.
+ *
+ * Pure and synchronous — no filesystem access. Combines data from both
+ * frontmatter (`sectionId`, `startSec`, `generatedAt`) and body sentinel blocks
+ * (`title`, `bodyMarkdown`). Sections are returned in frontmatter order (which
+ * the serializer guarantees is ascending startSec).
+ *
+ * - Unclosed sentinel blocks are skipped without throwing.
+ * - Content with no sentinel blocks returns `[]`.
+ */
+export function parseDugSections(content: string): DugSection[] {
+  const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  if (!fmMatch) return [];
+
+  const [, fmText, bodyText] = fmMatch;
+  const fm = parseFrontmatter(fmText);
+  const bodyMap = parseBodySections(bodyText, fm.sections);
+
+  return fm.sections.flatMap((s) => {
+    const body = bodyMap.get(s.sectionId);
+    // Skip sections whose sentinel block is absent or unclosed (no closing tag
+    // means the regex didn't match, so bodyMap has no entry for this sectionId).
+    if (!body) return [];
+    return [
+      {
+        sectionId: s.sectionId,
+        startSec: s.startSec,
+        // Title sourced from body map (sentinel block) first, then frontmatter
+        title: body.title !== '' ? body.title : s.title,
+        bodyMarkdown: body.bodyMarkdown,
+        generatedAt: s.generatedAt,
+      },
+    ];
+  });
+}
+
 // ── Read existing doc ─────────────────────────────────────────────────────────
 
 async function readCompanionDoc(filePath: string): Promise<CompanionDoc | null> {
@@ -296,26 +335,15 @@ async function readCompanionDoc(filePath: string): Promise<CompanionDoc | null> 
     return null;
   }
 
-  // Split into frontmatter and body
+  // Split into frontmatter and body to get doc-level fields
   const fmMatch = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!fmMatch) return null;
 
-  const [, fmText, bodyText] = fmMatch;
+  const [, fmText] = fmMatch;
   const fm = parseFrontmatter(fmText);
 
-  const bodyMap = parseBodySections(bodyText, fm.sections);
-
-  const sections: DugSection[] = fm.sections.map((s) => {
-    const body = bodyMap.get(s.sectionId);
-    return {
-      sectionId: s.sectionId,
-      startSec: s.startSec,
-      // Title sourced from body map (sentinel block) first, then frontmatter
-      title: body?.title ?? s.title,
-      bodyMarkdown: body?.bodyMarkdown ?? '',
-      generatedAt: s.generatedAt,
-    };
-  });
+  // Delegate section parsing to the pure parser
+  const sections = parseDugSections(raw);
 
   return {
     videoTitle: fm.videoTitle,
