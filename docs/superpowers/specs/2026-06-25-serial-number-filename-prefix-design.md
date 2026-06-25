@@ -1,7 +1,7 @@
 # Design — Serial-Number Filename Prefix
 
 **Date:** 2026-06-25
-**Status:** Approved (design) — pending spec review → implementation plan
+**Status:** Adversarial-reviewed (Claude fallback; F1/F2 HIGH + F3/F4/F6/F7/F8 addressed — see `docs/reviews/spec-serial-number-filename-prefix-review.md`) — pending user spec-review → implementation plan
 **Related:** [`2026-06-23-playlist-index-current-position-design.md`](2026-06-23-playlist-index-current-position-design.md) (the `playlistIndex` change this spec deliberately does NOT reuse)
 
 ---
@@ -90,38 +90,47 @@ models/001_software-fundamentals-matter-more-than-ever-matt-pocock.json
 
 ## 5. Serial Assignment
 
+The serial is computed from `max(serialNumber)` over the **whole folder index** (including archived/removed videos, which retain their serial) `+ 1`, falling back to `1`. The index `serialNumber` field — never the filename — is the source for `max`.
+
 ### 5.1 Going forward (ingest)
-In the ingestion pipeline (`lib/pipeline.ts`), when a new video first produces a summary file:
-```
-serialNumber = max(serialNumber over all videos in this folder's index) + 1   // 1 if none
-```
-Assigned once and written to the index. The slug + collision logic runs first; the serial prefix is applied to the resolved base name.
+In the ingestion pipeline (`lib/pipeline.ts`), when a new video first produces a summary file, assign `serialNumber = max(serialNumber over folder index) + 1`. Write-once. The slug + collision logic runs first; the prefix is applied to the resolved base name.
+
+**Concurrency (F6 / ADR-005):** `playlist-index.json` is written without locking (ADR-005 single-writer assumption). To avoid two concurrent same-folder ingests reading the same `max` and assigning a duplicate serial, the `max+1` read **must occur inside the same read-modify-write critical section** as the `upsertVideo` that persists the new video (not as a separate earlier read). This narrows but does not eliminate the race; the app is single-user, so we **document** the residual risk rather than add locking. A concurrent ingest *and* a `--apply` migration on the same folder is disallowed (operator constraint, stated in script help).
 
 ### 5.2 Backfill (existing files — one-time)
-Order all videos **that currently have output files** by `processedAt` ascending, tie-break by `videoId` (deterministic). Assign `1..N` in that order. This is the most faithful proxy for "ingestion order" for the existing backlog.
+Order all videos **that currently have output files** by `processedAt` ascending (a required, always-populated schema field), tie-break by `videoId` (deterministic, total order). Assign `1..N` in that order. Most faithful proxy for "ingestion order" for the existing backlog.
 
 ### 5.3 Monotonicity / no reuse
-- Removed/archived videos **retain** their `serialNumber` and their (renamed) files on disk, so `max + 1` never reuses a number.
+- Removed/archived videos **retain** their `serialNumber` and their (renamed) files, so `max + 1` never reuses a number.
 - `serialNumber` is never recomputed for a video that already has one.
+- **Orphan recovery (F7):** `recoverOrphanedVideos` / `reconstructVideo` (`lib/pipeline.ts`) rebuilds a video from files on disk and does **not** set `serialNumber`. After this feature ships, a recovered file may be prefixed (`NNN_<slug>.md`). Recovery is therefore the **one** place permitted to parse the serial back out of the filename: `reconstructVideo` must adopt the leading `NNN_` (if present) into `serialNumber`, so the field and filename never drift and a later `max+1` counts it.
 
 ---
 
 ## 6. Migration Mechanism (Approach A)
 
-A dedicated migration script — **dry-run by default**, matching the repo's existing dry-run-default repair precedent (timestamp guard/audit/repair, PR #17).
+A dedicated migration script `scripts/backfill-serial-prefix.ts` — **dry-run by default**, matching the repo's dry-run-default repair precedent (timestamp guard/audit/repair, PR #17). `--apply` executes; `--folder <path>` targets one playlist folder.
 
-`scripts/backfill-serial-prefix.ts`:
-- **Default (dry-run):** prints the planned per-video rename map (old → new for every artifact) and the assigned serial; touches nothing.
-- **`--apply`:** executes. Per video, idempotently:
-  1. Resolve serial (existing `serialNumber`, else assign per §5.2).
-  2. Rename each existing artifact file on disk to its `NNN_`-prefixed name.
-  3. Set `serialNumber` and update the 8 index path-fields (`summaryMd`, `summaryPdf`, `deepDiveMd`, `deepDivePdf`, `summaryHtml`, `deepDiveHtml`, `digDeeperMd`, `digDeeperHtml`).
-  4. Re-render the derived HTML so `<meta name="source-md">` reflects the new `.md` name (offline render from index + model; no external API).
-  5. Single read-modify-write of `playlist-index.json` (consistent with ADR-005).
-- **Idempotent:** a file already matching `NNN_<slug>` is skipped; re-running is a no-op.
-- **`--folder <path>`** to target a specific playlist folder.
+The migration is **two-phase** specifically to be crash-resumable without serial drift (addresses F1):
 
-**Remove** `migrateToSlugFilenames()` and its `GET /api/videos` invocation (it would otherwise strip the new prefixes). Confirm no other caller depends on it.
+### Phase A — assign serials (index only, atomic)
+Order target videos (those with output files, lacking a `serialNumber`) per §5.2 and assign `1..N` continuing from `max+1`. Persist **all** new `serialNumber`s in a **single atomic** `playlist-index.json` write (existing temp-file→rename write path). No file operations occur in Phase A.
+
+Why first: once `serialNumber` is committed, every target filename in Phase B is a **pure, deterministic function** of the committed serial + current slug-base. A crash + resume recomputes the **identical** names — assignment can never diverge (which was the F1 data-loss path). Phase A is idempotent: videos that already have a `serialNumber` are skipped.
+
+### Phase B — rename files + fix references (per-video, idempotent)
+For each video with a `serialNumber`, derive the base from its **current index path-field** (stripping any existing leading `NNN_` to avoid double-prefix), then for every artifact that exists:
+
+1. **Compute** target = `<dir>/<NNN>_<base><suffix><ext>`.
+2. **Rename guard (F2):** rename **only if** `exists(src) && !exists(dst)`. If `dst` already exists and is the intended file (basename matches the committed serial), treat as already-done and skip. If `dst` exists with a *different* origin, **abort this video** with a logged conflict — never clobber (mirrors `migrateToSlugFilenames:222`).
+3. **Provenance (F3/F4) — meta-rewrite, not re-render:** in each renamed rendered HTML (summary `render.ts:107`, deep-dive `render-deep-dive.ts:230`, dig-deeper `render-dig-deeper.ts:268`), do a targeted string-rewrite of `<meta name="source-md" content="OLD">` → new name. Also rewrite the model envelope's internal `sourceMd` (`model-store.ts:14`) when renaming `models/<base>.json`. This is deterministic and **does not depend on a model file existing** (old summaries predating the persisted-model feature have no `models/<base>.json`; re-render would no-op on them — `rerender.ts:38` `skipped-no-model`). Missing HTML/model → that step is a no-op, not a failure.
+4. **Per-video index update (F1):** immediately persist this video's updated `serialNumber` (already set in Phase A) and its 8 path-fields via a single-video update (`updateVideoFields`), bounding blast radius to one video. Do **not** batch all videos into one end-of-run write.
+
+**Archived files (F8):** archived videos still have index entries with path-fields, but their files live under `archived/<relPath>` (archive moves only `summaryMd/summaryPdf/deepDiveMd/deepDivePdf`, not `digDeeper*`/`*Html`/models). Phase B resolves each artifact at its **actual on-disk location** (root or `archived/`) and renames in place, keeping the index field's stored relative form consistent. (Edge case 3 below corrected accordingly.)
+
+**The 8 index path-fields:** `summaryMd`, `summaryPdf`, `deepDiveMd`, `deepDivePdf`, `summaryHtml`, `deepDiveHtml`, `digDeeperMd`, `digDeeperHtml` (verified complete — `types/index.ts:55-62`). The `models/<base>.json` file is **not** an index field but **is** renamed (derived from `summaryMd` base).
+
+**Remove the stripper:** delete `migrateToSlugFilenames()` and its single caller at `app/api/videos/route.ts:71`. Verified: it has no other caller, and the adjacent `recoverOrphanedVideos` call (line 70) is an independent try/catch — removal does not affect orphan recovery (F7).
 
 ---
 
@@ -129,12 +138,14 @@ A dedicated migration script — **dry-run by default**, matching the repo's exi
 
 | Reference | Handling |
 |---|---|
-| `playlist-index.json` path fields (8) | Updated in-place during migration / set at ingest |
-| `<meta name="source-md">` in rendered HTML | Fixed by re-render step (§6.4) |
+| `playlist-index.json` path fields (8) | Updated per-video during Phase B / set at ingest |
+| `<meta name="source-md">` in rendered HTML — **3 emitters** (summary `render.ts:107`, deep-dive `render-deep-dive.ts:230`, dig-deeper `render-dig-deeper.ts:268`) | Targeted meta string-rewrite (§6 Phase B step 3), not re-render |
+| Model envelope internal `sourceMd` (`model-store.ts:14`) | Rewritten when `models/<base>.json` is renamed |
 | Obsidian vault links (`VideoMenu.tsx`) | Auto-correct — derived client-side from index fields |
-| Dig-deeper companion name (`route.ts`) | Derived from `summaryMd` basename at generation → naturally picks up the prefix once `summaryMd` is prefixed |
-| Serve route base inference (`app/api/html/[id]/route.ts`) | Operates on index `summaryMd`/`digDeeperMd` basenames → works post-rename |
+| Dig-deeper companion name (`dig/[sectionId]/route.ts:150`) | Derived from `summaryMd` basename at generation → a fresh re-dig self-corrects to the prefixed name |
+| Serve route base inference (`app/api/html/[id]/route.ts:122-142`) | Operates on index `summaryMd`/`digDeeperMd` basenames → works post-rename |
 | Slide assets (`assets/<videoId>/…`) | Unaffected (keyed by videoId) |
+| Orphan recovery (`reconstructVideo`) | Must adopt leading `NNN_` from recovered filename into `serialNumber` (§5.3) |
 
 ---
 
@@ -144,28 +155,34 @@ A dedicated migration script — **dry-run by default**, matching the repo's exi
 |---|---|---|
 | 1 | Video in playlist, no summary file yet | No `serialNumber`, no rename; gets one when first summarized |
 | 2 | Slug collision (same title) | `-2` suffix on slug, then prefixed: `005_hello-world-2.md` |
-| 3 | Removed/archived video with files | Keeps serial + (renamed) files; counter never reuses |
-| 4 | Re-run migration | Idempotent no-op for already-prefixed files |
-| 5 | Partial failure mid-migration | Re-run resumes; already-renamed entries skipped |
-| 6 | serial > 999 | Becomes `1000_` (4 digits); see Open Question O-1 on sort at the boundary |
-| 7 | A derived file (e.g. pdf) missing while md exists | Rename only what exists; index field stays null |
-| 8 | New ingest while some files unprefixed | `max+1` still correct (reads `serialNumber` field, not filenames) |
+| 3 | Removed/archived video with files (under `archived/`) | Files renamed in place at their actual location; serial retained; counter never reuses (F8) |
+| 4 | Re-run migration | Idempotent: Phase A skips videos with a serial; Phase B skips files already at the committed `NNN_` name |
+| 5 | Crash mid-migration, then resume | Safe (F1): Phase A serial is committed atomically first, so Phase B target names are deterministic on resume — no divergent reassignment; per-video index writes bound the blast radius |
+| 6 | Rename target `NNN_<slug>` already exists | If it's the intended file → skip; if different origin → abort that video, log conflict, **no clobber** (F2) |
+| 7 | serial > 999 | Becomes `1000_` (4 digits); see O-1 on lexical sort at the boundary |
+| 8 | A derived file (e.g. pdf) missing while md exists | Rename only what exists; index field stays null; provenance/meta steps no-op |
+| 9 | Old summary with no `models/<base>.json` | Meta-rewrite still fixes `source-md` (no re-render dependency); model rename/envelope-rewrite skipped (F4) |
+| 10 | Concurrent same-folder ingests | Residual race documented (F6); `max+1` read inside the `upsertVideo` critical section; migration `--apply` must not run concurrently with ingest |
+| 11 | Orphaned prefixed file recovered later | `reconstructVideo` adopts the `NNN_` serial into `serialNumber` (F7) |
 
 ---
 
 ## 9. Testing Strategy
 
-- **Unit (`lib/pipeline` + new serial module):** assignment ordering (processedAt asc, tie-break videoId), `max+1`, write-once (no recompute), collision interaction, padding/format (`001`, `1000`).
-- **Unit (migration):** full rename cascade updates all present artifacts + 8 index fields; dry-run emits a plan and writes nothing; idempotent re-run is a no-op; missing-artifact handled.
-- **Component/render:** re-rendered HTML `<meta name="source-md">` equals the new `.md` name.
-- **E2E:** after migration, the serve route (`/api/html/[id]`) resolves the renamed summary + dig-deeper files; Obsidian hrefs in the menu point at prefixed names.
+- **Unit (serial assignment):** ordering (processedAt asc, tie-break videoId), `max+1` continues over archived/removed serials, write-once (no recompute), collision interaction, padding/format (`001`, `1000`).
+- **Unit (Phase A):** assigns to videos lacking a serial; atomic single index write; idempotent (skips videos that already have a serial).
+- **Unit (Phase B):** full rename cascade updates all present artifacts + 8 index fields + `models/<base>.json`; `exists(src)&&!exists(dst)` guard; **conflict-abort** when `dst` exists with different origin (no clobber); **crash-resume** produces identical names (no drift) given a committed serial; archived files renamed under `archived/`; missing artifact / missing model → no-op not failure.
+- **Unit (provenance):** `source-md` meta string-rewrite fixes all 3 emitters (summary/deep-dive/dig-deeper) to the new `.md` name; envelope `sourceMd` rewritten on model rename; old doc with no model file still gets meta fixed.
+- **Unit (recovery):** `reconstructVideo` adopts the `NNN_` serial from a prefixed filename into `serialNumber`.
+- **Dry-run:** emits the full plan and writes nothing to disk or index.
+- **E2E:** after migration, the serve route (`/api/html/[id]`) resolves the renamed summary + dig-deeper files; Obsidian hrefs in the menu point at prefixed names; a fresh re-dig writes a prefixed `digDeeperMd`.
 
 ---
 
 ## 10. Open Questions
 
 - **O-1 (sort past 999):** fixed 3-digit padding means `1000_` sorts before `999_` lexically. Acceptable given per-playlist counts (~236 today). Revisit only if a single playlist approaches 1000. (Default: leave as fixed-3-pad.)
-- **O-2 (re-render vs meta-rewrite):** §6.4 specifies full offline re-render for correctness. If re-render proves heavy, fall back to a targeted string-rewrite of the `source-md` meta. (Default: re-render.)
+- **O-2 (RESOLVED — provenance via meta-rewrite):** §6 Phase B uses a targeted `source-md` meta string-rewrite, **not** re-render. Chosen because re-render no-ops on summaries that predate the persisted-model feature (`rerender.ts:38` `skipped-no-model`) and there are 3 distinct emitters; a string-rewrite is deterministic and dependency-free. Re-render is **not** used by the migration.
 
 ---
 
