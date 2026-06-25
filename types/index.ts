@@ -68,6 +68,7 @@ export const VideoSchema = z.object({
   tags: z.array(z.string()).optional(),
   removedFromPlaylist: z.boolean().optional(),
   playlistIndex: z.number().int().positive().optional(),
+  serialNumber: z.number().int().positive().optional(),
   videoPublishedAt: z.string().datetime().optional(),
   addedToPlaylistAt: z.string().datetime().optional(),
   personalScore: z.number().int().min(1).max(5).optional(),
