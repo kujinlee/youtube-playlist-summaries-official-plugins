@@ -294,7 +294,7 @@ it('continues from max+1 when the index already has serials', async () => {
 });
 ```
 
-(Match the exact slug your test title produces via `slugify`. Reuse the file's existing temp-folder + mock harness; do not invent a new one.)
+(Match the exact slug your test title produces via `slugify`. **The harness is mock-based:** `tests/lib/pipeline.test.ts` uses `jest.mock('../../lib/index-store')` with `mockReadIndex`/`mockUpsertVideo`/`mockWriteIndex` (~L7-29) and a `makeIndexedVideo` builder (~L60). Drive `mockReadIndex.mockReturnValue({ videos: [...] })` to set the existing serials, and assert on `mockUpsertVideo`. Do not invent a new harness. Task 5's `reconstructVideo` tests use a **real temp dir** for `mdPath`, ~L823-834.)
 
 - [ ] **Step 2: Run test — verify it fails**
 
@@ -387,8 +387,8 @@ git commit -m "feat(serial): orphan recovery adopts NNN_ serial from filename"
 
 **Files:**
 - Modify: `lib/pipeline.ts` (delete `migrateToSlugFilenames`, `RANK_PREFIX`, `FILENAME_FIELDS` at ~206-233)
-- Modify: `app/api/videos/route.ts` (remove the `migrateToSlugFilenames(...)` call at ~line 71; keep `recoverOrphanedVideos` at line 70)
-- Test: remove/replace `migrateToSlugFilenames` tests in `tests/lib/pipeline.test.ts` (search for the name)
+- Modify: `app/api/videos/route.ts` — remove the `migrateToSlugFilenames(...)` call (~line 71) **AND drop it from the named import at line 3** (`import { recoverOrphanedVideos, migrateToSlugFilenames }` → `import { recoverOrphanedVideos }`); keep `recoverOrphanedVideos` (line 70) intact (L1)
+- Test: delete the `migrateToSlugFilenames` describe block in `tests/lib/pipeline.test.ts` (~lines 952-1027) **and remove it from the test's import at ~line 12** (L2)
 
 **Interfaces:**
 - Removes: `migrateToSlugFilenames` (no other caller — verified).
@@ -709,10 +709,24 @@ it('is idempotent on re-run (already-prefixed → no-op)', () => {
   expect(r2.renamed).toBe(0);
 });
 
-it('renames archived files under archived/', () => {
+// B1: archived file is renamed UNDER archived/, but the index field stays ROOT-relative.
+it('renames archived files under archived/ and stores a root-relative index field', () => {
   // seed archived video {serialNumber:1, summaryMd:'alpha.md'}; file at archived/alpha.md
   runPhaseB(outputFolder);
   expect(fs.existsSync(path.join(outputFolder, 'archived/001_alpha.md'))).toBe(true);
+  // CRITICAL: index field must be '001_alpha.md', NOT 'archived/001_alpha.md'
+  // (unarchiveVideo reconstructs the archived/ path from a root-relative field).
+  expect(readIndex(outputFolder).videos[0].summaryMd).toBe('001_alpha.md');
+});
+
+// B2: crash mid-video (file renamed, index not yet updated) → re-run must converge the index.
+it('repairs a stale index field when the file was already renamed by a crashed run', () => {
+  // seed video {id:'a', serialNumber:1, summaryMd:'alpha.md'} but the file on disk is ALREADY '001_alpha.md'
+  // (simulating: Phase A committed serial; a prior Phase B renamed the file then crashed before updateVideoFields)
+  const r = runPhaseB(outputFolder);
+  expect(r.renamed).toBe(0); // nothing to physically rename
+  expect(readIndex(outputFolder).videos[0].summaryMd).toBe('001_alpha.md'); // index converged
+  expect(r.conflicts).toEqual([]);
 });
 ```
 
@@ -737,6 +751,11 @@ function resolveOnDisk(outputFolder: string, relPath: string): { abs: string; re
   return null;
 }
 
+/** Physical dst path that mirrors src's actual location (root or archived/), with the new basename. */
+function physicalDst(src: { abs: string }, op: { to: string }): string {
+  return path.join(path.dirname(src.abs), path.basename(op.to));
+}
+
 export function runPhaseB(outputFolder: string): { renamed: number; conflicts: string[] } {
   const index = readIndex(outputFolder);
   const { perVideo } = planMigration(index.videos);
@@ -745,56 +764,66 @@ export function runPhaseB(outputFolder: string): { renamed: number; conflicts: s
 
   for (const plan of perVideo) {
     if (plan.renames.length === 0) continue;
-    const fieldUpdates: Record<string, string> = {};
-    let aborted = false;
-    const renamedHtmlAbs: string[] = [];
-    let mdNewName: string | null = null;
-    let modelNewAbs: string | null = null;
 
-    // First pass: validate no clobber conflicts before touching anything.
+    // ── Pass 1: clobber-conflict check (only when BOTH src present AND a different dst exists). ──
+    let aborted = false;
     for (const op of plan.renames) {
       const src = resolveOnDisk(outputFolder, op.from);
-      if (!src) continue; // nothing to rename for this artifact
-      const dstAbs = path.join(outputFolder, path.dirname(src.rel), path.basename(op.to));
+      if (!src) continue;                                  // src gone → not a conflict (see B2)
+      const dstAbs = physicalDst(src, op);
       if (fs.existsSync(dstAbs) && fs.realpathSync(dstAbs) !== fs.realpathSync(src.abs)) {
-        conflicts.push(plan.id); aborted = true; break;
+        conflicts.push(plan.id); aborted = true; break;    // different file at target → never clobber
       }
     }
     if (aborted) continue;
 
-    // Second pass: perform renames (exists(src) && !exists(dst)).
+    // ── Pass 2: rename (or recognise already-renamed) + collect index updates + provenance targets. ──
+    const fieldUpdates: Record<string, string> = {};       // index value is ALWAYS op.to (root-relative) — B1
+    const htmlTargetsAbs: string[] = [];
+    let mdNewName: string | null = null;
+    let modelTargetAbs: string | null = null;
+
     for (const op of plan.renames) {
+      let targetAbs: string | null = null;
       const src = resolveOnDisk(outputFolder, op.from);
-      if (!src) continue;
-      const dstRel = path.join(path.dirname(src.rel), path.basename(op.to)).replace(/\\/g, '/');
-      const dstAbs = path.join(outputFolder, dstRel);
-      if (!fs.existsSync(dstAbs)) { fs.renameSync(src.abs, dstAbs); renamed++; }
-      if (op.field !== 'model') fieldUpdates[op.field] = dstRel;
+      if (src) {
+        const dstAbs = physicalDst(src, op);
+        if (!fs.existsSync(dstAbs)) { fs.renameSync(src.abs, dstAbs); renamed++; }
+        targetAbs = dstAbs;
+      } else {
+        // B2: src missing — a prior crashed run may have already renamed it. Probe the target.
+        const done = resolveOnDisk(outputFolder, op.to);
+        if (done) targetAbs = done.abs;                    // already-renamed → still converge the index
+        // else: artifact simply doesn't exist → skip entirely
+      }
+      if (targetAbs === null) continue;
+
+      if (op.field !== 'model') fieldUpdates[op.field] = op.to;   // ROOT-relative — B1
       if (op.field === 'summaryMd') mdNewName = path.basename(op.to);
-      if (op.field === 'model') modelNewAbs = dstAbs;
+      if (op.field === 'model') modelTargetAbs = targetAbs;
       if (op.field === 'summaryHtml' || op.field === 'deepDiveHtml' || op.field === 'digDeeperHtml') {
-        renamedHtmlAbs.push(dstAbs);
+        htmlTargetsAbs.push(targetAbs);
       }
     }
 
-    // Provenance: rewrite source-md meta in renamed HTML + envelope sourceMd.
+    // ── Provenance: rewrite source-md meta in the renamed HTML + the envelope sourceMd. Best-effort. ──
     if (mdNewName) {
-      for (const h of renamedHtmlAbs) {
+      for (const h of htmlTargetsAbs) {
         try { fs.writeFileSync(h, rewriteSourceMdMeta(fs.readFileSync(h, 'utf8'), mdNewName)); } catch { /* no-op */ }
       }
-      if (modelNewAbs) {
-        try { fs.writeFileSync(modelNewAbs, rewriteEnvelopeSourceMd(fs.readFileSync(modelNewAbs, 'utf8'), mdNewName)); } catch { /* no-op */ }
+      if (modelTargetAbs) {
+        try { fs.writeFileSync(modelTargetAbs, rewriteEnvelopeSourceMd(fs.readFileSync(modelTargetAbs, 'utf8'), mdNewName)); } catch { /* no-op */ }
       }
     }
 
-    // Per-video index update (bounded blast radius).
+    // ── Per-video index update (bounded blast radius — B1/B2 convergence). ──
     if (Object.keys(fieldUpdates).length > 0) updateVideoFields(outputFolder, plan.id, fieldUpdates);
   }
   return { renamed, conflicts };
 }
 ```
 
-(Note: dig-deeper HTML emits `source-md` from `path.basename(mdPath)` of the dig-deeper md, not the summary md — confirm during implementation whether its meta should reference `001_<base>-dig-deeper.md`; adjust `mdNewName` per-HTML if so. Add a test if behavior differs.)
+(Note — review M1: `digDeeperHtml` is **currently never persisted** to the index — dig-deeper HTML is re-rendered fresh on every GET (`app/api/html/[id]/route.ts:195`). So its rename op never finds a file and its provenance branch never fires today. Keeping `digDeeperHtml` in the field list is harmless and future-proof. Also: the dig-deeper renderer is called with the **summary** `mdPath`, so its `source-md` already points at the summary md — `mdNewName` is correct as-is, no per-HTML special case needed.)
 
 - [ ] **Step 4: Run tests → PASS. Full `npm test`. `npx tsc --noEmit` clean.**
 
@@ -811,7 +840,10 @@ git commit -m "feat(serial): migration Phase B — guarded rename + provenance +
 
 **Files:**
 - Create: `scripts/backfill-serial-prefix.ts`
-- Modify: `package.json` (add a script entry, e.g. `"backfill-serial": "tsx scripts/backfill-serial-prefix.ts"` — match the runner used by existing scripts; check how `scripts/` files are invoked)
+- Modify: `package.json` — add a script entry **matching the existing `scripts/` runner** (repo uses `ts-node` with a CommonJS override; `tsx` is NOT installed):
+  ```json
+  "backfill-serial": "TS_NODE_COMPILER_OPTIONS='{\"module\":\"commonjs\"}' ts-node scripts/backfill-serial-prefix.ts"
+  ```
 - Test: `tests/scripts/backfill-serial-prefix.test.ts` (import the planner + a `dryRunReport(outputFolder)` pure function; smoke-test the report)
 
 **Interfaces:**
@@ -838,9 +870,11 @@ it('dry-run report lists planned renames without touching disk', () => {
 
 ```ts
 // scripts/backfill-serial-prefix.ts
-import { readIndex } from '@/lib/index-store';
-import { planMigration } from '@/lib/serial-migrate';
-import { runPhaseA, runPhaseB } from '@/lib/serial-migrate-exec';
+// NOTE: relative imports — ts-node (CommonJS override) does NOT resolve `@/*` at runtime
+// (only jest's moduleNameMapper does). Scripts in this repo all use relative imports.
+import { readIndex } from '../lib/index-store';
+import { planMigration } from '../lib/serial-migrate';
+import { runPhaseA, runPhaseB } from '../lib/serial-migrate-exec';
 
 export function dryRunReport(outputFolder: string): string {
   const { assignments, perVideo } = planMigration(readIndex(outputFolder).videos);
@@ -880,7 +914,7 @@ git commit -m "feat(serial): dry-run-default backfill CLI (Phase A + Phase B)"
 
 **Spec coverage** (spec §-by-§):
 - §3 data model → Task 1. §4 filename format → Task 2 (+ used in 4, 8). §5.1 ingest → Task 4. §5.2 backfill order → Task 3. §5.3 monotonic/no-reuse → Task 3 (`nextSerial` over all incl archived) + §5.3 orphan adoption → Task 5. §6 Phase A → Task 9; Phase B (guard, archived, per-video write) → Task 10; planner → Task 8; stripper removal → Task 6. §7 references (meta/envelope) → Task 7 (helpers) + Task 10 (applied); Obsidian/dig-name/serve-route need no code (index-derived). §9 testing → each task's tests + Task 11 smoke. §10 O-1/O-2 → format in Task 2 / provenance in Tasks 7+10.
-- **Gap check:** dig-deeper HTML `source-md` references the dig-deeper md basename, not the summary md (noted in Task 10 Step 3) — implementer must confirm and add a test; not a missing task.
+- **Gap check (resolved):** the earlier dig-deeper-provenance worry was a non-issue — `digDeeperHtml` is never persisted, and the dig-deeper renderer receives the summary `mdPath`, so `source-md` is already correct (review M1). No extra task needed.
 
 **Placeholder scan:** No "TBD"/"handle edge cases" — each step has concrete code or an exact command. Integration tests (Tasks 4, 10) reference the existing test harness ("reuse the file's temp-folder + mock setup") rather than reproducing it — acceptable since those harnesses already exist in `pipeline.test.ts`/repo.
 
