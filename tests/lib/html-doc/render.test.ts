@@ -1,4 +1,4 @@
-import { renderMagazineHtml } from '../../../lib/html-doc/render';
+import { renderMagazineHtml, GENERATOR_VERSION } from '../../../lib/html-doc/render';
 import type { ParsedSummary, MagazineModel } from '../../../lib/html-doc/types';
 
 const parsed: ParsedSummary = {
@@ -30,7 +30,7 @@ describe('renderMagazineHtml', () => {
     expect(html).toMatch(/^<!DOCTYPE html>/);
     expect(html).toContain('<style>');
     expect(html).not.toContain('<link');                 // no external CSS
-    expect(html).toContain('<meta name="generator" content="magazine-skim v1">');
+    expect(html).toContain(`<meta name="generator" content="${GENERATOR_VERSION}">`);
     expect(html).toContain('<meta name="video-id" content="7xTGNNLPyMI">');
     expect(html).toContain('<meta name="source-md" content="deep-dive-into-llms.md">');
     expect(html).toContain('<title>Deep Dive into LLMs</title>');
