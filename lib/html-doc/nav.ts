@@ -263,8 +263,60 @@ export const NAV_SCRIPT = `<script>
   // ── dig-state machine (summary-side only) ────────────────────────────────
   var parts=location.pathname.split('/');
   var videoId=parts[3];
-  var outputFolder=new URLSearchParams(location.search).get('outputFolder');
+  var _sp=new URLSearchParams(location.search);
+  var outputFolder=_sp.get('outputFolder');
   if(!videoId||!outputFolder)return;
+  // ── dig-doc client (dig-deeper page only) ────────────────────────────────
+  // Correctness premise: the POST job calls upsertDugSection BEFORE emitting
+  // "done", so the re-GET of the current page reflects the new dug section.
+  if(_sp.get('type')==='dig-deeper'){
+    var _dg=document.querySelector('.dg');
+    if(_dg){
+      function _applyDigErr(el){el.textContent='\\u26a0 retry';el.dataset.state='error';el.removeAttribute('href');}
+      function _startDocDig(trigger){
+        var startSec=+trigger.dataset.section;
+        trigger.textContent='\\u23f3';trigger.dataset.state='loading';trigger.removeAttribute('href');
+        fetch('/api/videos/'+videoId+'/dig/'+startSec,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({outputFolder:outputFolder})})
+          .then(function(r){if(!r.ok)throw new Error('POST '+r.status);return r.json();})
+          .then(function(d){
+            var es=new EventSource('/api/videos/'+videoId+'/dig/'+startSec+'/stream?jobId='+encodeURIComponent(d.jobId));
+            es.onmessage=function(ev){
+              try{var msg=JSON.parse(ev.data);
+                if(msg.type==='done'){
+                  es.close();
+                  // Re-GET this page; parse; replace the section node in-place.
+                  fetch(location.href)
+                    .then(function(res){return res.text();})
+                    .then(function(html){
+                      var dp=new DOMParser();
+                      var fd=dp.parseFromString(html,'text/html');
+                      var fresh=fd.querySelector('[data-start="'+startSec+'"]');
+                      var cur=document.querySelector('[data-start="'+startSec+'"]');
+                      if(fresh&&cur&&cur.parentNode){cur.parentNode.replaceChild(document.adoptNode(fresh),cur);}
+                    })
+                    .catch(function(){_applyDigErr(trigger);});
+                }else if(msg.type==='error'){es.close();_applyDigErr(trigger);}
+              }catch(e){}
+            };
+            es.onerror=function(){es.close();_applyDigErr(trigger);};
+          })
+          .catch(function(){_applyDigErr(trigger);});
+      }
+      _dg.addEventListener('click',function(e){
+        // Toggle (dug → show gist or dug) — zero fetch
+        var tog=(e.target.closest?e.target.closest('.dig-toggle'):null);
+        if(tog){e.preventDefault();var s=tog.closest('section');if(s)s.classList.toggle('show-gist');return;}
+        // Trigger (un-dug → expand in place)
+        var trig=(e.target.closest?e.target.closest('.dig-trigger[data-section]'):null);
+        if(!trig)return;
+        e.preventDefault();
+        var st=trig.dataset.state;
+        if(st==='loading')return;
+        _startDocDig(trig);
+      });
+    }
+    return;
+  }
   var controls=[].slice.call(document.querySelectorAll('a.dig[data-section]')).filter(function(a){return!a.dataset.type;});
   if(!controls.length)return;
   function viewHref(sec){

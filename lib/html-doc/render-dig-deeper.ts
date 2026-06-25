@@ -123,8 +123,9 @@ section{padding:2.4em 0;border-top:2px solid var(--rule)}
 section:first-of-type{border-top:0}
 .dug img{margin:1.2em 0}
 section[data-dug="true"] .gist{display:none}
-.show-gist .gist{display:block}
-.show-gist .dug{display:none}
+section[data-dug="true"] .dug{display:block}
+section[data-dug="true"].show-gist .gist{display:block}
+section[data-dug="true"].show-gist .dug{display:none}
 .dg-topbar{display:flex;align-items:center;gap:1em;margin-bottom:1.6em;font-size:.85rem}
 .dg-expand-all{background:none;border:1px solid var(--rule);border-radius:4px;padding:.2em .6em;cursor:pointer;font-size:.85rem;color:var(--meta)}
 .dg-orphans{margin-top:3em;padding-top:1.5em;border-top:2px dashed var(--rule)}

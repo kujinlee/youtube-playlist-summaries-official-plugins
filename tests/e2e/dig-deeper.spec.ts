@@ -7,6 +7,7 @@ import { expect, test } from '@playwright/test';
 import { renderMagazineHtml } from '../../lib/html-doc/render';
 import { renderDigDeeperDoc } from '../../lib/html-doc/render-dig-deeper';
 import type { ParsedSummary, MagazineModel } from '../../lib/html-doc/types';
+import type { ModelEnvelope } from '../../lib/html-doc/model-store';
 import type { DugSection } from '../../lib/dig/companion-doc';
 
 // ---------------------------------------------------------------------------
@@ -471,4 +472,297 @@ test('B6 (POST-500 error path): POST returning 500 shows ⚠ retry', async ({ pa
 
   // After POST 500: ⚠ retry appears (same error state as stream error)
   await expect(digCtrl).toHaveText('⚠ retry', { timeout: 5000 });
+});
+
+// ===========================================================================
+// DIG-DOC CLIENT STATE MACHINE (Task 10)
+// Tests for the event-delegated in-place expand + toggle on the dig-deeper page.
+// Fixtures are served at type=dig-deeper (the dig doc URL).
+// ===========================================================================
+
+const VIDEO_ID_DIG_DOC = 'vid-dig-doc';
+const START_SEC_DIG_DOC = 90;
+
+/**
+ * Render a dig-deeper doc with the given section in un-dug state.
+ * Serves as the "before" fixture (page with dig-trigger control).
+ */
+function makeDigDocHtmlUndug(): string {
+  const summary: ParsedSummary = {
+    title: 'Dig Doc Test',
+    channel: null,
+    duration: null,
+    url: `https://www.youtube.com/watch?v=${VIDEO_ID_DIG_DOC}`,
+    lang: 'EN',
+    videoId: VIDEO_ID_DIG_DOC,
+    tldr: null,
+    takeaways: [],
+    sourceMd: `${VIDEO_ID_DIG_DOC}.md`,
+    sections: [
+      {
+        numeral: '1',
+        title: 'Section Alpha',
+        prose: 'Intro prose',
+        timeRange: { startSec: START_SEC_DIG_DOC, endSec: START_SEC_DIG_DOC + 60, label: '1:30–2:30', url: `https://www.youtube.com/watch?v=${VIDEO_ID_DIG_DOC}&t=${START_SEC_DIG_DOC}s` },
+      },
+    ],
+  };
+  // No dug sections — renders dig-trigger
+  return renderDigDeeperDoc({ summary, envelope: null, dug: [], mdPath: '/tmp/dig-doc-test-dig.md', videoId: VIDEO_ID_DIG_DOC });
+}
+
+/**
+ * Render a dig-deeper doc with the section in dug state (with content).
+ * Serves as the "after" fixture returned by the re-GET after dig completes.
+ * Includes a ModelEnvelope so the .gist block is rendered (required for C2/C3
+ * toggle tests that assert .gist visibility).
+ */
+function makeDigDocHtmlDug(): string {
+  const summary: ParsedSummary = {
+    title: 'Dig Doc Test',
+    channel: null,
+    duration: null,
+    url: `https://www.youtube.com/watch?v=${VIDEO_ID_DIG_DOC}`,
+    lang: 'EN',
+    videoId: VIDEO_ID_DIG_DOC,
+    tldr: null,
+    takeaways: [],
+    sourceMd: `${VIDEO_ID_DIG_DOC}.md`,
+    sections: [
+      {
+        numeral: '1',
+        title: 'Section Alpha',
+        prose: 'Intro prose',
+        timeRange: { startSec: START_SEC_DIG_DOC, endSec: START_SEC_DIG_DOC + 60, label: '1:30–2:30', url: `https://www.youtube.com/watch?v=${VIDEO_ID_DIG_DOC}&t=${START_SEC_DIG_DOC}s` },
+      },
+    ],
+  };
+  // Envelope with matching sourceSections allows the renderer to emit a .gist block,
+  // which is needed for C2/C3 toggle assertions on .gist visibility.
+  const envelope: ModelEnvelope = {
+    sourceMd: `${VIDEO_ID_DIG_DOC}.md`,
+    generatedAt: '2026-01-01T00:00:00.000Z',
+    sourceSections: ['Section Alpha'],
+    model: {
+      sections: [
+        { lead: 'Key summary lead sentence.', bullets: [{ label: 'A', text: 'Bullet one.' }, { label: 'B', text: 'Bullet two.' }, { label: 'C', text: 'Bullet three.' }] },
+      ],
+    },
+  };
+  const dug: DugSection[] = [
+    {
+      sectionId: START_SEC_DIG_DOC,
+      startSec: START_SEC_DIG_DOC,
+      title: 'Section Alpha',
+      bodyMarkdown: '## Section Alpha\n\nDeep insight after digging.\n',
+      generatedAt: '2026-01-01T00:00:00.000Z',
+    },
+  ];
+  return renderDigDeeperDoc({ summary, envelope, dug, mdPath: '/tmp/dig-doc-test-dig.md', videoId: VIDEO_ID_DIG_DOC });
+}
+
+// ---------------------------------------------------------------------------
+// Helper: serve dig-doc HTML with a stateful toggle so the re-GET returns the dug version.
+// ---------------------------------------------------------------------------
+
+async function stubDigDocRoutes(
+  page: import('@playwright/test').Page,
+  videoId: string,
+  undugHtml: string,
+  dugHtml: string,
+) {
+  // Track whether dig has completed so re-GET returns updated HTML.
+  // Use a simple array to allow mutation inside the closure.
+  const state = { dug: false };
+
+  // POST dig trigger → returns jobId; also flips state.dug so re-GET gets the dug version
+  await page.route(`**/api/videos/${videoId}/dig/${START_SEC_DIG_DOC}`, (route) => {
+    if (route.request().method() !== 'POST') { route.continue(); return; }
+    state.dug = true;
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ jobId: 'dig-doc-job-1' }),
+    });
+  });
+
+  // SSE stream → emits done immediately
+  await page.route(`**/api/videos/${videoId}/dig/${START_SEC_DIG_DOC}/stream**`, (route) =>
+    route.fulfill({
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
+      body: sseBody({ type: 'done' }),
+    }),
+  );
+
+  // Dig-doc HTML route — returns undug initially, dug after POST sets state.dug
+  await page.route(`**/api/html/${videoId}**`, (route) => {
+    const html = state.dug ? dugHtml : undugHtml;
+    route.fulfill({
+      status: 200,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      body: html,
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Task 10 — Behavior C1: click dig-trigger → in-place expand (POST+stream+re-GET)
+//   After done: section has data-dug="true", shows .dug content, control is
+//   "show summary ⌃", page did NOT navigate.
+// ---------------------------------------------------------------------------
+
+test('C1 (dig-doc expand): click dig-trigger → in-place expand; section shows .dug; control becomes show summary ⌃; no navigation', async ({ page }) => {
+  const undugHtml = makeDigDocHtmlUndug();
+  const dugHtml = makeDigDocHtmlDug();
+  await stubDigDocRoutes(page, VIDEO_ID_DIG_DOC, undugHtml, dugHtml);
+
+  const digDocUrl = `http://localhost:3000/api/html/${VIDEO_ID_DIG_DOC}?outputFolder=${encodeURIComponent(OUTPUT_FOLDER)}&type=dig-deeper`;
+  await page.goto(digDocUrl);
+
+  // Before: section is un-dug, dig-trigger visible
+  const trigger = page.locator('a.dig-trigger[data-section]');
+  await expect(trigger).toBeVisible();
+  await expect(trigger).toHaveText('dig deeper ▶');
+
+  // Record URL before click — no navigation should occur
+  const urlBefore = page.url();
+
+  // Click the trigger
+  await trigger.click();
+
+  // After stream done + re-GET: the section is replaced with the dug version.
+  // The trigger is gone; a dig-toggle appears in its place.
+  const toggle = page.locator('a.dig-toggle');
+  await expect(toggle).toBeVisible({ timeout: 5000 });
+  await expect(toggle).toHaveText('show summary ⌃');
+
+  // The .dug content block is present (rendered dug body markdown)
+  const dugBlock = page.locator('section[data-dug="true"] .dug');
+  await expect(dugBlock).toBeVisible();
+
+  // Page did NOT navigate
+  expect(page.url()).toBe(urlBefore);
+});
+
+// ---------------------------------------------------------------------------
+// Task 10 — Behavior C2: click dig-toggle → .gist visible, .dug hidden
+// ---------------------------------------------------------------------------
+
+test('C2 (dig-doc toggle to summary): click show-summary ⌃ → gist visible, dug hidden', async ({ page }) => {
+  // Start on the DUG version of the page (section already dug)
+  const dugHtml = makeDigDocHtmlDug();
+  // Re-GET won't be needed here — we start already dug; stub HTML route directly
+  await page.route(`**/api/html/${VIDEO_ID_DIG_DOC}**`, (route) =>
+    route.fulfill({
+      status: 200,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      body: dugHtml,
+    }),
+  );
+
+  const digDocUrl = `http://localhost:3000/api/html/${VIDEO_ID_DIG_DOC}?outputFolder=${encodeURIComponent(OUTPUT_FOLDER)}&type=dig-deeper`;
+  await page.goto(digDocUrl);
+
+  // The section is pre-dug; dig-toggle should be visible
+  // data-dug="true" sections: .gist is hidden by default CSS; .dug is shown
+  const section = page.locator('section[data-dug="true"]');
+  await expect(section).toBeVisible();
+
+  const toggle = page.locator('a.dig-toggle');
+  await expect(toggle).toBeVisible();
+  await expect(toggle).toHaveText('show summary ⌃');
+
+  // Click toggle: adds .show-gist → .gist shown, .dug hidden
+  await toggle.click();
+
+  // .gist should now be visible (show-gist class added to section)
+  const gistBlock = section.locator('.gist');
+  // .dug should now be hidden
+  const dugBlock = section.locator('.dug');
+
+  // section[data-dug="true"] .gist is hidden by CSS; .show-gist .gist is visible
+  // After toggle click, section gets .show-gist → gist becomes visible, dug hidden
+  await expect(section).toHaveClass(/show-gist/, { timeout: 3000 });
+  await expect(gistBlock).toBeVisible();
+  await expect(dugBlock).toBeHidden();
+});
+
+// ---------------------------------------------------------------------------
+// Task 10 — Behavior C3: click dig-toggle again → toggle back (.dug visible, .gist hidden)
+// ---------------------------------------------------------------------------
+
+test('C3 (dig-doc toggle back to dug): toggle again → dug visible, gist hidden', async ({ page }) => {
+  const dugHtml = makeDigDocHtmlDug();
+  await page.route(`**/api/html/${VIDEO_ID_DIG_DOC}**`, (route) =>
+    route.fulfill({
+      status: 200,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      body: dugHtml,
+    }),
+  );
+
+  const digDocUrl = `http://localhost:3000/api/html/${VIDEO_ID_DIG_DOC}?outputFolder=${encodeURIComponent(OUTPUT_FOLDER)}&type=dig-deeper`;
+  await page.goto(digDocUrl);
+
+  const section = page.locator('section[data-dug="true"]');
+  const toggle = page.locator('a.dig-toggle');
+  await expect(toggle).toBeVisible();
+
+  // First toggle: → show-gist (gist visible, dug hidden)
+  await toggle.click();
+  await expect(section).toHaveClass(/show-gist/, { timeout: 3000 });
+
+  // Second toggle: → remove show-gist (dug visible, gist hidden again)
+  await toggle.click();
+  await expect(section).not.toHaveClass(/show-gist/, { timeout: 3000 });
+
+  const dugBlock = section.locator('.dug');
+  const gistBlock = section.locator('.gist');
+  await expect(dugBlock).toBeVisible();
+  await expect(gistBlock).toBeHidden();
+});
+
+// ---------------------------------------------------------------------------
+// Task 10 — Behavior C4: mocked POST returns 500 → ⚠ retry visible, section stays un-dug
+// ---------------------------------------------------------------------------
+
+test('C4 (dig-doc POST-500): POST 500 → ⚠ retry on trigger; section stays un-dug', async ({ page }) => {
+  const undugHtml = makeDigDocHtmlUndug();
+
+  // Stub dig-doc route
+  await page.route(`**/api/html/${VIDEO_ID_DIG_DOC}**`, (route) =>
+    route.fulfill({
+      status: 200,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      body: undugHtml,
+    }),
+  );
+
+  // Stub POST to return 500
+  await page.route(`**/api/videos/${VIDEO_ID_DIG_DOC}/dig/${START_SEC_DIG_DOC}`, (route) => {
+    if (route.request().method() !== 'POST') { route.continue(); return; }
+    route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'server error' }),
+    });
+  });
+
+  const digDocUrl = `http://localhost:3000/api/html/${VIDEO_ID_DIG_DOC}?outputFolder=${encodeURIComponent(OUTPUT_FOLDER)}&type=dig-deeper`;
+  await page.goto(digDocUrl);
+
+  const trigger = page.locator('a.dig-trigger[data-section]');
+  await expect(trigger).toBeVisible();
+  await expect(trigger).toHaveText('dig deeper ▶');
+
+  // Click trigger
+  await trigger.click();
+
+  // After POST 500: trigger shows ⚠ retry
+  await expect(trigger).toHaveText('⚠ retry', { timeout: 5000 });
+
+  // Section still un-dug (no replacement occurred)
+  await expect(page.locator('section[data-dug="true"]')).toHaveCount(0);
+  await expect(page.locator('section[data-dug="false"]')).toBeVisible();
 });
