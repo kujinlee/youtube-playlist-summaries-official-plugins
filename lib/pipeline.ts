@@ -210,34 +210,6 @@ export function formatDuration(secs: number): string {
     : `${m}:${String(s).padStart(2, '0')}`;
 }
 
-const RANK_PREFIX = /^\d+_/;
-const FILENAME_FIELDS = ['summaryMd', 'summaryPdf', 'deepDiveMd', 'deepDivePdf'] as const;
-
-export function migrateToSlugFilenames(outputFolder: string): void {
-  const index = readIndex(outputFolder);
-  let anyChanged = false;
-
-  const videos = index.videos.map((video) => {
-    const updates: Partial<Video> = {};
-    for (const field of FILENAME_FIELDS) {
-      const current = video[field];
-      if (!current || !RANK_PREFIX.test(current)) continue;
-      const newName = current.replace(RANK_PREFIX, '');
-      const src = path.join(outputFolder, current);
-      const dst = path.join(outputFolder, newName);
-      try {
-        if (fs.existsSync(src) && !fs.existsSync(dst)) fs.renameSync(src, dst);
-        updates[field] = newName;
-      } catch {
-        // leave unchanged if rename fails
-      }
-    }
-    if (Object.keys(updates).length > 0) { anyChanged = true; return { ...video, ...updates }; }
-    return video;
-  });
-
-  if (anyChanged) writeIndex(outputFolder, { ...index, videos });
-}
 
 /**
  * Remove an existing Quick Reference callout block from markdown content.
