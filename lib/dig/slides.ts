@@ -119,11 +119,13 @@ export async function resolveSlideTokens(
 
         // Rewrite token to markdown image reference.
         const imgRef = `![${token.caption}](assets/${videoId}/${sectionId}-${token.sec}.jpg)`;
-        result = result.replace(token.raw, imgRef);
+        const escapedRaw = token.raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        result = result.replace(new RegExp(escapedRaw, 'g'), () => imgRef);
       } catch (err: unknown) {
         // Per-frame failure → drop that token, continue with remaining tokens.
         console.warn('[dig-slide-miss] ffmpeg failed for token', token.raw, ':', (err as Error).message);
-        result = result.replace(token.raw, '');
+        const escapedRaw2 = token.raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        result = result.replace(new RegExp(escapedRaw2, 'g'), () => '');
       }
     }
   } finally {
@@ -143,7 +145,8 @@ export async function resolveSlideTokens(
 function stripAllTokens(markdown: string, tokens: SlideToken[]): string {
   let result = markdown;
   for (const token of tokens) {
-    result = result.replace(token.raw, '');
+    const escapedRaw = token.raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    result = result.replace(new RegExp(escapedRaw, 'g'), () => '');
   }
   return result;
 }

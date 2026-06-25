@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'node:fs/promises';
 import { NextResponse } from 'next/server';
 import { assertOutputFolder, assertVideoId, readIndex, updateVideoFields } from '@/lib/index-store';
-import { createJob, deleteJob, emitJobEvent, getActiveJob, releaseJobLock } from '@/lib/job-registry';
+import { cancelJob, createJob, deleteJob, emitJobEvent, getActiveJob, getJobSignal, releaseJobLock } from '@/lib/job-registry';
 import { logError, errorSummary } from '@/lib/dev-logger';
 import { parseSummaryMarkdown } from '@/lib/html-doc/parse';
 import { resolveTranscriptSegments } from '@/lib/transcript-source';
@@ -49,11 +49,15 @@ export async function POST(request: Request, { params }: Params) {
     if (existing) return NextResponse.json({ jobId: existing });
   } else {
     const existing = getActiveJob(key);
-    if (existing) releaseJobLock(existing);
+    if (existing) {
+      cancelJob(existing);
+      releaseJobLock(existing);
+    }
   }
 
   const jobId = crypto.randomUUID();
   createJob(jobId, key);
+  const signal = getJobSignal(jobId);
   let finished = false;
 
   const onTerminal = () => {
@@ -63,7 +67,7 @@ export async function POST(request: Request, { params }: Params) {
     (t as { unref?: () => void }).unref?.();
   };
 
-  runDigPipeline(videoId, sectionIdInt, outputFolder, (event: ProgressEvent) => {
+  runDigPipeline(videoId, sectionIdInt, outputFolder, signal, (event: ProgressEvent) => {
     emitJobEvent(jobId, event);
     if (event.type === 'done' || event.type === 'error') onTerminal();
   }).catch((err) => {
@@ -80,6 +84,7 @@ async function runDigPipeline(
   videoId: string,
   sectionIdInt: number,
   outputFolder: string,
+  signal: AbortSignal | undefined,
   emit: (event: ProgressEvent) => void,
 ): Promise<void> {
   // Step 1: Read video from index
@@ -136,6 +141,12 @@ async function runDigPipeline(
     sectionId: sectionIdInt,
   });
 
+  // Guard: if the pipeline was aborted (force re-dig), skip the write.
+  if (signal?.aborted) {
+    emit({ type: 'error', log: 'Pipeline aborted before write' });
+    return;
+  }
+
   // Step 10: Upsert dug section into companion doc
   const summaryBasename = path.basename(summaryMdName, '.md');
   const digDeeperFilename = `${summaryBasename}-dig-deeper.md`;
@@ -162,7 +173,8 @@ async function runDigPipeline(
 
   const digDeeperHtmlFilename = `${summaryBasename}-dig-deeper.html`;
   const digDeeperHtmlPath = path.join(htmlsDir, digDeeperHtmlFilename);
-  const htmlContent = renderDigDeeperHtml(finalMd, digDeeperPath);
+  const companionDocContent = await fs.readFile(digDeeperPath, 'utf8');
+  const htmlContent = renderDigDeeperHtml(companionDocContent, digDeeperPath);
 
   // Step 12: Write HTML file
   await fs.writeFile(digDeeperHtmlPath, htmlContent, 'utf8');

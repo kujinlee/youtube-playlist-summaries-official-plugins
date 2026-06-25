@@ -121,7 +121,34 @@ export function renderDigDeeperHtml(mdContent: string, mdPath: string): string {
     .replace(/\r\n/g, '\n');
 
   const title = body.match(/^#\s+(.+)$/m)?.[1]?.trim() ?? 'Dig Deeper';
-  const bodyHtml = renderer.render(body);
+
+  // Parse sentinel-delimited blocks from the body.
+  // If the body contains sentinel blocks, render each as <section data-start="N">.
+  // Pre-sentinel content (e.g. the H1 title) renders normally.
+  const sentinelRe = /<!-- dig-section: (\d+) -->\n([\s\S]*?)<!-- \/dig-section -->/g;
+  const parts: string[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = sentinelRe.exec(body)) !== null) {
+    // Render content before this sentinel block
+    if (match.index > lastIndex) {
+      parts.push(renderer.render(body.slice(lastIndex, match.index)));
+    }
+    // Render the sentinel block content wrapped in <section data-start="N">
+    const sectionId = match[1];
+    const blockContent = match[2];
+    const blockHtml = renderer.render(blockContent);
+    parts.push(`<section data-start="${sectionId}">\n${blockHtml}</section>\n`);
+    lastIndex = match.index + match[0].length;
+  }
+
+  // Render any remaining content after the last sentinel block (or the whole body if no sentinels)
+  if (lastIndex < body.length) {
+    parts.push(renderer.render(body.slice(lastIndex)));
+  }
+
+  const bodyHtml = parts.join('');
 
   return `<!DOCTYPE html>
 <html lang="en">

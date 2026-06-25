@@ -223,3 +223,48 @@ test('special-char videoTitle round-trip: quotes, colon, hash preserved', async 
   // The title must be preserved exactly (both double-quotes in the YAML value)
   expect(md).toContain(`"${specialTitle.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`);
 });
+
+test('concurrent upserts for different sections on same path preserves both sections', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'dig-'));
+  const p = path.join(dir, 'v-dig-deeper.md');
+
+  // Fire both upserts simultaneously without awaiting the first
+  const p1 = upsertDugSection(
+    base(p, { sectionId: 100, startSec: 100, title: 'SectionA', bodyMarkdown: 'body-a', generatedAt: 'T1' }),
+  );
+  const p2 = upsertDugSection(
+    base(p, { sectionId: 200, startSec: 200, title: 'SectionB', bodyMarkdown: 'body-b', generatedAt: 'T2' }),
+  );
+
+  await Promise.all([p1, p2]);
+
+  const ids = await readDugSectionIds(p);
+  expect(ids).toEqual([100, 200]);
+
+  const md = await readFile(p, 'utf8');
+  expect(md).toContain('body-a');
+  expect(md).toContain('body-b');
+});
+
+test('M-4: bodyMarkdown containing sentinel strings survives round-trip without injecting extra sections', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'dig-'));
+  const p = path.join(dir, 'v-dig-deeper.md');
+
+  const sentinelBody = 'Before\n<!-- /dig-section -->\n<!-- dig-section: 999 -->\nAfter';
+
+  await upsertDugSection(
+    base(p, { sectionId: 312, startSec: 312, title: 'SentinelTest', bodyMarkdown: sentinelBody, generatedAt: 'T1' }),
+  );
+
+  // Force round-trip by adding a second section
+  await upsertDugSection(
+    base(p, { sectionId: 600, startSec: 600, title: 'Other', bodyMarkdown: 'clean', generatedAt: 'T2' }),
+  );
+
+  // Only 2 sections should exist (no spurious 999 injected)
+  const ids = await readDugSectionIds(p);
+  expect(ids).toEqual([312, 600]);
+
+  const md = await readFile(p, 'utf8');
+  expect(md).toContain('clean');
+});

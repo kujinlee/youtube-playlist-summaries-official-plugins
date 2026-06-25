@@ -101,7 +101,11 @@ function serializeBody(sections: DugSection[]): string {
   return sections
     .map((s) => {
       const body = s.bodyMarkdown.trimEnd();
-      return `<!-- dig-section: ${s.sectionId} -->\n## ${s.title}\n\n${body}\n<!-- /dig-section -->`;
+      // Sanitize sentinel strings that could corrupt round-trip parsing.
+      const safeBody = body
+        .replace(/<!--\s*\/dig-section\s*-->/g, '<!-- /dig-section (escaped) -->')
+        .replace(/<!--\s*dig-section\s*:/g, '<!-- dig-section-escaped:');
+      return `<!-- dig-section: ${s.sectionId} -->\n## ${s.title}\n\n${safeBody}\n<!-- /dig-section -->`;
     })
     .join('\n\n');
 }
@@ -342,18 +346,21 @@ async function atomicWrite(filePath: string, content: string): Promise<void> {
   }
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
+// ── Per-path write serialization ──────────────────────────────────────────────
 
 /**
- * Upsert one dug section into the companion doc at `digDeeperPath`.
+ * Serializes writes per digDeeperPath so that concurrent digs of different
+ * sections for the same video do not interleave their read→mutate→write cycles.
  *
- * - Creates the file if absent (first write).
- * - Replaces the section with the matching `sectionId` if present.
- * - Preserves all other sections.
- * - Sorts sections by `startSec` ascending in both frontmatter and body.
- * - Writes atomically via temp file + rename.
+ * Each entry is the tail of the promise chain for that path. New writes append
+ * to the chain via `.then()`. Errors are swallowed at chain level so a failed
+ * upsert doesn't break the chain for subsequent writes.
  */
-export async function upsertDugSection(opts: {
+const writeChains = new Map<string, Promise<void>>();
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+async function doUpsert(opts: {
   digDeeperPath: string;
   videoTitle: string;
   videoId: string;
@@ -380,6 +387,31 @@ export async function upsertDugSection(opts: {
 
   const content = serialize(doc);
   await atomicWrite(digDeeperPath, content);
+}
+
+/**
+ * Upsert one dug section into the companion doc at `digDeeperPath`.
+ *
+ * - Creates the file if absent (first write).
+ * - Replaces the section with the matching `sectionId` if present.
+ * - Preserves all other sections.
+ * - Sorts sections by `startSec` ascending in both frontmatter and body.
+ * - Writes atomically via temp file + rename.
+ * - Serializes concurrent writes for the same path to avoid interleaving.
+ */
+export async function upsertDugSection(opts: {
+  digDeeperPath: string;
+  videoTitle: string;
+  videoId: string;
+  language: 'en' | 'ko';
+  sourceVideoUrl: string;
+  section: DugSection;
+}): Promise<void> {
+  const { digDeeperPath } = opts;
+  const prev = writeChains.get(digDeeperPath) ?? Promise.resolve();
+  const next = prev.then(() => doUpsert(opts));
+  writeChains.set(digDeeperPath, next.catch(() => {}));
+  return next;
 }
 
 /**

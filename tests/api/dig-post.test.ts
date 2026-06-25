@@ -554,6 +554,27 @@ describe('Finding 3: empty/whitespace sectionId → 400', () => {
   });
 });
 
+// ── M-2: force=1 calls cancelJob on the old job ──────────────────────────────
+
+describe('M-2: force=1 aborts old job via cancelJob', () => {
+  it('force=1 calls cancelJob on the existing job before creating a new one', async () => {
+    // Hang first job so it stays active
+    mockGenerateDig.mockReturnValue(new Promise(() => {}));
+    const firstRes = await post(VIDEO_ID, SECTION_ID, { outputFolder: HOME });
+    const { jobId: firstJobId } = await firstRes.json();
+
+    // Clear call counts
+    (jobRegistry.cancelJob as jest.Mock).mockClear();
+
+    // Reset generateDig for the force request
+    mockGenerateDig.mockResolvedValue('# New content');
+    await post(VIDEO_ID, SECTION_ID, { outputFolder: HOME, force: 1 });
+
+    // cancelJob should have been called with the OLD jobId
+    expect(jobRegistry.cancelJob).toHaveBeenCalledWith(firstJobId);
+  });
+});
+
 // ── Finding 4: suppress console.error in error-path tests ────────────────────
 
 describe('Finding 4: console.error suppressed in error paths', () => {

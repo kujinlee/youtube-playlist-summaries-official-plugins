@@ -291,6 +291,59 @@ describe('renderDigDeeperHtml', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Behavior 7 (H-1): sentinel-delimited companion doc → section data-start attrs
+  // -------------------------------------------------------------------------
+  describe('Behavior 7 — sentinel blocks render as <section data-start="N">', () => {
+    let tmpDir: string;
+    let html: string;
+
+    beforeAll(() => {
+      tmpDir = makeTempDir();
+      const mdContent = [
+        '---',
+        'title: "Test Video"',
+        'videoId: "abc12345678"',
+        '---',
+        '# Test Video',
+        '',
+        '<!-- dig-section: 312 -->',
+        '## Introduction',
+        '',
+        'Body text for section 312.',
+        '<!-- /dig-section -->',
+        '',
+        '<!-- dig-section: 600 -->',
+        '## Advanced Topics',
+        '',
+        'Body text for section 600.',
+        '<!-- /dig-section -->',
+      ].join('\n');
+      html = renderDigDeeperHtml(mdContent, path.join(tmpDir, 'test-dig-deeper.md'));
+    });
+
+    afterAll(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('contains <section data-start="312"', () => {
+      expect(html).toContain('<section data-start="312"');
+    });
+
+    it('contains <section data-start="600"', () => {
+      expect(html).toContain('<section data-start="600"');
+    });
+
+    it('renders the section body text inside the section element', () => {
+      expect(html).toContain('Body text for section 312');
+      expect(html).toContain('Body text for section 600');
+    });
+
+    it('pre-sentinel content (title) renders normally outside sections', () => {
+      expect(html).toContain('Test Video');
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Behavior 6: multiple images — present one inlined, missing one dropped
   // -------------------------------------------------------------------------
   describe('mixed present + missing assets in one doc', () => {

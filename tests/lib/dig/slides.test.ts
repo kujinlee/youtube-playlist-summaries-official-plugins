@@ -217,3 +217,49 @@ test('execFile is always called with array argv — never a string command', asy
     expect(call[0] as string).not.toMatch(/[;&|`$]/);
   });
 });
+
+// ─── L-1: $ in imgRef not misinterpreted; duplicate tokens both replaced ────
+
+test('L-1: imgRef containing $& is not misinterpreted (literal $ preserved)', async () => {
+  // Create a fake asset file so the path containment check passes and ffmpeg "succeeds"
+  const assetDir = path.join(tmpAssetsRoot, 'abc12345678');
+  fs.mkdirSync(assetDir, { recursive: true });
+  const assetFile = path.join(assetDir, '300-352.jpg');
+  fs.writeFileSync(assetFile, 'fake-jpeg');
+
+  // Mock execFile: yt-dlp succeeds, ffmpeg succeeds
+  mockExecFile.mockImplementation((_cmd: string, _args: string[], cb: (err: null, stdout: string, stderr: string) => void) =>
+    cb(null, '', ''),
+  );
+
+  // The caption contains $& which would be misinterpreted by String.replace(string, string)
+  // as the matched string. The fix uses a RegExp + function replacement to avoid this.
+  const out = await resolveSlideTokens('see [[SLIDE:352|price $& more]]', getOpts());
+
+  // The alt text in the output should contain the literal $& not the matched token
+  expect(out).toContain('![price $& more]');
+  expect(out).not.toContain('[[SLIDE:352|price $& more]]');
+
+  fs.unlinkSync(assetFile);
+});
+
+test('L-1: duplicate slide token — both occurrences replaced', async () => {
+  const assetDir = path.join(tmpAssetsRoot, 'abc12345678');
+  fs.mkdirSync(assetDir, { recursive: true });
+  const assetFile = path.join(assetDir, '300-352.jpg');
+  fs.writeFileSync(assetFile, 'fake-jpeg');
+
+  mockExecFile.mockImplementation((_cmd: string, _args: string[], cb: (err: null, stdout: string, stderr: string) => void) =>
+    cb(null, '', ''),
+  );
+
+  const markdown = 'First [[SLIDE:352|Loop]] and again [[SLIDE:352|Loop]]';
+  const out = await resolveSlideTokens(markdown, getOpts());
+
+  // Both occurrences should be replaced with image refs
+  const count = (out.match(/!\[Loop\]/g) ?? []).length;
+  expect(count).toBe(2);
+  expect(out).not.toContain('[[SLIDE:352|Loop]]');
+
+  fs.unlinkSync(assetFile);
+});
