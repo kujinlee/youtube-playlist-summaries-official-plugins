@@ -7,7 +7,7 @@ import { renderMagazineHtml } from './render';
 import { readModelEnvelope } from './model-store';
 
 export type ReRenderResult =
-  | { status: 'rerendered'; htmlPath: string }
+  | { status: 'rerendered'; htmlPath: string; html: string }
   | { status: 'skipped-not-eligible' }   // no video / no summaryMd / no summaryHtml — nothing to refresh
   | { status: 'skipped-no-model' }        // eligible but the model file is absent/invalid — regenerate to enable
   | { status: 'skipped-no-md' }
@@ -69,7 +69,7 @@ export function reRenderSummaryHtml(videoId: string, outputFolder: string): ReRe
     try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
     throw err;
   }
-  return { status: 'rerendered', htmlPath: htmlRel };
+  return { status: 'rerendered', htmlPath: htmlRel, html };
 }
 
 export interface ReRenderDetail {
