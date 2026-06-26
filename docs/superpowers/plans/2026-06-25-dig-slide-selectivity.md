@@ -25,7 +25,7 @@
 
 **Files:**
 - Modify: `lib/dig/generate.ts` (the `buildDigPrompt` return string, currently the slide bullet at ~`:63`; add the version constant near the top exports)
-- Test: `tests/lib/dig/generate.test.ts` (or the existing prompt test file — search for an existing `buildDigPrompt` describe; create the file if none)
+- Test: **append to the existing** `tests/lib/dig/generate.test.ts` (it already has a `buildDigPrompt` describe ~`:36-53`; the existing `≤3` and `[[SLIDE:` assertions survive the new prompt). Do not create a new file.
 
 **Interfaces:**
 - Produces: `export const DIG_GENERATOR_VERSION = 2;` — consumed by Tasks 3 (route stamp) and 4 (dig-merge staleness).
@@ -168,11 +168,11 @@ Expected: FAIL — `genVersion` is `undefined` (not 0); TypeScript: `genVersion`
 
 - [ ] **Step 3: Implement — all 7 sites**
 
-1. **Interface** (`DugSection`, ~`:30`): add `genVersion: number;` after `generatedAt`.
+1. **Interface** (`DugSection`, `generatedAt` at ~`:35`): add `genVersion: number;` after `generatedAt` (interface ends ~`:36`).
 2. **`ParsedFrontmatter.sections` element** (~`:145`): add `genVersion: number` to the inline shape.
 3. **`currentSection` Partial** (~`:159`): add `genVersion: number` to the `Partial<{…}>`.
 4. **Serialize** (`serializeFrontmatter`, the per-section loop ~`:77-80`): after the `generatedAt` line push `lines.push(\`    genVersion: ${s.genVersion}\`);` (fixed position after `generatedAt` for test determinism).
-5. **Parse regex** (after the `generatedAt` match block ~`:188`): add
+5. **Parse regex** (after the `generatedAt` **match block** at ~`:200-204` — NOT `:188`, which is the `startSec` regex; order is otherwise free since parse is regex-keyed): add
    ```ts
    const genVersionMatch = line.match(/^\s{4}genVersion\s*:\s*(\d+)/);
    if (genVersionMatch && currentSection) {
@@ -185,19 +185,30 @@ Expected: FAIL — `genVersion` is `undefined` (not 0); TypeScript: `genVersion`
 
 Then **remove the dead doc-level literal**: delete the `` `digVersion: { major: 1, minor: 0 }` `` line from `serializeFrontmatter` (~`:69`). It is written but never parsed (the scalar switch ignores it), so removal is safe — but it changes serialized output, so update the 3 fixtures.
 
-- [ ] **Step 4: Fix the 3 fixtures embedding the dead literal**
+- [ ] **Step 4: Update real serialize-output assertions (NOT the 3 input fixtures)**
 
-In `tests/api/html-serve.test.ts` (~`:140`, `:223`) and `tests/lib/dig/companion-doc.test.ts` (~`:345`), remove the `digVersion: { major: 1, minor: 0 }` line from any expected-serialized-output assertion (and from any input fixture that asserts exact equality). Where a section's serialized form is asserted, add the new `    genVersion: <n>` line after `generatedAt`.
+The 3 `digVersion` literals at `tests/api/html-serve.test.ts:140,223` and `tests/lib/dig/companion-doc.test.ts:345` are **input** fixtures fed to the parser (which ignores the line) — they assert rendered-HTML `toContain` / `toEqual([])`, **not** serialized output, so removing the serializer's `digVersion` line does NOT break them and they need no `genVersion`. Leave them (or drop the now-ignored line cosmetically).
 
-- [ ] **Step 5: Run tests + tsc**
+The genuine update target is any assertion in `tests/lib/dig/companion-doc.test.ts` that checks the exact `serializeFrontmatter`/`writeCompanionDoc` **output string** (search the file for assertions on serialized frontmatter lines / round-trip equality). Add the new `    genVersion: <n>` line (after `generatedAt`) to those expected strings, and add the new round-trip test from Step 1.
 
-Run: `npx jest tests/lib/dig/companion-doc.test.ts tests/api/html-serve.test.ts -v` → PASS. `npx tsc --noEmit` → clean.
+- [ ] **Step 5: Update shared `DugSection` test builders so `tsc` passes (REQUIRED — see review B2)**
 
-- [ ] **Step 6: Commit**
+Making `genVersion` required means every existing builder that returns a `DugSection` literal without it fails `tsc`. Add an optional `genVersion` param defaulting to `DIG_GENERATOR_VERSION` (import it) to each, so existing call sites stay valid (produce fresh sections) and later tasks can pass an older value for stale:
+- `tests/lib/html-doc/dig-merge.test.ts` — `makeDug(sectionId, title, startSec?)` (~`:59`): add a 4th param `genVersion = DIG_GENERATOR_VERSION` and emit it; also fix inline `dugA`/`dugB` literals (~`:514`).
+- `tests/lib/html-doc/render-dig-deeper.test.ts` — `makeDugWithBody(...)` (~`:46`): same.
+- `tests/e2e/dig-deeper.spec.ts` — the dug fixtures used by `makeCompanionHtmlNoSlides`/`WithSlides`: emit `genVersion` (default current).
+
+(Tasks 4 and 5 call these REAL signatures — e.g. `makeDug(0, 'Intro', 0, DIG_GENERATOR_VERSION - 1)` for a stale section — NOT an invented `dug({...})` helper.)
+
+- [ ] **Step 6: Run tests + tsc**
+
+Run: `npx jest tests/lib/dig/companion-doc.test.ts tests/api/html-serve.test.ts tests/lib/html-doc/dig-merge.test.ts tests/lib/html-doc/render-dig-deeper.test.ts -v` → PASS. `npx tsc --noEmit` → clean (this is the gate that B2 protects — confirm the shared builders compile).
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add lib/dig/companion-doc.ts tests/lib/dig/companion-doc.test.ts tests/api/html-serve.test.ts
-git commit -m "feat(dig): persist per-section genVersion; remove dead doc-level digVersion"
+git add lib/dig/companion-doc.ts tests/lib/dig/companion-doc.test.ts tests/lib/html-doc/dig-merge.test.ts tests/lib/html-doc/render-dig-deeper.test.ts tests/e2e/dig-deeper.spec.ts
+git commit -m "feat(dig): persist per-section genVersion; remove dead doc-level digVersion; +genVersion in test builders"
 ```
 
 ---
@@ -206,27 +217,28 @@ git commit -m "feat(dig): persist per-section genVersion; remove dead doc-level 
 
 **Files:**
 - Modify: `app/api/videos/[id]/dig/[sectionId]/route.ts` (the `upsertDugSection({ … section: { … } })` literal, ~`:160-166`)
-- Test: `tests/api/dig-route.test.ts` (or the existing dig-route test file — assert the persisted section carries the current version)
+- Test: `tests/api/dig-post.test.ts` — the EXISTING dig-route test. **It mocks `lib/dig/companion-doc` (`jest.mock(...)` ~`:33`) and fs**, so `upsertDugSection` is a `jest.fn()`. Do NOT read the doc from disk; assert on the mock call (mirror the existing happy-path assertion ~`:284-300`).
 
 **Interfaces:**
 - Consumes: `DIG_GENERATOR_VERSION` (Task 1), `DugSection.genVersion` (Task 2).
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing test (append to `tests/api/dig-post.test.ts`)**
 
 ```ts
-// In the existing dig-route test (stubs Gemini + FS). After a successful dig POST,
-// read the companion doc and assert the upserted section's genVersion is current.
 import { DIG_GENERATOR_VERSION } from '@/lib/dig/generate';
-import { parseDugSections } from '@/lib/dig/companion-doc';
+// mockUpsertDugSection is already the mocked companion-doc export in this file.
 
-it('stamps the current DIG_GENERATOR_VERSION on a freshly dug section', async () => {
-  // …run the route's pipeline to completion (reuse the file's existing success-path setup)…
-  const sections = parseDugSections(fs.readFileSync(digDeeperPath, 'utf8'));
-  expect(sections.find((s) => s.sectionId === SECTION_ID)?.genVersion).toBe(DIG_GENERATOR_VERSION);
+it('stamps the current DIG_GENERATOR_VERSION on the upserted section', async () => {
+  // …reuse the file's existing success-path setup that drives the route to `done`…
+  expect(mockUpsertDugSection).toHaveBeenCalledWith(
+    expect.objectContaining({
+      section: expect.objectContaining({ genVersion: DIG_GENERATOR_VERSION }),
+    }),
+  );
 });
 ```
 
-- [ ] **Step 2: Run → FAIL** (section serialized with `genVersion: 0` or undefined since the route doesn't set it).
+- [ ] **Step 2: Run → FAIL** (the route's section literal has no `genVersion`, so the mock is called without it).
 
 - [ ] **Step 3: Implement**
 
@@ -250,7 +262,7 @@ Add the import: `import { DIG_GENERATOR_VERSION } from '../../../../../../lib/di
 - [ ] **Step 5: Commit**
 
 ```bash
-git add "app/api/videos/[id]/dig/[sectionId]/route.ts" tests/api/dig-route.test.ts
+git add "app/api/videos/[id]/dig/[sectionId]/route.ts" tests/api/dig-post.test.ts
 git commit -m "feat(dig): stamp DIG_GENERATOR_VERSION on freshly dug sections"
 ```
 
@@ -272,23 +284,21 @@ git commit -m "feat(dig): stamp DIG_GENERATOR_VERSION on freshly dug sections"
 // tests/lib/html-doc/dig-merge.test.ts
 import { mergeDigDoc } from '@/lib/html-doc/dig-merge';
 import { DIG_GENERATOR_VERSION } from '@/lib/dig/generate';
-
-// helper: build a summary with one section at startSec=0 and a dug section matching it,
-// parameterized by genVersion. (Reuse the file's existing summary/dug builders.)
+// Uses the file's REAL builder, now `makeDug(sectionId, title, startSec?, genVersion?)`
+// after Task 2's builder update. Reuse the file's existing summary/envelope fixtures.
 
 it('marks a matched section stale when its genVersion < current', () => {
-  const { sections } = mergeDigDoc(summaryWithOneSection, envelope, [dug({ sectionId: 0, startSec: 0, genVersion: DIG_GENERATOR_VERSION - 1 })]);
-  const s = sections.find((x) => x.dug !== null)!;
-  expect(s.isStale).toBe(true);
+  const { sections } = mergeDigDoc(summaryWithOneSection, envelope, [makeDug(0, 'Intro', 0, DIG_GENERATOR_VERSION - 1)]);
+  expect(sections.find((x) => x.dug !== null)!.isStale).toBe(true);
 });
 
 it('marks a matched section fresh when genVersion === current', () => {
-  const { sections } = mergeDigDoc(summaryWithOneSection, envelope, [dug({ sectionId: 0, startSec: 0, genVersion: DIG_GENERATOR_VERSION })]);
+  const { sections } = mergeDigDoc(summaryWithOneSection, envelope, [makeDug(0, 'Intro', 0, DIG_GENERATOR_VERSION)]);
   expect(sections.find((x) => x.dug !== null)!.isStale).toBe(false);
 });
 
-it('treats a missing/zero genVersion as stale (legacy doc)', () => {
-  const { sections } = mergeDigDoc(summaryWithOneSection, envelope, [dug({ sectionId: 0, startSec: 0, genVersion: 0 })]);
+it('treats a zero genVersion as stale (legacy doc)', () => {
+  const { sections } = mergeDigDoc(summaryWithOneSection, envelope, [makeDug(0, 'Intro', 0, 0)]);
   expect(sections.find((x) => x.dug !== null)!.isStale).toBe(true);
 });
 
@@ -297,7 +307,7 @@ it('non-dug sections are never stale', () => {
   expect(sections.every((x) => x.isStale === false)).toBe(true);
 });
 
-// If the title-match path (second construction site) is separately reachable in this
+// If the title-match path (mutation site, ~:148) is separately reachable via this
 // file's fixtures, add one test that exercises it with a stale genVersion too.
 ```
 
@@ -324,12 +334,12 @@ if (startSec !== null) {
 // …include `isStale: isStale_` in the returned MergedSection literal.
 ```
 
-At **construction site 2** (title match, ~`:148`) — currently `ms.dug = { bodyMarkdown: matched.bodyMarkdown };`. Add immediately after:
+At **construction site 2** (title match, ~`:148`) — this is a **mutation** of an already-built `MergedSection` (`ms.dug = { bodyMarkdown: matched.bodyMarkdown };`), not a literal. Add immediately after:
 ```ts
 ms.isStale = matched.genVersion < DIG_GENERATOR_VERSION;
 ```
 
-Ensure the returned literal at site 1 includes `isStale: isStale_`, and every other `MergedSection` construction (non-dug path) sets `isStale: false`.
+**Note (review M2):** there is exactly **one** `MergedSection` object literal in this file — the `.map` return (~`:105`). It must include `isStale: isStale_`. Site 2 (`:148`) mutates that same object. There is no separate non-dug return literal to update, and the orphan path (`:161-167`) builds plain `{sectionId,title,bodyMarkdown}` objects (not `MergedSection`), so it is unaffected. Because there is a single literal, `tsc` will flag it if `isStale` is missing.
 
 - [ ] **Step 4: Run → PASS. `npx tsc --noEmit` clean** (compiler flags any `MergedSection` literal missing `isStale`).
 
@@ -345,8 +355,8 @@ git commit -m "feat(dig): compute isStale on MergedSection at both merge sites"
 ### Task 5: Render `.dig-refresh` control for stale sections
 
 **Files:**
-- Modify: `lib/html-doc/render-dig-deeper.ts` (the control block ~`:200-208`; CSS ~`:133`)
-- Test: `tests/lib/html-doc/render-dig-deeper.test.ts`
+- Modify: `lib/html-doc/render-dig-deeper.ts` (the control block ~`:201-206`; CSS ~`:133-134`)
+- Test: `tests/lib/html-doc/render-dig-deeper.test.ts` (build stale/fresh dug fixtures with the real `makeDugWithBody(...)`, now taking `genVersion` after Task 2 — pass `DIG_GENERATOR_VERSION - 1` for stale, `DIG_GENERATOR_VERSION` for fresh)
 
 **Interfaces:**
 - Consumes: `MergedSection.isStale` (Task 4).
@@ -381,7 +391,7 @@ it('uses a class distinct from dig-trigger and dig-toggle for the refresh contro
 
 - [ ] **Step 3: Implement**
 
-In the control block (~`:200-208`), a dug section currently always renders the toggle:
+In the control block (~`:201-206`), a dug section currently always renders the toggle (the real line `:203`):
 ```ts
 control = ` <a class="dig-toggle">show summary ⌃</a>`;
 ```
@@ -429,12 +439,18 @@ git commit -m "feat(dig): render ↻ outdated .dig-refresh control on stale sect
 ```ts
 // tests/e2e/dig-deeper.spec.ts — fixtures: a doc with one STALE dug section (genVersion=1).
 test('clicking ↻ outdated re-digs the section and the badge is gone after the swap', async ({ page }) => {
-  // stub the dig POST → SSE (reuse the file's existing stub helper) so the swap returns the
-  // section re-rendered with genVersion=current (no .dig-refresh).
+  // CRITICAL (review H1): the swap is `fetch(location.href)` → the /api/html route, NOT the
+  // POST/SSE. The default stubHtmlRoutes returns FIXED stale HTML, so the re-GET would still
+  // contain .dig-refresh and this test would fail. Two stubs are required:
+  //   1. stub the dig POST → SSE to `done` (reuse the file's existing POST/SSE stub helper);
+  //   2. re-route **/api/html/<videoId>** to FRESH companion HTML (genVersion=current, no
+  //      .dig-refresh) BEFORE the click. Playwright applies the most-recently-registered
+  //      matching route first (LIFO), so this overrides the initial stale stub for the swap.
   await page.goto(digDocUrlForStaleFixture);
   await expect(page.locator('.dig-refresh')).toHaveCount(1);
+  await page.route('**/api/html/**', (route) => route.fulfill({ contentType: 'text/html', body: freshCompanionHtml }));
   await page.locator('.dig-refresh').click();
-  // after POST→SSE done → re-GET swap → fresh section, no badge:
+  // POST→SSE done → re-GET swap returns FRESH html → section has no badge:
   await expect(page.locator('.dig-refresh')).toHaveCount(0);
 });
 
