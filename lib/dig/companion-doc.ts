@@ -78,7 +78,7 @@ function serializeFrontmatter(doc: CompanionDoc): string {
       lines.push(`    startSec: ${s.startSec}`);
       lines.push(`    title: "${yamlQuote(s.title)}"`);
       lines.push(`    generatedAt: "${yamlQuote(s.generatedAt)}"`);
-      lines.push(`    genVersion: ${s.genVersion}`);
+      lines.push(`    genVersion: ${s.genVersion ?? 0}`);
     }
   }
 

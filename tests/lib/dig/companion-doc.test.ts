@@ -10,7 +10,7 @@ const base = (p: string, section: any) => ({
   videoId: 'abc12345678',
   language: 'en' as const,
   sourceVideoUrl: 'https://yt/x',
-  section,
+  section: { ...section, genVersion: section.genVersion ?? DIG_GENERATOR_VERSION },
 });
 
 test('first write creates frontmatter + block; readDugSectionIds reflects it', async () => {
