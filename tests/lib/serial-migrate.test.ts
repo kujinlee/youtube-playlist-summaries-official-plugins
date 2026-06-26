@@ -31,3 +31,29 @@ it('continues max+1 over existing serials', () => {
   ]);
   expect(assignments).toEqual([{ id: 'new', serial: 10 }]);
 });
+
+it('plans renames for existing-serial unprefixed video', () => {
+  const { assignments, perVideo } = planMigration([
+    v({
+      id: 'b',
+      serialNumber: 5,
+      summaryMd: 'foo.md',
+      summaryPdf: 'pdfs/foo.pdf',
+      summaryHtml: 'htmls/foo.html',
+    }),
+  ]);
+  expect(assignments).toEqual([]);
+  const renames = perVideo[0].renames;
+  expect(renames).toContainEqual({ field: 'summaryMd', from: 'foo.md', to: '005_foo.md' });
+  expect(renames).toContainEqual({
+    field: 'summaryPdf',
+    from: 'pdfs/foo.pdf',
+    to: 'pdfs/005_foo.pdf',
+  });
+  expect(renames).toContainEqual({
+    field: 'summaryHtml',
+    from: 'htmls/foo.html',
+    to: 'htmls/005_foo.html',
+  });
+  expect(renames).toContainEqual({ field: 'model', from: 'models/foo.json', to: 'models/005_foo.json' });
+});
