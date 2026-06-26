@@ -58,4 +58,25 @@ describe('dryRunReport', () => {
     // Assert no file was renamed (still alpha.md, not 001_alpha.md)
     expect(fs.existsSync(path.join(outputFolder, 'alpha.md'))).toBe(true);
   });
+
+  it('omits phantom renames whose source file does not exist on disk', () => {
+    // Two videos: one with a real .md on disk, one whose .md is referenced but missing.
+    const index: PlaylistIndex = {
+      playlistUrl: 'https://www.youtube.com/playlist?list=TEST',
+      outputFolder,
+      videos: [
+        makeVideo('real', new Date('2025-01-01').toISOString(), 'present.md'),
+        makeVideo('ghost', new Date('2025-01-02').toISOString(), 'missing.md'),
+      ],
+    };
+    writeIndex(outputFolder, index);
+    fs.writeFileSync(path.join(outputFolder, 'present.md'), 'x'); // only the real one exists
+
+    const report = dryRunReport(outputFolder);
+
+    // The real file's rename is listed…
+    expect(report).toContain('001_present.md');
+    // …but the missing file's rename is filtered out (no forever-pending phantom).
+    expect(report).not.toContain('missing.md');
+  });
 });
