@@ -1822,3 +1822,197 @@ test('E5 (expand-all failure): POST 500 for one section → batch continues; fai
   // sec3 is dug
   await expect(page.locator(`section[data-start="${SEC_EA_3}"][data-dug="true"]`)).toBeVisible();
 });
+
+// ===========================================================================
+// DIG-REFRESH (Task 6)
+// Tests for the ↻ outdated click delegation: clicking the badge on a stale
+// dug section re-digs it and the badge disappears after the swap.
+// ===========================================================================
+
+const VIDEO_ID_REFRESH = 'vid-dig-refresh';
+const START_SEC_REFRESH = 75;
+
+/**
+ * Stale dig-doc HTML: the section is dug but genVersion < DIG_GENERATOR_VERSION,
+ * so isStale=true → the renderer emits .dig-refresh on the section heading.
+ */
+function makeStaleDigDocHtml(): string {
+  const summary: ParsedSummary = {
+    title: 'Dig Refresh Test',
+    channel: null,
+    duration: null,
+    url: `https://www.youtube.com/watch?v=${VIDEO_ID_REFRESH}`,
+    lang: 'EN',
+    videoId: VIDEO_ID_REFRESH,
+    tldr: null,
+    takeaways: [],
+    sourceMd: `${VIDEO_ID_REFRESH}.md`,
+    sections: [
+      {
+        numeral: '1',
+        title: 'Section Gamma',
+        prose: 'Intro prose',
+        timeRange: {
+          startSec: START_SEC_REFRESH,
+          endSec: START_SEC_REFRESH + 60,
+          label: '1:15–2:15',
+          url: `https://www.youtube.com/watch?v=${VIDEO_ID_REFRESH}&t=${START_SEC_REFRESH}s`,
+        },
+      },
+    ],
+  };
+  // genVersion < DIG_GENERATOR_VERSION → isStale=true → .dig-refresh rendered
+  const dug: DugSection[] = [
+    {
+      sectionId: START_SEC_REFRESH,
+      startSec: START_SEC_REFRESH,
+      title: 'Section Gamma',
+      bodyMarkdown: '## Section Gamma\n\nOld dug content.\n',
+      generatedAt: '2026-01-01T00:00:00.000Z',
+      genVersion: DIG_GENERATOR_VERSION - 1,
+    },
+  ];
+  return renderDigDeeperDoc({
+    summary,
+    envelope: null,
+    dug,
+    mdPath: '/tmp/dig-refresh-test-dig.md',
+    videoId: VIDEO_ID_REFRESH,
+  });
+}
+
+/**
+ * Fresh dig-doc HTML: same section now dug at current genVersion → isStale=false
+ * → no .dig-refresh badge. This is what the re-GET returns after the re-dig completes.
+ */
+function makeFreshDigDocHtml(): string {
+  const summary: ParsedSummary = {
+    title: 'Dig Refresh Test',
+    channel: null,
+    duration: null,
+    url: `https://www.youtube.com/watch?v=${VIDEO_ID_REFRESH}`,
+    lang: 'EN',
+    videoId: VIDEO_ID_REFRESH,
+    tldr: null,
+    takeaways: [],
+    sourceMd: `${VIDEO_ID_REFRESH}.md`,
+    sections: [
+      {
+        numeral: '1',
+        title: 'Section Gamma',
+        prose: 'Intro prose',
+        timeRange: {
+          startSec: START_SEC_REFRESH,
+          endSec: START_SEC_REFRESH + 60,
+          label: '1:15–2:15',
+          url: `https://www.youtube.com/watch?v=${VIDEO_ID_REFRESH}&t=${START_SEC_REFRESH}s`,
+        },
+      },
+    ],
+  };
+  // genVersion = DIG_GENERATOR_VERSION → isStale=false → no .dig-refresh badge
+  const dug: DugSection[] = [
+    {
+      sectionId: START_SEC_REFRESH,
+      startSec: START_SEC_REFRESH,
+      title: 'Section Gamma',
+      bodyMarkdown: '## Section Gamma\n\nFreshly re-dug content.\n',
+      generatedAt: '2026-06-25T00:00:00.000Z',
+      genVersion: DIG_GENERATOR_VERSION,
+    },
+  ];
+  return renderDigDeeperDoc({
+    summary,
+    envelope: null,
+    dug,
+    mdPath: '/tmp/dig-refresh-test-dig.md',
+    videoId: VIDEO_ID_REFRESH,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// R1: clicking ↻ outdated re-digs the section and the badge is gone after the swap
+// ---------------------------------------------------------------------------
+
+test('R1 (dig-refresh click): clicking ↻ outdated re-digs and the badge is gone after the swap', async ({ page }) => {
+  const staleHtml = makeStaleDigDocHtml();
+  const freshHtml = makeFreshDigDocHtml();
+
+  // Initial stub: serve stale HTML for the dig-doc route
+  await page.route(`**/api/html/${VIDEO_ID_REFRESH}**`, (route) =>
+    route.fulfill({
+      status: 200,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      body: staleHtml,
+    }),
+  );
+
+  // Stub POST → returns jobId
+  await page.route(`**/api/videos/${VIDEO_ID_REFRESH}/dig/${START_SEC_REFRESH}`, (route) => {
+    if (route.request().method() !== 'POST') { route.continue(); return; }
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ jobId: 'refresh-job-1' }),
+    });
+  });
+
+  // Stub SSE stream → emits done immediately
+  await page.route(`**/api/videos/${VIDEO_ID_REFRESH}/dig/${START_SEC_REFRESH}/stream**`, (route) =>
+    route.fulfill({
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
+      body: sseBody({ type: 'done' }),
+    }),
+  );
+
+  const digDocUrl = `http://localhost:3000/api/html/${VIDEO_ID_REFRESH}?outputFolder=${encodeURIComponent(OUTPUT_FOLDER)}&type=dig-deeper`;
+  await page.goto(digDocUrl);
+
+  // Confirm the stale badge is present before click
+  await expect(page.locator('.dig-refresh')).toHaveCount(1);
+
+  // CRITICAL: re-route /api/html/ to FRESH HTML before the click so the re-GET swap
+  // returns a page without .dig-refresh. Playwright applies the most-recently-registered
+  // matching route first (LIFO) — this override takes effect for the re-GET fetch.
+  await page.route(`**/api/html/${VIDEO_ID_REFRESH}**`, (route) =>
+    route.fulfill({
+      status: 200,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      body: freshHtml,
+    }),
+  );
+
+  await page.locator('.dig-refresh').click();
+
+  // After POST → SSE done → re-GET swap returns fresh HTML → no .dig-refresh badge
+  await expect(page.locator('.dig-refresh')).toHaveCount(0, { timeout: 5000 });
+});
+
+// ---------------------------------------------------------------------------
+// R2: opening a doc with stale sections fires NO dig POST until a click
+// ---------------------------------------------------------------------------
+
+test('R2 (NO dig POST on load): opening a doc with stale sections fires no dig POST until a click', async ({ page }) => {
+  const staleHtml = makeStaleDigDocHtml();
+
+  await page.route(`**/api/html/${VIDEO_ID_REFRESH}**`, (route) =>
+    route.fulfill({
+      status: 200,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      body: staleHtml,
+    }),
+  );
+
+  let posted = false;
+  await page.route(`**/api/videos/${VIDEO_ID_REFRESH}/dig/**`, (route) => {
+    if (route.request().method() === 'POST') { posted = true; }
+    route.continue();
+  });
+
+  const digDocUrl = `http://localhost:3000/api/html/${VIDEO_ID_REFRESH}?outputFolder=${encodeURIComponent(OUTPUT_FOLDER)}&type=dig-deeper`;
+  await page.goto(digDocUrl);
+  await page.waitForTimeout(300);
+
+  expect(posted).toBe(false);
+});
