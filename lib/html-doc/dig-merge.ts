@@ -19,6 +19,7 @@ import type { ParsedSummary } from './types';
 import type { ModelEnvelope } from './model-store';
 import type { DugSection } from '../dig/companion-doc';
 import { sameTitles } from './rerender';
+import { DIG_GENERATOR_VERSION } from '../dig/generate';
 
 // ── Public types ───────────────────────────────────────────────────────────────
 
@@ -29,6 +30,7 @@ export interface MergedSection {
   startSec: number | null;
   gist: { lead: string; bullets: { text: string }[] } | null;
   dug: { bodyMarkdown: string } | null;
+  isStale: boolean;
 }
 
 export interface MergeResult {
@@ -94,10 +96,12 @@ export function mergeDigDoc(
 
     // DUG step 1: exact sectionId match against section's startSec.
     let dug_: MergedSection['dug'] = null;
+    let isStale_ = false;
     if (startSec !== null) {
       const matched = dugBySectionId.get(startSec);
       if (matched !== undefined && !consumedIds.has(matched.sectionId)) {
         dug_ = { bodyMarkdown: matched.bodyMarkdown };
+        isStale_ = matched.genVersion < DIG_GENERATOR_VERSION;
         consumedIds.add(matched.sectionId);
       }
     }
@@ -109,6 +113,7 @@ export function mergeDigDoc(
       startSec,
       gist,
       dug: dug_, // may be overwritten in step 2 pass below, but step-2 only fills null slots
+      isStale: isStale_,
     };
   });
 
@@ -146,6 +151,7 @@ export function mergeDigDoc(
 
     const matched = candidates[idx];
     ms.dug = { bodyMarkdown: matched.bodyMarkdown };
+    ms.isStale = matched.genVersion < DIG_GENERATOR_VERSION;
     consumedIds.add(matched.sectionId);
   }
 
