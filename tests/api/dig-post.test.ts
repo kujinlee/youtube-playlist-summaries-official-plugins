@@ -14,6 +14,7 @@
  */
 
 import { POST } from '../../app/api/videos/[id]/dig/[sectionId]/route';
+import { DIG_GENERATOR_VERSION } from '../../lib/dig/generate';
 import * as sectionWindowMod from '../../lib/dig/section-window';
 import * as generateMod from '../../lib/dig/generate';
 import * as slidesMod from '../../lib/dig/slides';
@@ -318,6 +319,16 @@ describe('B1: happy path', () => {
     // digDeeperHtml must NOT be stamped — GET renders the HTML fresh on every request
     const call = (mockUpdateVideoFields as jest.Mock).mock.calls[0][2];
     expect(call).not.toHaveProperty('digDeeperHtml');
+  });
+
+  it('stamps the current DIG_GENERATOR_VERSION on the upserted section', async () => {
+    await post(VIDEO_ID, SECTION_ID, { outputFolder: HOME });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(mockUpsertDugSection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        section: expect.objectContaining({ genVersion: DIG_GENERATOR_VERSION }),
+      }),
+    );
   });
 });
 
