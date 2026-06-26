@@ -50,7 +50,7 @@ describe('DIG_GENERATOR_VERSION', () => {
 });
 ```
 
-Then, in the `describe('buildDigPrompt — slide selectivity', ...)` block, replace the transcribe test:
+Then, in the `describe('buildDigPrompt — slide selectivity', ...)` block, **DELETE the entire existing transcribe test block at `tests/lib/dig/generate.test.ts:197-198`** (do not leave it — an appended negative assertion alongside the old positive one would leave the suite permanently red, review H5):
 
 ```typescript
   it('instructs transcribing code/commands into fenced code blocks', () => {
@@ -58,7 +58,7 @@ Then, in the `describe('buildDigPrompt — slide selectivity', ...)` block, repl
   });
 ```
 
-with these tests:
+and in its place add these tests:
 
 ```typescript
   it('no longer instructs transcribing code into fenced code blocks', () => {
@@ -148,6 +148,10 @@ git commit -m "feat(dig): code/config slides → screenshot, not transcribed fen
 **Interfaces:**
 - Consumes: `parseSlideTokens(markdown, startSec, endSec)` (existing) — returns `SlideToken[]`, capped at 3 unique seconds in document order (`lib/dig/slide-tokens.ts:83`).
 - Produces: nothing (test-only).
+
+> **TDD note (review M1):** this task is a **regression guard** for already-shipped behavior, not new logic. The standard RED phase is **N/A** — the test passes immediately (Step 3). In the per-task checklist, mark the "Write failing tests (RED)" step **Skipped** with rationale "documents existing parser cap; no new code." If it fails RED, the cap regressed — stop and investigate.
+>
+> **Pre-flight (reviews M3/M4) — already verified, no sub-tasks needed:** `tests/lib/dig/companion-doc.test.ts` has zero `fenced`/`code block`/`transcribe` references; the only version-related `toBe(2)` is `generate.test.ts:188` (flipped in Task 1). All staleness tests reference the imported `DIG_GENERATOR_VERSION`, so the bump is transparent.
 
 - [ ] **Step 1: Check whether a ≤3 cap test already exists**
 
