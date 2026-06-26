@@ -69,6 +69,41 @@ function openMenu(overrides: Partial<Video> = {}, onDeepDive = jest.fn(), onArch
 }
 
 describe('VideoRow', () => {
+  describe('rank cell (serial number)', () => {
+    // The rank cell is the only <td> carrying both `tabular-nums` and `text-zinc-500`
+    // (the Published/Added cells use `text-zinc-400`), so scope assertions to it —
+    // otherwise an absent publish date also renders an em dash and the query is ambiguous.
+    function rankCellText(rank: number | undefined): string {
+      const { container } = render(
+        <table>
+          <tbody>
+            <VideoRow
+              video={baseVideo}
+              rank={rank}
+              outputFolder={OUTPUT_FOLDER}
+              baseOutputFolder={BASE_OUTPUT_FOLDER}
+              dimUnscored={false}
+              onDeepDive={jest.fn()}
+              onArchive={jest.fn()}
+              onGenerateHtml={jest.fn()}
+              onAnnotationChange={jest.fn()}
+            />
+          </tbody>
+        </table>,
+      );
+      const cell = container.querySelector('td.tabular-nums.text-zinc-500');
+      return cell?.textContent ?? '';
+    }
+
+    it('renders the serial number when rank is set', () => {
+      expect(rankCellText(7)).toBe('7');
+    });
+
+    it('renders an em dash when rank is undefined (no serial assigned yet)', () => {
+      expect(rankCellText(undefined)).toBe('—');
+    });
+  });
+
   describe('row display', () => {
     it('renders the video title', () => {
       renderRow();

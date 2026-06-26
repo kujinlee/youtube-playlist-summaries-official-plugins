@@ -5,6 +5,15 @@ import type { SortColumn, SortOrder, Video } from '../../../types';
 
 const AUDIENCE_ORDER: Record<string, number> = { Beginner: 1, Intermediate: 2, Advanced: 3 };
 
+// Accepted values for the `sortColumn` query param. Keep in sync with the SortColumn
+// union in types/index.ts (the literal types here are compile-time-checked against it).
+// An unrecognized value (e.g. a stale `playlistIndex` from an old bookmark) falls back
+// to 'name' instead of silently producing an unsorted list.
+const SORT_COLUMNS = new Set<SortColumn>([
+  'name', 'overall', 'usefulness', 'depth', 'originality', 'recency', 'completeness',
+  'language', 'videoType', 'audience', 'serialNumber', 'videoPublishedAt', 'addedToPlaylistAt', 'personalScore',
+]);
+
 function sortVideos(videos: Video[], column: SortColumn, order: SortOrder): Video[] {
   const sorted = [...videos].sort((a, b) => {
     let aVal: string | number;
@@ -24,9 +33,13 @@ function sortVideos(videos: Video[], column: SortColumn, order: SortOrder): Vide
     } else if (column === 'audience') {
       aVal = AUDIENCE_ORDER[a.audience ?? ''] ?? 0;
       bVal = AUDIENCE_ORDER[b.audience ?? ''] ?? 0;
-    } else if (column === 'playlistIndex') {
-      aVal = a.playlistIndex ?? 0;
-      bVal = b.playlistIndex ?? 0;
+    } else if (column === 'serialNumber') {
+      // Videos with no summary yet have no serial — always sort them last, regardless of direction.
+      if (a.serialNumber === undefined && b.serialNumber === undefined) return 0;
+      if (a.serialNumber === undefined) return 1;
+      if (b.serialNumber === undefined) return -1;
+      const cmp = a.serialNumber - b.serialNumber;
+      return order === 'asc' ? cmp : -cmp;
     } else if (column === 'videoPublishedAt' || column === 'addedToPlaylistAt') {
       const aDate = a[column];
       const bDate = b[column];
@@ -69,7 +82,9 @@ export async function GET(request: Request) {
   // Best-effort: recover orphaned MD files.
   try { recoverOrphanedVideos(outputFolder); } catch { /* non-fatal */ }
 
-  const sortColumn = (searchParams.get('sortColumn') ?? 'name') as SortColumn;
+  const rawSortColumn = searchParams.get('sortColumn');
+  const sortColumn: SortColumn =
+    rawSortColumn && SORT_COLUMNS.has(rawSortColumn as SortColumn) ? (rawSortColumn as SortColumn) : 'name';
   const sortOrder = (searchParams.get('sortOrder') ?? 'asc') as SortOrder;
 
   let index;
