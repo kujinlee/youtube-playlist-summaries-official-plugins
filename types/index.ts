@@ -68,6 +68,7 @@ export const VideoSchema = z.object({
   tags: z.array(z.string()).optional(),
   removedFromPlaylist: z.boolean().optional(),
   playlistIndex: z.number().int().positive().optional(),
+  serialNumber: z.number().int().positive().optional(),
   videoPublishedAt: z.string().datetime().optional(),
   addedToPlaylistAt: z.string().datetime().optional(),
   personalScore: z.number().int().min(1).max(5).optional(),
@@ -155,5 +156,5 @@ export const FILTER_DEFAULTS: FilterState = {
 // --- Sort types for GET /api/videos ---
 type RatingSortColumn = keyof Ratings;
 // 'overall' maps to Video.overallScore; all others map directly to Ratings fields.
-export type SortColumn = 'name' | 'overall' | RatingSortColumn | 'language' | 'videoType' | 'audience' | 'playlistIndex' | 'videoPublishedAt' | 'addedToPlaylistAt' | 'personalScore';
+export type SortColumn = 'name' | 'overall' | RatingSortColumn | 'language' | 'videoType' | 'audience' | 'serialNumber' | 'videoPublishedAt' | 'addedToPlaylistAt' | 'personalScore';
 export type SortOrder = 'asc' | 'desc';

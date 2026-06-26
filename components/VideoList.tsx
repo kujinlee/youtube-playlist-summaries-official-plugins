@@ -20,7 +20,7 @@ interface VideoListProps {
 }
 
 const COLUMNS: { key: SortColumn | null; label: string; fullName: string; align: 'left' | 'right' }[] = [
-  { key: 'playlistIndex', label: '#', fullName: 'Playlist position', align: 'left' },
+  { key: 'serialNumber', label: '#', fullName: 'Serial number', align: 'left' },
   { key: 'name', label: 'Title', fullName: 'Title', align: 'left' },
   { key: 'language', label: 'Lang', fullName: 'Language', align: 'left' },
   { key: 'videoType', label: 'Type', fullName: 'Type', align: 'left' },
@@ -129,11 +129,11 @@ export default function VideoList({
         {/* Archive filtering is the caller's responsibility via filteredVideos in page.tsx.
             showArchive={true} is always passed from the app; this prop is preserved for
             component-level testing and API backward-compatibility. */}
-        {visible.map((video, i) => (
+        {visible.map((video) => (
           <VideoRow
             key={video.id}
             video={video}
-            rank={video.playlistIndex ?? i + 1}
+            rank={video.serialNumber}
             outputFolder={outputFolder}
             baseOutputFolder={baseOutputFolder}
             dimUnscored={minPersonalScore > 0 && video.personalScore === undefined}

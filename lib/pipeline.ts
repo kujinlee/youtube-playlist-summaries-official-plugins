@@ -5,6 +5,8 @@ import { generateSummary, extractQuickView } from './gemini';
 import { resolveTranscriptSegments } from './transcript-source';
 import { assertOutputFolder, assertVideoId, upsertVideo, readIndex, writeIndex } from './index-store';
 import { slugify } from './slugify';
+import { nextSerial } from './serial-assign';
+import { applySerial, padSerial } from './serial-filename';
 import type { ProgressEvent, Video, VideoMeta, RatingValue, VideoType, Audience, GeminiSummaryResponse } from '../types';
 import { CURRENT_DOC_VERSION } from './doc-version';
 import { padDividers } from './markdown-dividers';
@@ -135,6 +137,10 @@ export function reconstructVideo(content: string, file: string, mdPath: string):
     ? (audienceRaw as Audience) : undefined;
 
   const summaryMd = file;
+
+  const serialMatch = file.match(/^(\d+)_/);
+  const serialNumber = serialMatch ? parseInt(serialMatch[1], 10) : undefined;
+
   const pdfFilename = file.replace(/\.md$/, '.pdf');
   const pdfPath = path.join(path.dirname(mdPath), 'pdfs', pdfFilename);
   const summaryPdf = fs.existsSync(pdfPath) ? `pdfs/${pdfFilename}` : null;
@@ -158,6 +164,7 @@ export function reconstructVideo(content: string, file: string, mdPath: string):
     ...(videoType !== undefined && { videoType }),
     ...(audience !== undefined && { audience }),
     ...(channelRaw ? { channel: channelRaw } : {}),
+    ...(serialNumber !== undefined && { serialNumber }),
   };
 }
 
@@ -203,34 +210,6 @@ export function formatDuration(secs: number): string {
     : `${m}:${String(s).padStart(2, '0')}`;
 }
 
-const RANK_PREFIX = /^\d+_/;
-const FILENAME_FIELDS = ['summaryMd', 'summaryPdf', 'deepDiveMd', 'deepDivePdf'] as const;
-
-export function migrateToSlugFilenames(outputFolder: string): void {
-  const index = readIndex(outputFolder);
-  let anyChanged = false;
-
-  const videos = index.videos.map((video) => {
-    const updates: Partial<Video> = {};
-    for (const field of FILENAME_FIELDS) {
-      const current = video[field];
-      if (!current || !RANK_PREFIX.test(current)) continue;
-      const newName = current.replace(RANK_PREFIX, '');
-      const src = path.join(outputFolder, current);
-      const dst = path.join(outputFolder, newName);
-      try {
-        if (fs.existsSync(src) && !fs.existsSync(dst)) fs.renameSync(src, dst);
-        updates[field] = newName;
-      } catch {
-        // leave unchanged if rename fails
-      }
-    }
-    if (Object.keys(updates).length > 0) { anyChanged = true; return { ...video, ...updates }; }
-    return video;
-  });
-
-  if (anyChanged) writeIndex(outputFolder, { ...index, videos });
-}
 
 /**
  * Remove an existing Quick Reference callout block from markdown content.
@@ -328,13 +307,16 @@ export async function runIngestion(
       newIndex += 1;
 
       onProgress({ type: 'step', videoId: meta.videoId, title: meta.title, step: 'Fetching transcript…', current: newIndex, total: newTotal });
+      const serial = nextSerial(readIndex(outputFolder).videos);
       const slug = slugify(meta.title);
-      let baseName = slug;
+      let baseSlug = slug;
       let counter = 2;
-      while (fs.existsSync(path.join(outputFolder, `${baseName}.md`))) {
-        baseName = `${slug}-${counter}`;
+      // serial makes filenames unique; collision suffix kept for slug readability only.
+      while (fs.existsSync(path.join(outputFolder, applySerial(`${baseSlug}.md`, serial)))) {
+        baseSlug = `${slug}-${counter}`;
         counter++;
       }
+      const baseName = `${padSerial(serial)}_${baseSlug}`;
       onProgress({ type: 'step', videoId: meta.videoId, title: meta.title, step: 'Generating summary…', current: newIndex, total: newTotal });
       const { language, ratings, overallScore, videoType, audience, tags, tldr, takeaways } =
         await writeSummaryDoc({
@@ -351,6 +333,7 @@ export async function runIngestion(
         archived: false,
         ratings,
         overallScore,
+        serialNumber: serial,
         summaryMd: `${baseName}.md`,
         summaryPdf: null,
         deepDiveMd: null,

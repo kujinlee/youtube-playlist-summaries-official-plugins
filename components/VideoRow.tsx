@@ -11,7 +11,8 @@ import VideoQuickView from './VideoQuickView';
 
 interface VideoRowProps {
   video: Video;
-  rank: number;
+  /** Serial number shown in the # column; undefined for videos with no summary yet (renders as an em dash). */
+  rank?: number;
   outputFolder: string;
   baseOutputFolder: string;
   dimUnscored: boolean;
@@ -82,7 +83,7 @@ export default function VideoRow({ video, rank, outputFolder, baseOutputFolder, 
             {isExpanded ? '▼' : '▶'}
           </button>
         </td>
-        <td className={`px-3 py-2 text-sm text-zinc-500 tabular-nums ${cellDim}`}>{rank}</td>
+        <td className={`px-3 py-2 text-sm text-zinc-500 tabular-nums ${cellDim}`}>{rank ?? '—'}</td>
         <td
           className="px-3 py-2 cursor-pointer"
           onClick={() => setIsExpanded((prev) => !prev)}

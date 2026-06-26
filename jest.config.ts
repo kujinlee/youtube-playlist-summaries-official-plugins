@@ -11,6 +11,7 @@ const jestConfig = createJestConfig({
   testMatch: [
     '<rootDir>/tests/lib/**/*.test.ts',
     '<rootDir>/tests/api/**/*.test.ts',
+    '<rootDir>/tests/scripts/**/*.test.ts',
     '<rootDir>/tests/smoke.test.ts',
     '<rootDir>/tests/components/**/*.test.tsx',
   ],

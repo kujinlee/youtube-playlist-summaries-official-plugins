@@ -936,6 +936,9 @@ test('C2 (dig-doc toggle to summary): click show-summary ⌃ → gist visible, d
   await expect(section).toHaveClass(/show-gist/, { timeout: 3000 });
   await expect(gistBlock).toBeVisible();
   await expect(dugBlock).toBeHidden();
+
+  // Label flips to describe the next action (show the dug detail again)
+  await expect(toggle).toHaveText('show dig deeper ▶');
 });
 
 // ---------------------------------------------------------------------------
@@ -959,13 +962,15 @@ test('C3 (dig-doc toggle back to dug): toggle again → dug visible, gist hidden
   const toggle = page.locator('a.dig-toggle');
   await expect(toggle).toBeVisible();
 
-  // First toggle: → show-gist (gist visible, dug hidden)
+  // First toggle: → show-gist (gist visible, dug hidden); label → "show dig deeper ▶"
   await toggle.click();
   await expect(section).toHaveClass(/show-gist/, { timeout: 3000 });
+  await expect(toggle).toHaveText('show dig deeper ▶');
 
-  // Second toggle: → remove show-gist (dug visible, gist hidden again)
+  // Second toggle: → remove show-gist (dug visible, gist hidden again); label → "show summary ⌃"
   await toggle.click();
   await expect(section).not.toHaveClass(/show-gist/, { timeout: 3000 });
+  await expect(toggle).toHaveText('show summary ⌃');
 
   const dugBlock = section.locator('.dug');
   const gistBlock = section.locator('.gist');

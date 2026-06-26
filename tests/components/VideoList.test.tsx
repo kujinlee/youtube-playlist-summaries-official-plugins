@@ -15,7 +15,7 @@ jest.mock('@/components/VideoRow', () => {
     onAnnotationChange,
   }: {
     video: Video;
-    rank: number;
+    rank?: number;
     outputFolder: string;
     baseOutputFolder: string;
     dimUnscored: boolean;
@@ -95,16 +95,17 @@ describe('VideoList — core rendering', () => {
     expect(screen.getByTestId('row-v1')).toHaveTextContent(OUTPUT_FOLDER);
   });
 
-  it('passes 1-indexed rank to each VideoRow', () => {
-    renderList({ videos: [makeVideo('v1'), makeVideo('v2'), makeVideo('v3')] });
-    const rows = [
-      screen.getByTestId('row-v1'),
-      screen.getByTestId('row-v2'),
-      screen.getByTestId('row-v3'),
-    ];
-    expect(rows[0]).toHaveTextContent('1');
-    expect(rows[1]).toHaveTextContent('2');
-    expect(rows[2]).toHaveTextContent('3');
+  it('passes each video.serialNumber through as rank to VideoRow', () => {
+    renderList({
+      videos: [
+        { ...makeVideo('v1'), serialNumber: 10 },
+        { ...makeVideo('v2'), serialNumber: 20 },
+        { ...makeVideo('v3'), serialNumber: 30 },
+      ],
+    });
+    expect(screen.getByTestId('row-v1')).toHaveTextContent('10');
+    expect(screen.getByTestId('row-v2')).toHaveTextContent('20');
+    expect(screen.getByTestId('row-v3')).toHaveTextContent('30');
   });
 
   it('threads onDeepDive callback to VideoRow (prop-forwarding)', () => {
@@ -142,26 +143,35 @@ describe('VideoList — archive filtering (showArchive=false)', () => {
   });
 });
 
-describe('VideoList — playlistIndex rank', () => {
-  it('passes playlistIndex as rank when video has playlistIndex set', () => {
-    const video = { ...makeVideo('v1'), playlistIndex: 41 };
+describe('VideoList — serialNumber rank', () => {
+  it('passes serialNumber as rank when video has serialNumber set', () => {
+    const video = { ...makeVideo('v1'), serialNumber: 41 };
     renderList({ videos: [video] });
     // rank=41 is rendered as text in the first <td> of the mock row
     expect(screen.getByTestId('row-v1')).toHaveTextContent('41');
   });
 
-  it('falls back to 1-indexed loop position when playlistIndex is absent', () => {
-    renderList({ videos: [makeVideo('v1'), makeVideo('v2')] });
-    expect(screen.getByTestId('row-v1')).toHaveTextContent('1');
-    expect(screen.getByTestId('row-v2')).toHaveTextContent('2');
+  it('passes serialNumber as rank — not the loop position — so the value is stable', () => {
+    // v1 has serialNumber 7 even though it is the first row; the rank must be 7, not 1
+    const video = { ...makeVideo('v1'), serialNumber: 7 };
+    renderList({ videos: [video] });
+    expect(screen.getByTestId('row-v1')).toHaveTextContent('7');
   });
 
-  it('playlistIndex values are stable regardless of display order', () => {
-    const v1 = { ...makeVideo('v1'), playlistIndex: 5 };
-    const v2 = { ...makeVideo('v2'), playlistIndex: 2 };
+  it('serialNumber values are stable regardless of display order', () => {
+    const v1 = { ...makeVideo('v1'), serialNumber: 5 };
+    const v2 = { ...makeVideo('v2'), serialNumber: 2 };
     renderList({ videos: [v1, v2] });
     expect(screen.getByTestId('row-v1')).toHaveTextContent('5');
     expect(screen.getByTestId('row-v2')).toHaveTextContent('2');
+  });
+
+  it('passes rank=undefined (not the loop position) when a video has no serialNumber', () => {
+    // makeVideo leaves serialNumber unset → the first rank cell must be empty, NOT "1".
+    // Guards against regressing to the old `playlistIndex ?? i + 1` fallback.
+    renderList({ videos: [makeVideo('v1')] });
+    const rankCell = screen.getByTestId('row-v1').querySelector('td');
+    expect(rankCell?.textContent).toBe('');
   });
 });
 
@@ -195,11 +205,11 @@ describe('VideoList — sort column headers', () => {
     expect(sortableHeaders).toHaveLength(14);
   });
 
-  it('clicking # column calls onSort("playlistIndex", "asc") when unsorted', () => {
+  it('clicking # column calls onSort("serialNumber", "asc") when unsorted', () => {
     const onSort = jest.fn();
     renderWithSort({ onSort });
-    fireEvent.click(screen.getByRole('button', { name: 'Playlist position' }));
-    expect(onSort).toHaveBeenCalledWith('playlistIndex', 'asc');
+    fireEvent.click(screen.getByRole('button', { name: 'Serial number' }));
+    expect(onSort).toHaveBeenCalledWith('serialNumber', 'asc');
   });
 
   it('clicking Title column calls onSort("name", "asc")', () => {
