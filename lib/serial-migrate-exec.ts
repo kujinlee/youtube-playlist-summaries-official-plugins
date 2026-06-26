@@ -17,12 +17,45 @@ export function runPhaseA(outputFolder: string): { assigned: number } {
   return { assigned: assignments.length };
 }
 
+/**
+ * Find a file by scanning its directory and matching on NFC-normalized name.
+ * `relPath` may include a subdir prefix (e.g. `pdfs/foo.pdf`). Returns the absolute
+ * path of the first entry whose NFC form equals the target's, or null.
+ *
+ * Why: filenames can be stored on disk in a different Unicode normalization than the
+ * string in the index (Korean slugs are sometimes mixed/NFD), so a byte-exact
+ * `fs.existsSync` can miss a file that is genuinely present. See the
+ * serial-migration-normalization fix. The scan is normalization-insensitive.
+ */
+export function findByNormalizedName(dir: string, relPath: string): string | null {
+  const sub = path.dirname(relPath); // '.' when relPath has no subdir
+  const targetNfc = path.basename(relPath).normalize('NFC');
+  const scanDir = sub === '.' ? dir : path.join(dir, sub);
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(scanDir);
+  } catch {
+    return null; // directory missing
+  }
+  for (const entry of entries) {
+    if (entry.normalize('NFC') === targetNfc) return path.join(scanDir, entry);
+  }
+  return null;
+}
+
 /** Resolve a relPath to its actual on-disk absolute path (root or archived/). Null if neither exists. */
-function resolveOnDisk(outputFolder: string, relPath: string): { abs: string; rel: string } | null {
+export function resolveOnDisk(outputFolder: string, relPath: string): { abs: string; rel: string } | null {
   const root = path.join(outputFolder, relPath);
   if (fs.existsSync(root)) return { abs: root, rel: relPath };
   const arch = path.join(outputFolder, 'archived', relPath);
   if (fs.existsSync(arch)) return { abs: arch, rel: `archived/${relPath}` };
+  // Normalization-tolerant fallback: the index string may differ from the on-disk
+  // bytes by Unicode normalization, so existsSync (byte-exact, and only NFC↔NFD
+  // tolerant on some filesystems) can miss a file that is really there.
+  const rootMatch = findByNormalizedName(outputFolder, relPath);
+  if (rootMatch) return { abs: rootMatch, rel: relPath };
+  const archMatch = findByNormalizedName(path.join(outputFolder, 'archived'), relPath);
+  if (archMatch) return { abs: archMatch, rel: `archived/${relPath}` };
   return null;
 }
 
@@ -110,4 +143,30 @@ export function runPhaseB(outputFolder: string): { renamed: number; conflicts: s
     if (Object.keys(fieldUpdates).length > 0) updateVideoFields(outputFolder, plan.id, fieldUpdates);
   }
   return { renamed, conflicts };
+}
+
+/**
+ * Run Phase B repeatedly until a pass renames nothing (converged) or maxPasses is hit.
+ *
+ * A single Phase B pass has been observed to leave some renames unapplied (a file that
+ * exists but whose lookup transiently missed); re-running completes them. Looping here
+ * guarantees a single `--apply` converges instead of requiring the operator to re-run.
+ * Terminates as soon as a pass renames 0 — files that can never be renamed (no source on
+ * disk) contribute 0 and therefore never cause an infinite loop.
+ */
+export function runPhaseBUntilStable(
+  outputFolder: string,
+  maxPasses = 10,
+): { renamed: number; conflicts: string[]; passes: number } {
+  let renamed = 0;
+  const conflicts = new Set<string>();
+  let passes = 0;
+  for (let i = 0; i < maxPasses; i++) {
+    const pass = runPhaseB(outputFolder);
+    passes++;
+    renamed += pass.renamed;
+    for (const c of pass.conflicts) conflicts.add(c);
+    if (pass.renamed === 0) break; // no progress → converged
+  }
+  return { renamed, conflicts: [...conflicts], passes };
 }
