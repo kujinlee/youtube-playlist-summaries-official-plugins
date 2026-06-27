@@ -58,13 +58,19 @@ or an unrelated photo. The boundary turns a fragile global heuristic into a robu
 
 ---
 
-## Constants (named, tunable)
+## Constants (named, env-overridable for tuning)
 
-| Name | Value | Rationale |
-|---|---|---|
-| `SCENE_THRESHOLD` | `0.4` | Ignore intra-slide animation deltas, catch slide swaps. Tune per real decks. |
-| `MAX_WINDOW_SEC` | `8` | Fallback window cap when no transition is detected. |
-| `SAMPLE_FPS` | `2` | Frame sampling density within the window. |
+Each is a named constant with an env override so values can be tuned during testing without a
+rebuild. Default applies when the env var is unset or non-numeric.
+
+| Name | Default | Env override | Rationale |
+|---|---|---|---|
+| `SCENE_THRESHOLD` | `0.4` | `DIG_SCENE_THRESHOLD` | Ignore intra-slide animation deltas, catch slide swaps. Tune per real decks. |
+| `MAX_WINDOW_SEC` | `8` | `DIG_MAX_WINDOW_SEC` | Fallback window cap when no transition is detected. |
+| `SAMPLE_FPS` | `2` | `DIG_SAMPLE_FPS` | Frame sampling density within the window. |
+
+Pattern: `const SCENE_THRESHOLD = numEnv('DIG_SCENE_THRESHOLD', 0.4);` where `numEnv(name, def)`
+returns `Number(process.env[name])` when finite, else `def`.
 
 ---
 
