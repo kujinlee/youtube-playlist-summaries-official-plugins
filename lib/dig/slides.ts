@@ -22,6 +22,46 @@ import { parseSlideTokens, type SlideToken } from '@/lib/dig/slide-tokens';
 
 const execFileAsync = util.promisify(_execFile);
 
+/** Read a finite numeric env override, else the default. */
+function numEnv(name: string, def: number): number {
+  const v = Number(process.env[name]);
+  return Number.isFinite(v) ? v : def;
+}
+
+/** Scene-change sensitivity: ignore intra-slide animation, catch slide swaps. */
+const SCENE_THRESHOLD = numEnv('DIG_SCENE_THRESHOLD', 0.4);
+/** Fallback window length when no slide transition is detected (seconds). */
+const MAX_WINDOW_SEC = numEnv('DIG_MAX_WINDOW_SEC', 8);
+/** Frame sampling density within the window (frames per second). */
+const SAMPLE_FPS = numEnv('DIG_SAMPLE_FPS', 2);
+
+/**
+ * Parse the first scene-change timestamp (seconds, relative to the window start)
+ * from ffmpeg `showinfo` output. Returns `maxFallbackSec` when none is found or
+ * the value is non-positive / non-finite.
+ */
+export function parseFirstSceneChange(ffmpegOutput: string, maxFallbackSec: number): number {
+  const m = ffmpegOutput.match(/pts_time:([0-9]+(?:\.[0-9]+)?)/);
+  if (!m) return maxFallbackSec;
+  const t = Number(m[1]);
+  return Number.isFinite(t) && t > 0 ? t : maxFallbackSec;
+}
+
+/** Return the path of the largest file in `dir`, or null if the dir has no files. */
+export function pickLargestFile(dir: string): string | null {
+  let best: string | null = null;
+  let bestSize = -1;
+  for (const name of fs.readdirSync(dir)) {
+    const p = path.join(dir, name);
+    const st = fs.statSync(p);
+    if (st.isFile() && st.size > bestSize) {
+      bestSize = st.size;
+      best = p;
+    }
+  }
+  return best;
+}
+
 export interface ResolveSlideTokensOpts {
   videoId: string;
   startSec: number;
