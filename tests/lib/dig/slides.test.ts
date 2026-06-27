@@ -54,6 +54,83 @@ test('empty string → no exec called, empty string returned', async () => {
   expect(mockExecFile).not.toHaveBeenCalled();
 });
 
+// ─── Shared ffmpeg-pipeline mock ───────────────────────────────────────────
+
+// Emulates the ffmpeg pipeline: scene-detect (stderr), fps-extract (writes frames),
+// single-frame (writes the asset directly). One mock for all capture paths.
+function mockFfmpegPipeline(sceneStderr = 'pts_time:3.0\n', frameSizes = [10, 500]) {
+  mockExecFile.mockImplementation(
+    (cmd: string, args: string[], cb: (e: Error | null, so: string, se: string) => void) => {
+      if (cmd === 'yt-dlp') return cb(null, '', '');
+      const a = args.join(' ');
+      if (a.includes('scene')) return cb(null, '', sceneStderr);           // scene-detect → stderr
+      if (a.includes('fps=')) {                                            // window sampling
+        const dir = path.dirname(args[args.length - 1]);                   // <dir>/f_%03d.jpg
+        frameSizes.forEach((sz, i) =>
+          fs.writeFileSync(path.join(dir, `f_${String(i + 1).padStart(3, '0')}.jpg`), Buffer.alloc(sz)));
+        return cb(null, '', '');
+      }
+      if (a.includes('-frames:v')) {                                       // single-frame fallback
+        fs.writeFileSync(args[args.length - 1], Buffer.alloc(42));         // outPath
+        return cb(null, '', '');
+      }
+      return cb(null, '', '');
+    },
+  );
+}
+
+// ─── captureBestFrame tests ─────────────────────────────────────────────────
+
+test('captureBestFrame: samples the window and writes the largest frame to the asset path', async () => {
+  mockFfmpegPipeline('pts_time:3.0\n', [10, 500]);
+  const out = await resolveSlideTokens('see [[SLIDE:352|Build]]', getOpts());
+  expect(out).toContain('![Build](assets/abc12345678/300-352.jpg)');
+  const asset = path.join(tmpAssetsRoot, 'abc12345678', '300-352.jpg');
+  expect(fs.existsSync(asset)).toBe(true);
+  expect(fs.statSync(asset).size).toBe(500); // the largest sampled frame
+});
+
+test('captureBestFrame: scene-detect argv uses the configured threshold + showinfo', async () => {
+  mockFfmpegPipeline();
+  await resolveSlideTokens('see [[SLIDE:352|Build]]', getOpts());
+  const sceneCall = mockExecFile.mock.calls.find(
+    (c: unknown[]) => Array.isArray(c[1]) && (c[1] as string[]).join(' ').includes('scene'),
+  ) as unknown[] | undefined;
+  expect(sceneCall).toBeDefined();
+  expect((sceneCall![1] as string[]).join(' ')).toMatch(/select='gt\(scene,0\.4\)',showinfo/);
+});
+
+test('captureBestFrame: sampling produces no frames → token dropped, no leak', async () => {
+  mockFfmpegPipeline('pts_time:3.0\n', []); // fps writes ZERO frames
+  const out = await resolveSlideTokens('see [[SLIDE:352|Build]]', getOpts());
+  expect(out).not.toContain('[[SLIDE:');
+  expect(out).not.toContain('![');
+});
+
+test('captureBestFrame: token at endSec → single-frame fallback (no sampling window)', async () => {
+  mockFfmpegPipeline();
+  // token.sec == endSec (400) → maxWindowSec = 0 → single-frame path
+  const out = await resolveSlideTokens('see [[SLIDE:400|Edge]]', getOpts());
+  expect(out).toContain('![Edge](assets/abc12345678/300-400.jpg)');
+  // exactly one ffmpeg capture happened, via -frames:v (no scene/fps calls)
+  const ffmpegArgs = mockExecFile.mock.calls
+    .filter((c: unknown[]) => c[0] === 'ffmpeg')
+    .map((c: unknown[]) => (c[1] as string[]).join(' '));
+  expect(ffmpegArgs.some((s) => s.includes('-frames:v'))).toBe(true);
+  expect(ffmpegArgs.some((s) => s.includes('scene') || s.includes('fps='))).toBe(false);
+});
+
+test('captureBestFrame: scene change before MAX bounds the window (uses scene offset)', async () => {
+  mockFfmpegPipeline('pts_time:2.0\n', [10, 500]);
+  await resolveSlideTokens('see [[SLIDE:352|Build]]', getOpts());
+  const fpsCall = mockExecFile.mock.calls.find(
+    (c: unknown[]) => (c[1] as string[]).join(' ').includes('fps='),
+  ) as unknown[];
+  const argv = fpsCall[1] as string[];
+  const t = Number(argv[argv.indexOf('-t') + 1]);
+  expect(t).toBeCloseTo(2.0); // bounded by the scene change, not MAX_WINDOW_SEC (8)
+});
+
 // ─── Defense-in-depth: never leak a raw [[SLIDE:...]] token ────────────────
 
 test('out-of-range SLIDE token is stripped, never leaked as raw text', async () => {
@@ -66,9 +143,7 @@ test('out-of-range SLIDE token is stripped, never leaked as raw text', async () 
 });
 
 test('mixed: valid token resolved to image, stray unresolved token stripped', async () => {
-  mockExecFile.mockImplementation((_cmd: string, _args: string[], cb: (err: null, stdout: string, stderr: string) => void) =>
-    cb(null, '', ''),
-  );
+  mockFfmpegPipeline();
   const out = await resolveSlideTokens('a [[SLIDE:352|Good]] b [[SLIDE:999|Bad]] c', getOpts());
   expect(out).toContain('![Good](assets/abc12345678/300-352.jpg)');
   expect(out).not.toContain('[[SLIDE:');
@@ -95,9 +170,7 @@ test('yt-dlp ENOENT with mixed in-range + out-of-range tokens → neither leaks 
 // ─── Behavior 2: Happy path → yt-dlp + ffmpeg with argv arrays ─────────────
 
 test('happy path rewrites token and calls yt-dlp then ffmpeg with array argv', async () => {
-  mockExecFile.mockImplementation((_cmd: string, _args: string[], cb: (err: null, stdout: string, stderr: string) => void) =>
-    cb(null, '', ''),
-  );
+  mockFfmpegPipeline();
 
   const out = await resolveSlideTokens('see [[SLIDE:352|Loop]]', getOpts());
 
@@ -198,19 +271,27 @@ test('yt-dlp non-zero exit → all tokens stripped, text-only returned', async (
 
 // ─── Behavior 5: One frame fails → drop that token, keep others ─────────────
 
-test('second ffmpeg call fails → first token kept, second dropped', async () => {
-  let ffmpegCallCount = 0;
-  mockExecFile.mockImplementation((cmd: string, _args: string[], cb: (err: Error | null, stdout?: string, stderr?: string) => void) => {
-    if (cmd === 'yt-dlp') return cb(null, '', '');
-    ffmpegCallCount++;
-    if (ffmpegCallCount === 1) return cb(null, '', ''); // first frame OK
-    return cb(Object.assign(new Error('exit 1'), { code: 1 })); // second frame fails
-  });
-
+test('second token fps pass fails → first token kept, second dropped', async () => {
+  let fpsCount = 0;
+  mockExecFile.mockImplementation(
+    (cmd: string, args: string[], cb: (e: Error | null, so?: string, se?: string) => void) => {
+      if (cmd === 'yt-dlp') return cb(null, '', '');
+      const a = args.join(' ');
+      if (a.includes('scene')) return cb(null, '', 'pts_time:3.0\n');
+      if (a.includes('fps=')) {
+        fpsCount++;
+        if (fpsCount === 1) { // first token: write a frame
+          fs.writeFileSync(path.join(path.dirname(args[args.length - 1]), 'f_001.jpg'), Buffer.alloc(99));
+          return cb(null, '', '');
+        }
+        return cb(Object.assign(new Error('exit 1'), { code: 1 })); // second token: fps fails
+      }
+      return cb(null, '', '');
+    },
+  );
   const out = await resolveSlideTokens('[[SLIDE:310|A]] [[SLIDE:350|B]]', getOpts());
   expect(out).toContain('![A](assets/abc12345678/300-310.jpg)');
   expect(out).not.toContain('![B]');
-  // Second token is stripped to empty string
   expect(out).not.toContain('[[SLIDE:350|B]]');
 });
 
@@ -259,16 +340,7 @@ test('execFile is always called with array argv — never a string command', asy
 // ─── L-1: $ in imgRef not misinterpreted; duplicate tokens both replaced ────
 
 test('L-1: imgRef containing $& is not misinterpreted (literal $ preserved)', async () => {
-  // Create a fake asset file so the path containment check passes and ffmpeg "succeeds"
-  const assetDir = path.join(tmpAssetsRoot, 'abc12345678');
-  fs.mkdirSync(assetDir, { recursive: true });
-  const assetFile = path.join(assetDir, '300-352.jpg');
-  fs.writeFileSync(assetFile, 'fake-jpeg');
-
-  // Mock execFile: yt-dlp succeeds, ffmpeg succeeds
-  mockExecFile.mockImplementation((_cmd: string, _args: string[], cb: (err: null, stdout: string, stderr: string) => void) =>
-    cb(null, '', ''),
-  );
+  mockFfmpegPipeline();
 
   // The caption contains $& which would be misinterpreted by String.replace(string, string)
   // as the matched string. The fix uses a RegExp + function replacement to avoid this.
@@ -277,19 +349,10 @@ test('L-1: imgRef containing $& is not misinterpreted (literal $ preserved)', as
   // The alt text in the output should contain the literal $& not the matched token
   expect(out).toContain('![price $& more]');
   expect(out).not.toContain('[[SLIDE:352|price $& more]]');
-
-  fs.unlinkSync(assetFile);
 });
 
 test('L-1: duplicate slide token — both occurrences replaced', async () => {
-  const assetDir = path.join(tmpAssetsRoot, 'abc12345678');
-  fs.mkdirSync(assetDir, { recursive: true });
-  const assetFile = path.join(assetDir, '300-352.jpg');
-  fs.writeFileSync(assetFile, 'fake-jpeg');
-
-  mockExecFile.mockImplementation((_cmd: string, _args: string[], cb: (err: null, stdout: string, stderr: string) => void) =>
-    cb(null, '', ''),
-  );
+  mockFfmpegPipeline();
 
   const markdown = 'First [[SLIDE:352|Loop]] and again [[SLIDE:352|Loop]]';
   const out = await resolveSlideTokens(markdown, getOpts());
@@ -298,6 +361,4 @@ test('L-1: duplicate slide token — both occurrences replaced', async () => {
   const count = (out.match(/!\[Loop\]/g) ?? []).length;
   expect(count).toBe(2);
   expect(out).not.toContain('[[SLIDE:352|Loop]]');
-
-  fs.unlinkSync(assetFile);
 });

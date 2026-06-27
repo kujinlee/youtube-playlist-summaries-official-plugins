@@ -22,6 +22,120 @@ import { parseSlideTokens, type SlideToken } from '@/lib/dig/slide-tokens';
 
 const execFileAsync = util.promisify(_execFile);
 
+/** Read a finite numeric env override, else the default. */
+function numEnv(name: string, def: number): number {
+  const v = Number(process.env[name]);
+  return Number.isFinite(v) ? v : def;
+}
+
+/** Scene-change sensitivity: ignore intra-slide animation, catch slide swaps. */
+const SCENE_THRESHOLD = numEnv('DIG_SCENE_THRESHOLD', 0.4);
+/** Fallback window length when no slide transition is detected (seconds). */
+const MAX_WINDOW_SEC = numEnv('DIG_MAX_WINDOW_SEC', 8);
+/** Frame sampling density within the window (frames per second). */
+const SAMPLE_FPS = numEnv('DIG_SAMPLE_FPS', 2);
+
+/**
+ * Parse the first scene-change timestamp (seconds, relative to the window start)
+ * from ffmpeg `showinfo` output. Returns `maxFallbackSec` when none is found or
+ * the value is non-positive / non-finite.
+ */
+export function parseFirstSceneChange(ffmpegOutput: string, maxFallbackSec: number): number {
+  const m = ffmpegOutput.match(/pts_time:([0-9]+(?:\.[0-9]+)?)/);
+  if (!m) return maxFallbackSec;
+  const t = Number(m[1]);
+  return Number.isFinite(t) && t > 0 ? t : maxFallbackSec;
+}
+
+/**
+ * Run a command capturing BOTH stdout and stderr. `util.promisify` of a mocked
+ * `execFile` resolves to stdout only (the mock drops the promisify.custom symbol),
+ * so the scene pass — which needs stderr — wraps `_execFile` explicitly.
+ */
+function runCapture(cmd: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    _execFile(cmd, args, (err, stdout, stderr) => {
+      if (err) reject(err);
+      else resolve({ stdout: String(stdout ?? ''), stderr: String(stderr ?? '') });
+    });
+  });
+}
+
+/** Capture a single frame at `relStart` directly to `outPath` (the legacy path,
+ *  used when the forward window is too small to sample). */
+async function singleFrameCapture(clipPath: string, relStart: number, outPath: string): Promise<void> {
+  await execFileAsync('ffmpeg', [
+    '-ss', String(relStart), '-i', clipPath, '-frames:v', '1', '-q:v', '2', outPath,
+  ]);
+}
+
+/**
+ * Capture the most-complete frame of the slide at `relStart` (clip-relative
+ * seconds). Detects the next slide transition (scene detection) to bound a
+ * window, samples it at SAMPLE_FPS, and writes the largest frame to `outPath`.
+ * Throws if no frame could be produced (caller drops the token).
+ */
+async function captureBestFrame(opts: {
+  clipPath: string; relStart: number; maxWindowSec: number; outPath: string;
+}): Promise<void> {
+  const { clipPath, relStart, maxWindowSec, outPath } = opts;
+  const minSample = Math.max(0.5, 1 / SAMPLE_FPS);
+
+  // Too little forward room (e.g. token at endSec) → grab the frame at relStart.
+  if (maxWindowSec < minSample) {
+    await singleFrameCapture(clipPath, relStart, outPath);
+    return;
+  }
+
+  // 1. Scene detection → first transition offset (relative to relStart).
+  let sceneOffset = maxWindowSec;
+  try {
+    const { stderr } = await runCapture('ffmpeg', [
+      '-ss', String(relStart), '-t', String(maxWindowSec), '-i', clipPath,
+      '-vf', `select='gt(scene,${SCENE_THRESHOLD})',showinfo`, '-f', 'null', '-',
+    ]);
+    sceneOffset = parseFirstSceneChange(stderr, maxWindowSec);
+  } catch {
+    sceneOffset = maxWindowSec; // scene-detect failed → fall back to MAX window
+  }
+
+  // Slide ends almost immediately → relStart is already the settled frame.
+  if (sceneOffset < minSample) {
+    await singleFrameCapture(clipPath, relStart, outPath);
+    return;
+  }
+
+  // 2. Sample [relStart, relStart+winLen] at SAMPLE_FPS; keep the largest frame.
+  const winLen = Math.min(sceneOffset, maxWindowSec); // in [minSample, maxWindowSec]
+  const framesDir = fs.mkdtempSync(path.join(path.resolve('.cache'), 'frames-'));
+  try {
+    await execFileAsync('ffmpeg', [
+      '-ss', String(relStart), '-t', String(winLen), '-i', clipPath,
+      '-vf', `fps=${SAMPLE_FPS}`, '-q:v', '2', path.join(framesDir, 'f_%03d.jpg'),
+    ]);
+    const best = pickLargestFile(framesDir);
+    if (!best) throw new Error('no frames sampled');
+    fs.copyFileSync(best, outPath);
+  } finally {
+    fs.rmSync(framesDir, { recursive: true, force: true });
+  }
+}
+
+/** Return the path of the largest file in `dir`, or null if the dir has no files. */
+export function pickLargestFile(dir: string): string | null {
+  let best: string | null = null;
+  let bestSize = -1;
+  for (const name of fs.readdirSync(dir)) {
+    const p = path.join(dir, name);
+    const st = fs.statSync(p);
+    if (st.isFile() && st.size > bestSize) {
+      bestSize = st.size;
+      best = p;
+    }
+  }
+  return best;
+}
+
 export interface ResolveSlideTokensOpts {
   videoId: string;
   startSec: number;
@@ -107,17 +221,12 @@ export async function resolveSlideTokens(
       fs.mkdirSync(assetsDir, { recursive: true });
 
       try {
-        await execFileAsync('ffmpeg', [
-          '-ss',
-          String(token.sec - startSec),
-          '-i',
-          tmpClip,
-          '-frames:v',
-          '1',
-          '-q:v',
-          '2',
-          assetPath,
-        ]);
+        await captureBestFrame({
+          clipPath: tmpClip,
+          relStart: token.sec - startSec,
+          maxWindowSec: Math.min(MAX_WINDOW_SEC, endSec - token.sec),
+          outPath: assetPath,
+        });
 
         // Rewrite token to markdown image reference.
         const imgRef = `![${token.caption}](assets/${videoId}/${sectionId}-${token.sec}.jpg)`;

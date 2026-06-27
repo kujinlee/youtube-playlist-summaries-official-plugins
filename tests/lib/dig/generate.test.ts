@@ -184,8 +184,8 @@ test('two consecutive timeouts/transient network failures throws', async () => {
 // ── DIG_GENERATOR_VERSION ────────────────────────────────────────────────────────
 
 describe('DIG_GENERATOR_VERSION', () => {
-  it('is the integer 4', () => {
-    expect(DIG_GENERATOR_VERSION).toBe(4);
+  it('is the integer 5', () => {
+    expect(DIG_GENERATOR_VERSION).toBe(5);
   });
 });
 
@@ -236,5 +236,9 @@ describe('buildDigPrompt — slide selectivity', () => {
 
   it('produces Korean instruction under lang=ko (unchanged)', () => {
     expect(buildDigPrompt('ko', 0, 100)).toMatch(/한국어/);
+  });
+
+  it('asks for the timestamp when the slide is fully built / settled', () => {
+    expect(p()).toMatch(/fully built|settled|finished animating|fully visible/i);
   });
 });
