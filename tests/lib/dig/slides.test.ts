@@ -120,6 +120,19 @@ test('captureBestFrame: token at endSec → single-frame fallback (no sampling w
   expect(ffmpegArgs.some((s) => s.includes('scene') || s.includes('fps='))).toBe(false);
 });
 
+test('captureBestFrame: single-frame fallback passes -y so a re-dig overwrites an existing asset (no interactive prompt hang)', async () => {
+  mockFfmpegPipeline();
+  // token.sec == endSec (400) → single-frame path
+  await resolveSlideTokens('see [[SLIDE:400|Edge]]', getOpts());
+  const frameArgs = mockExecFile.mock.calls
+    .filter((c: unknown[]) => c[0] === 'ffmpeg')
+    .map((c: unknown[]) => c[1] as string[])
+    .find((a) => a.includes('-frames:v'));
+  expect(frameArgs).toBeDefined();
+  // Without -y, ffmpeg blocks on "Overwrite? [y/N]" when outPath already exists.
+  expect(frameArgs).toContain('-y');
+});
+
 test('captureBestFrame: scene change before MAX bounds the window (uses scene offset)', async () => {
   mockFfmpegPipeline('pts_time:2.0\n', [10, 500]);
   await resolveSlideTokens('see [[SLIDE:352|Build]]', getOpts());

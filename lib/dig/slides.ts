@@ -64,8 +64,10 @@ function runCapture(cmd: string, args: string[]): Promise<{ stdout: string; stde
 /** Capture a single frame at `relStart` directly to `outPath` (the legacy path,
  *  used when the forward window is too small to sample). */
 async function singleFrameCapture(clipPath: string, relStart: number, outPath: string): Promise<void> {
+  // `-y`: force-overwrite outPath. On a re-dig the prior asset already exists;
+  // without this, ffmpeg blocks forever on an interactive "Overwrite? [y/N]" prompt.
   await execFileAsync('ffmpeg', [
-    '-ss', String(relStart), '-i', clipPath, '-frames:v', '1', '-q:v', '2', outPath,
+    '-y', '-ss', String(relStart), '-i', clipPath, '-frames:v', '1', '-q:v', '2', outPath,
   ]);
 }
 
