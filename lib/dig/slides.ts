@@ -23,7 +23,7 @@ import { parseSlideTokens, type SlideToken } from '@/lib/dig/slide-tokens';
 const execFileAsync = util.promisify(_execFile);
 
 /** Read a finite numeric env override, else the default. */
-function numEnv(name: string, def: number): number {
+export function numEnv(name: string, def: number): number {
   const v = Number(process.env[name]);
   return Number.isFinite(v) ? v : def;
 }
