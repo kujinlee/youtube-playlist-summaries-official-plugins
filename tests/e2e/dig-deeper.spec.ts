@@ -2239,3 +2239,11 @@ test('Z3 (zoom dismissal — ✕): open then close button closes', async ({ page
   await page.locator('#_dg-zoom-close').click();
   await expect(overlay).toBeHidden();
 });
+
+test('Z4 (zoom dismissal — image): clicking the enlarged image itself closes (matches zoom-out cursor)', async ({ page }) => {
+  const { overlay, slide } = await openZoom(page);
+  await slide.click();
+  await expect(overlay).toBeVisible();
+  await page.locator('#_dg-zoom-img').click();
+  await expect(overlay).toBeHidden();
+});

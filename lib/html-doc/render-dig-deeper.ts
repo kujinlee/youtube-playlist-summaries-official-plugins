@@ -47,7 +47,7 @@ html.theme-ready .dg{transition:background-color .2s,color .2s}
 .dg pre code{background:none;padding:0;font-size:.85em;white-space:pre}
 .dg img{max-width:100%;height:auto;border-radius:6px;margin:.75em 0;display:block}
 .dg footer{margin-top:2.6em;padding-top:1.2em;border-top:1px solid var(--rule);color:var(--foot);font-size:.8rem}
-@media print{body{background:#fff}.dg{box-shadow:none}#theme-toggle{display:none}}
+@media print{body{background:#fff}.dg{box-shadow:none}#theme-toggle{display:none}.dg-zoom{display:none!important}}
 .missing-slide{display:inline-block;color:var(--meta);font-style:italic;font-size:.85rem;padding:.15em .4em;border:1px dashed var(--rule);border-radius:4px}
 `;
 
@@ -118,7 +118,9 @@ function buildRenderer(mdPath: string): MarkdownIt {
       return `<img class="dig-slide" src="data:image/jpeg;base64,${b64}" alt="${esc(altAttr)}">`;
     }
 
-    // Non-assets src: let markdown-it render normally but escape the src.
+    // Non-assets src (external URL): rendered escaped, but intentionally NOT a
+    // .dig-slide — external images keep default sizing and are not zoomable
+    // (only inlined slide assets get the size cap + click-to-zoom).
     return `<img src="${esc(srcAttr)}" alt="${esc(altAttr)}">`;
   };
 
@@ -286,7 +288,7 @@ export function renderDigDeeperDoc(args: {
   document.addEventListener('click',function(e){
     var t=e.target;
     if(t&&t.classList&&t.classList.contains('dig-slide')){im.src=t.getAttribute('src');im.alt=t.getAttribute('alt')||'';ov.setAttribute('data-open','');return;}
-    if(t===ov||(t&&t.id==='_dg-zoom-close')){close();}
+    if(ov.hasAttribute('data-open')){close();} // when open the overlay covers the viewport → any click (backdrop, image, or ✕) closes, matching the zoom-out cursor
   });
   document.addEventListener('keydown',function(e){
     if(e.key==='Escape'&&ov.hasAttribute('data-open')){close();}

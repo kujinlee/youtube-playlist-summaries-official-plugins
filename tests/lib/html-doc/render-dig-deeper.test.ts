@@ -856,6 +856,7 @@ describe('renderDigDeeperDoc', () => {
       expect(html).toContain('id="_dg-zoom-close"');
       expect(html).toContain('z-index:9500');
       expect(html).toContain("getElementById('_dg-zoom')");
+      expect(html).toContain('.dg-zoom{display:none!important}'); // hidden in print even if open
     });
 
     it('includes default hide-gist CSS for dug sections', () => {
