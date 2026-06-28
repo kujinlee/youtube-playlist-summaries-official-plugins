@@ -318,6 +318,8 @@ export function renderDigDeeperDoc(args: {
 })();</script>`;
 
   // ── Ask-AI toast + launcher (Feature 2) ──────────────────────────────────
+  // Third independent document-level click handler (with nav's .dg-scoped one and
+  // zoomScript's): isolated by closest('.ask-ai'), so they coexist by design.
   const aiToast = `<div id="_dg-ai-toast" role="status"></div>`;
 
   const askAiScript = `<script>(function(){
