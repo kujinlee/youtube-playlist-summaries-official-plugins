@@ -38,6 +38,18 @@ export function buildIndexedTranscript(segments: TranscriptSegment[]): string {
 
 const OWN_LINE_TOKEN = /^\s*\[\[TS:(.*?)\]\]\s*$/;
 const ANY_TOKEN = /\[\[TS:.*?\]\]/g;
+/**
+ * A malformed citation token of the shape `[[<index> @<clock>]]` — e.g. `[[0 @1:09]]`.
+ * This is NOT a `[[TS:i]]` token; it is Gemini fusing the `[[ ]]` citation wrapper with the
+ * `[i @m:ss]` DISPLAY format it sees in buildIndexedTranscript, so it matches neither
+ * OWN_LINE_TOKEN nor ANY_TOKEN and would otherwise leak verbatim. The pattern is deliberately
+ * narrow — digits, then `@`, then a clock (digits/colons) — so it never touches a genuine
+ * Obsidian wikilink (`[[Some Note]]`, `[[2024 Roadmap]]`: no digits-then-`@` shape).
+ * Whitespace is tolerated everywhere inside the wrapper (`[[ 0 @ 1:09 ]]`) so a padded
+ * LLM echo cannot slip past — the `\d+ … @ … clock` skeleton is still required, so genuine
+ * wikilinks (which never present digits-then-`@`) remain untouched.
+ */
+const STRAY_CITATION = /\[\[\s*\d+\s*@\s*[\d:]+\s*\]\]/g;
 const FENCE = /^\s*(```|~~~)/; // opens/closes a fenced code block (matches parse.ts:isFenceLine)
 
 /**
@@ -57,7 +69,8 @@ const FENCE = /^\s*(```|~~~)/; // opens/closes a fenced code block (matches pars
  * remainder of the document is treated as fenced content.
  *
  * Any stray inline token OUTSIDE a fence is stripped regardless, so no raw `[[TS:…]]` ever reaches
- * the reader (spec §8).
+ * the reader (spec §8). The same strip also scrubs the malformed `[[<index> @<clock>]]` shape that
+ * Gemini produced when it echoed the indexed-transcript display format (see STRAY_CITATION).
  */
 export function resolveTranscriptTokens(
   markdown: string,
@@ -139,7 +152,7 @@ export function resolveTranscriptTokens(
       const k = keptMap.get(i);
       return k ? timestampLine(k.start, k.end, videoId as string) : null; // dropped token line removed
     }
-    return line.replace(ANY_TOKEN, '');             // strip any stray inline token
+    return line.replace(ANY_TOKEN, '').replace(STRAY_CITATION, ''); // strip stray [[TS:…]] AND malformed [[i @clock]] citation echoes
   });
 
   return out.filter((l): l is string => l !== null).join('\n');

@@ -192,6 +192,46 @@ describe('resolveTranscriptTokens — malformed token hardening (Codex)', () => 
     const out = resolveTranscriptTokens('## 1. A\n[[TS:0]]\n\nbody', badLast, 'vid123');
     expect(out).not.toMatch(/▶|\[\[TS:/);
   });
+
+  // The dig prompt formerly asked Gemini to cite the transcript inline. Gemini
+  // fused the [[ ]] citation wrapper with the `[i @m:ss]` DISPLAY format it sees
+  // in buildIndexedTranscript, emitting `[[0 @1:09]]` — a shape that matches
+  // neither OWN_LINE_TOKEN nor ANY_TOKEN, so it leaked into the reader's doc as
+  // literal text. The safety strip must scrub this malformed citation shape too.
+  it('strips a malformed [[<index> @<clock>]] citation token inline (display-format echo)', () => {
+    const inline = '## 1. A\n\nThe model is stateless [[0 @1:09]] and forgets context.';
+    const out = resolveTranscriptTokens(inline, SEGS, 'vid123');
+    expect(out).not.toMatch(/\[\[/);             // no raw citation token of any shape
+    expect(out).toContain('The model is stateless  and forgets context.');
+  });
+
+  it('strips a multi-digit / h:mm:ss malformed citation token inline', () => {
+    const inline = '## 1. A\n\nclaim [[12 @1:09:23]] more text';
+    const out = resolveTranscriptTokens(inline, SEGS, 'vid123');
+    expect(out).not.toMatch(/\[\[/);
+  });
+
+  // H1 (adversarial): an LLM may pad the wrapper — `[[ 0 @ 1:09 ]]`. Whitespace
+  // right after `[[` or before `]]` must not let the leak through.
+  it('strips a malformed citation token padded with whitespace inside the wrapper', () => {
+    const inline = '## 1. A\n\nclaim [[ 0 @ 1:09 ]] more text';
+    const out = resolveTranscriptTokens(inline, SEGS, 'vid123');
+    expect(out).not.toMatch(/\[\[/);
+  });
+
+  it('strips a malformed citation token on its own line', () => {
+    const ownLine = '## 1. A\n[[TS:0]]\n\nbody\n[[3 @5:30]]\n\nmore';
+    const out = resolveTranscriptTokens(ownLine, SEGS, 'vid123');
+    expect(out).toContain('▶ [0:00–10:30]'); // valid own-line token still resolves
+    expect(out).not.toMatch(/\[\[/);          // malformed own-line token scrubbed
+  });
+
+  it('does NOT strip a genuine Obsidian wikilink (no digits-then-@ shape)', () => {
+    const wiki = '## 1. A\n\nSee [[Some Note]] and [[2024 Roadmap]] for details.';
+    const out = resolveTranscriptTokens(wiki, SEGS, 'vid123');
+    expect(out).toContain('[[Some Note]]');
+    expect(out).toContain('[[2024 Roadmap]]'); // digits but no `@` → not a citation
+  });
 });
 
 describe('resolveTranscriptTokens — windowed segments', () => {

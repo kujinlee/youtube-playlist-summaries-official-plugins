@@ -33,12 +33,16 @@ beforeEach(() => {
 
 // ── buildDigPrompt ────────────────────────────────────────────────────────────
 
-test('buildDigPrompt names the clip range and slide/TS rules', () => {
+test('buildDigPrompt names the clip range and slide rules', () => {
   const p = buildDigPrompt('en', 300, 400);
   expect(p).toMatch(/300/);
   expect(p).toMatch(/400/);
   expect(p).toMatch(/\[\[SLIDE:/);
-  expect(p).toMatch(/\[\[TS:/);
+});
+
+test('buildDigPrompt no longer asks for inline [[TS:i]] citations (dropped — they leaked)', () => {
+  const p = buildDigPrompt('en', 300, 400);
+  expect(p).not.toMatch(/\[\[TS:/);
 });
 
 test('buildDigPrompt mentions ≤3 slide limit', () => {
@@ -184,8 +188,8 @@ test('two consecutive timeouts/transient network failures throws', async () => {
 // ── DIG_GENERATOR_VERSION ────────────────────────────────────────────────────────
 
 describe('DIG_GENERATOR_VERSION', () => {
-  it('is the integer 7', () => {
-    expect(DIG_GENERATOR_VERSION).toBe(7);
+  it('is the integer 8', () => {
+    expect(DIG_GENERATOR_VERSION).toBe(8);
   });
 });
 
@@ -229,9 +233,9 @@ describe('buildDigPrompt — slide selectivity', () => {
     expect(p()).not.toMatch(/code screen/i);
   });
 
-  it('keeps the ≤4 ceiling wording and [[TS:i]] citations', () => {
+  it('keeps the ≤4 ceiling wording, with no [[TS:i]] citation instruction', () => {
     expect(p()).toMatch(/at most 4/i);
-    expect(p()).toMatch(/\[\[TS:i\]\]/);
+    expect(p()).not.toMatch(/\[\[TS:/);
   });
 
   it('produces Korean instruction under lang=ko (unchanged)', () => {

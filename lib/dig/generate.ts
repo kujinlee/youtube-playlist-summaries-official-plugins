@@ -10,7 +10,7 @@ import type { SectionWindow } from '@/lib/dig/section-window';
 
 /** Dig generation policy version. Bump when the slide/code policy changes so existing
  *  dug sections become stale and can be deliberately refreshed. */
-export const DIG_GENERATOR_VERSION = 7;
+export const DIG_GENERATOR_VERSION = 8;
 
 const DEEPDIVE_MODEL =
   process.env.GEMINI_DEEPDIVE_MODEL ?? 'gemini-2.5-pro';
@@ -40,9 +40,14 @@ function getApiKey(): string {
  *
  * The prompt:
  * - names the clip range [startSec, endSec]
- * - includes [[SLIDE:sec|caption]] and [[TS:i]] citation instructions
- * - enforces a ≤3-slide rule
+ * - includes [[SLIDE:M:SS|M:SS|caption]] visual-capture instructions
+ * - curates to at most 4 slides
  * - instructs Korean output when lang='ko'
+ *
+ * Note: inline [[TS:i]] transcript citations were removed (DIG_GENERATOR_VERSION 8). Gemini
+ * echoed the indexed-transcript display format as `[[i @m:ss]]`, which leaked as literal text,
+ * and resolveTranscriptTokens only ever rendered OWN-LINE citations (it strips inline ones).
+ * Each dug section already carries the summary's own-line ▶ timestamp link directly above it.
  */
 export function buildDigPrompt(
   lang: 'en' | 'ko',
@@ -63,7 +68,6 @@ ${langInstruction}
 Your task:
 - Elaborate this ONE section in depth, grounded in the transcript and video content provided.
 - Cover at least everything the summary section states, then go deeper with specifics, examples, and reasoning from the clip.
-- Cite key moments using [[TS:i]] tokens (where i is the 0-based index from the transcript below). Use these inline to anchor claims to the transcript.
 - Emit [[SLIDE:M:SS|M:SS|caption]] when an on-screen visual carries meaning words alone cannot fully convey — a diagram, chart, architecture/flow figure, data visualization, a UI/result screenshot whose spatial layout matters, OR a slide showing code, a command, terminal/CLI output, or config whose on-screen text is the point. Emit ONLY when that content is actually shown on screen — do NOT transcribe code into a fenced block, and do NOT invent a slide for code that is merely spoken. NEVER for title cards, bullet lists, quotes, tips, or a speaker on camera (including a split-screen with a speaker) unless the slide content itself is the point. The FIRST M:SS is the moment the visual is FULLY BUILT and settled; the SECOND M:SS is when it is replaced or leaves the screen.
 - Usually emit ONE token per visual, at its settled moment. EXCEPTION: if a visual builds in stages and the intermediate stages each teach something the final frame cannot (e.g. a diagram that reveals a relationship piece by piece), emit one token per instructive stage, each pointed at the moment that stage is complete. If the build merely animates into place, the final settled frame alone is enough.
 - The caption is a short plain-English description of the slide. It MUST NOT contain the characters [ ] ( ) or | — describe the slide in words; never paste raw code, YAML, or shell into the caption. (example: [[SLIDE:3:51|4:02|Diagram showing four capabilities]])
