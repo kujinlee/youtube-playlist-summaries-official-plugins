@@ -137,7 +137,18 @@ export async function resolveSlideTokens(
   // Short-circuit: no resolvable tokens → no exec calls. Still strip any raw
   // [[SLIDE:...]] that the parser rejected (out-of-range / malformed) so it
   // never leaks into the rendered doc as literal text.
+  // M3: also prune stale sectionId-* assets — a legitimate empty re-dig (Gemini
+  // emitted ZERO slide tokens) should clear the prior set for this section.
   if (tokens.length === 0) {
+    const emptyDir = path.resolve(assetsRoot, videoId);
+    const emptyPrefix = `${sectionId}-`;
+    let emptyEntries: string[] = [];
+    try { emptyEntries = fs.readdirSync(emptyDir); } catch { emptyEntries = []; }
+    for (const name of emptyEntries) {
+      if (name.startsWith(emptyPrefix) && name.endsWith('.jpg')) {
+        try { fs.unlinkSync(path.join(emptyDir, name)); } catch { /* ignore */ }
+      }
+    }
     return { markdown: stripUnresolvedSlideTokens(markdown), slides: [] };
   }
 
@@ -146,6 +157,7 @@ export async function resolveSlideTokens(
 
   const slides: Array<{ startSec: number; endSec: number; pickedSec: number }> = [];
   const usedNames = new Set<string>();  // B2: guarantee filename uniqueness (first-wins) across this run
+  const written = new Set<string>();    // M3: basenames that SUCCESSFULLY captured; drives post-loop prune
 
   let result = markdown;
   for (const token of tokens) {
@@ -166,6 +178,7 @@ export async function resolveSlideTokens(
     fs.mkdirSync(path.resolve(assetsRoot, videoId), { recursive: true });
     try {
       const pickedSec = await captureSlideFrame({ youtubeUrl, startSec: token.sec, endSec: token.endSec, outPath: assetPath });
+      written.add(assetName);  // M3: record successful capture for post-loop prune
       const imgRef = `![${token.caption}](assets/${videoId}/${assetName})`;
       const escapedRaw = token.raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       result = result.replace(new RegExp(escapedRaw, 'g'), () => imgRef);
@@ -175,6 +188,24 @@ export async function resolveSlideTokens(
       const escapedRaw2 = token.raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       result = result.replace(new RegExp(escapedRaw2, 'g'), () => '');
       usedNames.delete(assetName); // failed capture: free the name
+    }
+  }
+
+  // M3: prune stale sectionId-* assets. Runs when at least one new asset was written
+  // (normal re-dig) or when Gemini legitimately emitted ZERO tokens (empty re-dig,
+  // handled in the short-circuit above). Does NOT prune when tokens were emitted but
+  // ALL captures failed (written.size===0 && tokens.length>0) — that would wipe the
+  // prior good set. The prefix `${sectionId}-` includes a trailing hyphen so section
+  // 16 never matches section 160's files ('160-…'.startsWith('16-') is false).
+  if (written.size > 0) {
+    const pruneDir = path.resolve(assetsRoot, videoId);
+    const prunePrefix = `${sectionId}-`;
+    let pruneEntries: string[] = [];
+    try { pruneEntries = fs.readdirSync(pruneDir); } catch { pruneEntries = []; }
+    for (const name of pruneEntries) {
+      if (name.startsWith(prunePrefix) && name.endsWith('.jpg') && !written.has(name)) {
+        try { fs.unlinkSync(path.join(pruneDir, name)); } catch { /* ignore */ }
+      }
     }
   }
 

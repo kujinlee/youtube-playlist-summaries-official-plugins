@@ -415,3 +415,45 @@ test('returns slides metadata incl. pickedSec', async () => {
   expect(slides[0]).toMatchObject({ startSec: 171, endSec: 181 });
   expect(typeof slides[0].pickedSec).toBe('number');
 });
+
+// ─── Task 4: Delete-on-re-dig (write-then-prune) ────────────────────────────
+
+test('prunes stale sectionId-* assets after writing the new set', async () => {
+  const dir = path.join(tmpAssetsRoot, 'abc12345678');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, '160-999-1000.jpg'), 'old'); // stale orphan, same section
+  fs.writeFileSync(path.join(dir, '200-5-9.jpg'), 'other');    // different section — must survive
+  mockFfmpegPipeline('', [100]);
+  await resolveSlideTokens('x [[SLIDE:171|181|S]]', { ...getOpts(), startSec: 160, endSec: 233, sectionId: 160 });
+  expect(fs.existsSync(path.join(dir, '160-171-181.jpg'))).toBe(true);  // new written
+  expect(fs.existsSync(path.join(dir, '160-999-1000.jpg'))).toBe(false); // stale pruned
+  expect(fs.existsSync(path.join(dir, '200-5-9.jpg'))).toBe(true);       // other section kept
+});
+
+test('writes nothing (all captures fail) → prunes nothing, prior set intact', async () => {
+  const dir = path.join(tmpAssetsRoot, 'abc12345678');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, '160-5-9.jpg'), 'prior');
+  mockExecFile.mockImplementation((cmd: string, _a: string[], cb: (e: Error|null, so?: string, se?: string) => void) =>
+    cmd === 'yt-dlp' ? cb(new Error('403')) : cb(null, '', '')); // tokens emitted but all fail
+  await resolveSlideTokens('x [[SLIDE:171|181|S]]', { ...getOpts(), startSec: 160, endSec: 233, sectionId: 160 });
+  expect(fs.existsSync(path.join(dir, '160-5-9.jpg'))).toBe(true); // prior set intact (written=0, tokens>0)
+});
+
+test('legit zero-token re-dig prunes stale assets (M3)', async () => {
+  const dir = path.join(tmpAssetsRoot, 'abc12345678');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, '160-5-9.jpg'), 'stale');
+  // no [[SLIDE]] tokens in the markdown → tokens.length === 0 → prune runs
+  await resolveSlideTokens('plain prose, no slides', { ...getOpts(), startSec: 160, endSec: 233, sectionId: 160 });
+  expect(fs.existsSync(path.join(dir, '160-5-9.jpg'))).toBe(false);
+});
+
+test('prune prefix is hyphen-bounded: section 16 does not touch section 160 assets', async () => {
+  const dir = path.join(tmpAssetsRoot, 'abc12345678');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, '160-1-5.jpg'), 'section160');
+  mockFfmpegPipeline('', [100]);
+  await resolveSlideTokens('x [[SLIDE:17|21|S]]', { ...getOpts(), startSec: 16, endSec: 80, sectionId: 16 });
+  expect(fs.existsSync(path.join(dir, '160-1-5.jpg'))).toBe(true); // 160-* untouched by section 16
+});
