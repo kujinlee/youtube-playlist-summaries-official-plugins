@@ -12,6 +12,7 @@ import type { ParsedSummary } from './types';
 import type { ModelEnvelope } from './model-store';
 import type { DugSection } from '../dig/companion-doc';
 import { mergeDigDoc } from './dig-merge';
+import { buildWholeVideoPrompt, buildSectionPrompt, AI_PROVIDER } from '../ask-gemini';
 
 const LIGHT: Palette = {
   ...BASE_PALETTE_LIGHT_PRE, ...BASE_PALETTE_LIGHT_POST, link: '#b07700', h3: '#5b463a', h4: '#6b5a4a',
@@ -153,6 +154,10 @@ section[data-dug="true"].show-gist .dug{display:none}
 .dg-zoom[data-open]{display:flex}
 .dg-zoom img{max-width:95vw;max-height:95vh;object-fit:contain;border-radius:4px}
 .dg-zoom-close{position:fixed;top:1rem;right:1.2rem;font-size:1.6rem;line-height:1;color:#fff;background:none;border:none;cursor:pointer;z-index:9501}
+.dg .ask-ai{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--meta);font-size:.8rem;font-weight:400;text-decoration:none;white-space:nowrap;cursor:pointer}
+.dg .ask-ai:hover{text-decoration:underline}
+#_dg-ai-toast{display:none;position:fixed;left:50%;bottom:1.4rem;transform:translateX(-50%);z-index:9600;background:var(--card,#222);color:var(--ink,#fff);border:1px solid var(--rule);border-radius:6px;padding:.5em .9em;font-size:.85rem;box-shadow:0 4px 18px rgba(0,0,0,.2)}
+#_dg-ai-toast[data-show]{display:block}
 `;
 
 /**
@@ -170,13 +175,22 @@ export function renderDigDeeperDoc(args: {
   dug: DugSection[];
   mdPath: string;
   videoId: string;
+  language?: 'en' | 'ko';
 }): string {
-  const { summary, envelope, dug, mdPath, videoId } = args;
+  const { summary, envelope, dug, mdPath, videoId, language = 'en' } = args;
   const renderer = buildRenderer(mdPath);
 
   const { sections, orphans } = mergeDigDoc(summary, envelope, dug);
 
   const title = summary.title;
+
+  // ── Ask-AI (Feature 2) ─────────────────────────────────────────────────────
+  const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  // An .ask-ai anchor: data-ai-prompt is HTML-attribute-escaped (NOT percent-encoded)
+  // so the clipboard receives the literal prompt; data-ai-url percent-encodes the
+  // prompt INSIDE the gemini URL (then attribute-escapes the whole URL).
+  const askAi = (prompt: string, label: string): string =>
+    `<a class="ask-ai" data-ai-prompt="${esc(prompt)}" data-ai-url="${esc(AI_PROVIDER.buildUrl(prompt))}">${label}</a>`;
 
   // Determine the first section that has a startSec for the top-bar back-link.
   const firstStartSec = sections.find((s) => s.startSec !== null)?.startSec ?? null;
@@ -185,10 +199,11 @@ export function renderDigDeeperDoc(args: {
   const summaryLink = firstStartSec !== null
     ? digControl('summary', firstStartSec)
     : `<a class="dig" data-type="summary">↑ summary</a>`;
-  const topBar = `<div class="dg-topbar">${summaryLink} <button class="dg-expand-all">⤢ expand all</button></div>`;
+  const wholeAsk = askAi(buildWholeVideoPrompt(videoUrl, language), '💬 Ask AI about this video');
+  const topBar = `<div class="dg-topbar">${summaryLink} <button class="dg-expand-all">⤢ expand all</button> ${wholeAsk}</div>`;
 
   // ── Sections ──────────────────────────────────────────────────────────────
-  const sectionsHtml = sections.map((ms) => {
+  const sectionsHtml = sections.map((ms, i) => {
     const { startSec, title: sectionTitle, gist, dug: dugData } = ms;
     const isDug = dugData !== null;
 
@@ -212,6 +227,13 @@ export function renderDigDeeperDoc(args: {
       }
     } else if (startSec !== null) {
       control = ` <a class="dig-trigger" data-section="${startSec}">dig deeper ▶</a>`;
+    }
+
+    // Section Ask-AI (independent of dug state): end = the next section's start,
+    // or null → "onward" for the last/untimed-tail section.
+    if (startSec !== null) {
+      const endSec = sections.slice(i + 1).find((s) => s.startSec !== null)?.startSec ?? null;
+      control += ` ${askAi(buildSectionPrompt(videoUrl, startSec, endSec, language), '💬 ask AI')}`;
     }
 
     const heading = `<h2>${esc(headingText)}${tsLink}${control}</h2>`;
@@ -295,6 +317,24 @@ export function renderDigDeeperDoc(args: {
   });
 })();</script>`;
 
+  // ── Ask-AI toast + launcher (Feature 2) ──────────────────────────────────
+  const aiToast = `<div id="_dg-ai-toast" role="status"></div>`;
+
+  const askAiScript = `<script>(function(){
+  var toast=document.getElementById('_dg-ai-toast');
+  function show(m){if(!toast)return;toast.textContent=m;toast.setAttribute('data-show','');setTimeout(function(){toast.removeAttribute('data-show');},2500);}
+  document.addEventListener('click',function(e){
+    var a=e.target&&e.target.closest?e.target.closest('.ask-ai'):null;
+    if(!a)return;
+    e.preventDefault();
+    var p=a.getAttribute('data-ai-prompt')||'',u=a.getAttribute('data-ai-url')||'';
+    if(u)window.open(u,'_blank','noopener,noreferrer');
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(p).then(function(){show('✓ copied — paste (⌘V) into Gemini');},function(){show('Could not copy — select the link text and copy it');});
+    }else{show('Could not copy — select the link text and copy it');}
+  });
+})();</script>`;
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -311,8 +351,8 @@ ${THEME_TOGGLE_BUTTON}${PRINT_BUTTON}
 <article class="dg">
 ${bodyHtml}
 </article>
-${expandAllDialogs}${zoomOverlay}
-${NAV_SCRIPT}${THEME_TOGGLE_SCRIPT}${zoomScript}
+${expandAllDialogs}${zoomOverlay}${aiToast}
+${NAV_SCRIPT}${THEME_TOGGLE_SCRIPT}${zoomScript}${askAiScript}
 </body>
 </html>`;
 }

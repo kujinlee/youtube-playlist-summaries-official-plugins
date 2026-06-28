@@ -2247,3 +2247,32 @@ test('Z4 (zoom dismissal — image): clicking the enlarged image itself closes (
   await page.locator('#_dg-zoom-img').click();
   await expect(overlay).toBeHidden();
 });
+
+test('A1 (Ask-AI): clicking a link copies the prompt, shows the toast, and opens the gemini url', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.addInitScript(() => {
+    (window as unknown as { __opened: string[] }).__opened = [];
+    window.open = ((u?: string | URL) => {
+      (window as unknown as { __opened: string[] }).__opened.push(String(u));
+      return null;
+    }) as typeof window.open;
+  });
+  const html = makeCompanionHtmlWithSlides();
+  await page.route(`**/api/html/${VIDEO_ID_SLIDES}**`, (route) =>
+    route.fulfill({ status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' }, body: html }),
+  );
+  await page.goto(`http://localhost:3000/api/html/${VIDEO_ID_SLIDES}?outputFolder=${encodeURIComponent(OUTPUT_FOLDER)}&type=dig-deeper`);
+
+  // .first() is the top-bar WHOLE-VIDEO link; its prompt says "this video".
+  const ask = page.locator('.ask-ai').first();
+  await expect(ask).toBeVisible();
+  await ask.click();
+
+  await expect(page.locator('#_dg-ai-toast')).toBeVisible();
+
+  const clip = await page.evaluate(() => navigator.clipboard.readText());
+  expect(clip).toContain('this video');
+
+  const opened = await page.evaluate(() => (window as unknown as { __opened: string[] }).__opened);
+  expect(opened.some((u) => u.startsWith('https://gemini.google.com/app?prompt='))).toBe(true);
+});

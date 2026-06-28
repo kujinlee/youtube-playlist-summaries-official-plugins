@@ -910,6 +910,61 @@ describe('renderDigDeeperDoc', () => {
     it('keeps the dig-trigger control text exactly "dig deeper ▶"', () => {
       expect(html).toContain('dig deeper ▶');
     });
+
+    // ── Ask-AI links (Feature 2) ──────────────────────────────────────────
+    it('renders a whole-video Ask-AI link in the top bar', () => {
+      expect(html).toMatch(/<a class="ask-ai"[^>]*data-ai-prompt="[^"]*Please review this video first/);
+      expect(html).toContain('Ask AI about this video');
+    });
+
+    it('renders a per-section Ask-AI link with the section prompt + gemini url', () => {
+      expect(html).toMatch(/<a class="ask-ai"[^>]*data-ai-prompt="[^"]*this section of the video/);
+      expect(html).toMatch(/data-ai-url="https:\/\/gemini\.google\.com\/app\?prompt=/);
+    });
+
+    it('section end = NEXT section start; last section is "onward"', () => {
+      // section 1 startSec 60 (1:00), next 300 (5:00): range "from 1:00 to 5:00"
+      expect(html).toContain('this section of the video (from 1:00 to 5:00)');
+      // section 2 startSec 300 (5:00) is last: "from 5:00 onward"
+      expect(html).toContain('this section of the video (from 5:00 onward)');
+    });
+
+    it('includes the ask-ai toast + script', () => {
+      expect(html).toContain('id="_dg-ai-toast"');
+      expect(html).toContain("closest('.ask-ai')");
+      expect(html).toContain('clipboard');
+    });
+  });
+
+  describe('renderDigDeeperDoc — Ask-AI language threading', () => {
+    function summaryTwoSections(): ParsedSummary {
+      return {
+        title: 'T', channel: null, duration: null,
+        url: 'https://www.youtube.com/watch?v=vid123', lang: 'EN', videoId: 'vid123',
+        tldr: null, takeaways: [], sourceMd: 'test.md',
+        sections: [
+          { numeral: '1', title: 'A', prose: 'p', timeRange: { startSec: 10, endSec: 20 } },
+          { numeral: '2', title: 'B', prose: 'p', timeRange: { startSec: 40, endSec: 50 } },
+        ],
+      } as unknown as ParsedSummary;
+    }
+
+    it('threads ko: section range uses next start and Korean phrasing', () => {
+      const html = renderDigDeeperDoc({
+        summary: summaryTwoSections(), envelope: null, dug: [],
+        mdPath, videoId: 'vid123', language: 'ko',
+      });
+      expect(html).toContain('0:10부터 0:40까지'); // section 1 → next start 0:40
+      expect(html).toContain('0:40부터)');          // last section → onward
+    });
+
+    it('defaults language to en when omitted', () => {
+      const html = renderDigDeeperDoc({
+        summary: summaryTwoSections(), envelope: null, dug: [],
+        mdPath, videoId: 'vid123',
+      });
+      expect(html).toContain('this section of the video (from 0:10 to 0:40)');
+    });
   });
 
   // ──────────────────────────────────────────────────────────────────────────
