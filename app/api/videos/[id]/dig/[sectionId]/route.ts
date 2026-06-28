@@ -132,7 +132,7 @@ async function runDigPipeline(
 
   // Step 9: Resolve slide tokens (assets written here)
   const assetsRoot = path.join(outputFolder, 'assets');
-  const { markdown: finalMd } = await resolveSlideTokens(mdWithTs, {
+  const { markdown: finalMd, slides } = await resolveSlideTokens(mdWithTs, {
     videoId,
     startSec: window.startSec,
     endSec: window.endSec,
@@ -164,6 +164,7 @@ async function runDigPipeline(
       bodyMarkdown: finalMd,
       generatedAt: new Date().toISOString(),
       genVersion: DIG_GENERATOR_VERSION,
+      slides,
     },
   });
 

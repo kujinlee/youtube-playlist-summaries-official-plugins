@@ -411,6 +411,16 @@ test('genVersion round-trips through serialize → parse', async () => {
   expect(sections[0].genVersion).toBe(5);
 });
 
+test('round-trips per-slide {startSec,endSec,pickedSec} in frontmatter', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'dig-slides-'));
+  const p = path.join(dir, 'x-dig-deeper.md');
+  await upsertDugSection({ digDeeperPath: p, videoTitle: 'T', videoId: 'v', language: 'en', sourceVideoUrl: 'u',
+    section: { sectionId: 160, startSec: 160, title: 'S', bodyMarkdown: 'b', generatedAt: 'g', genVersion: 7,
+      slides: [{ startSec: 171, endSec: 181, pickedSec: 176.5 }] } });
+  const parsed = parseDugSections(await readFile(p, 'utf8'));
+  expect(parsed[0].slides).toEqual([{ startSec: 171, endSec: 181, pickedSec: 176.5 }]);
+});
+
 test('defaults genVersion to 0 when the frontmatter omits it (legacy doc)', () => {
   const legacy = [
     '---',

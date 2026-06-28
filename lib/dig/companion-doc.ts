@@ -34,6 +34,7 @@ export interface DugSection {
   bodyMarkdown: string;
   generatedAt: string;
   genVersion: number;
+  slides?: Array<{ startSec: number; endSec: number; pickedSec: number }>;
 }
 
 // ── Internal types ────────────────────────────────────────────────────────────
@@ -79,6 +80,14 @@ function serializeFrontmatter(doc: CompanionDoc): string {
       lines.push(`    title: "${yamlQuote(s.title)}"`);
       lines.push(`    generatedAt: "${yamlQuote(s.generatedAt)}"`);
       lines.push(`    genVersion: ${s.genVersion ?? 0}`);
+      if (s.slides && s.slides.length) {
+        lines.push('    slides:');
+        for (const sl of s.slides) {
+          lines.push(`      - startSec: ${sl.startSec}`);
+          lines.push(`        endSec: ${sl.endSec}`);
+          lines.push(`        pickedSec: ${sl.pickedSec}`);
+        }
+      }
     }
   }
 
@@ -143,7 +152,7 @@ interface ParsedFrontmatter {
   videoId: string;
   language: 'en' | 'ko';
   sourceVideoUrl: string;
-  sections: Array<{ sectionId: number; startSec: number; title: string; generatedAt: string; genVersion: number }>;
+  sections: Array<{ sectionId: number; startSec: number; title: string; generatedAt: string; genVersion: number; slides?: Array<{ startSec: number; endSec: number; pickedSec: number }> }>;
 }
 
 function parseFrontmatter(fmText: string): ParsedFrontmatter {
@@ -153,11 +162,13 @@ function parseFrontmatter(fmText: string): ParsedFrontmatter {
   let videoId = '';
   let language: 'en' | 'ko' = 'en';
   let sourceVideoUrl = '';
-  const sections: Array<{ sectionId: number; startSec: number; title: string; generatedAt: string; genVersion: number }> = [];
+  const sections: Array<{ sectionId: number; startSec: number; title: string; generatedAt: string; genVersion: number; slides?: Array<{ startSec: number; endSec: number; pickedSec: number }> }> = [];
 
   // State machine for parsing the sections block sequence
   let inSections = false;
-  let currentSection: Partial<{ sectionId: number; startSec: number; title: string; generatedAt: string; genVersion: number }> | null = null;
+  let currentSection: Partial<{ sectionId: number; startSec: number; title: string; generatedAt: string; genVersion: number; slides: Array<{ startSec: number; endSec: number; pickedSec: number }> }> | null = null;
+  let inSlides = false;
+  let currentSlide: Partial<{ startSec: number; endSec: number; pickedSec: number }> | null = null;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -173,6 +184,15 @@ function parseFrontmatter(fmText: string): ParsedFrontmatter {
     if (inSections) {
       const listItemMatch = line.match(/^\s{2}-\s+sectionId\s*:\s*(\d+)/);
       if (listItemMatch) {
+        // Commit any pending slide before committing the section
+        if (inSlides && currentSlide && currentSection) {
+          if (currentSlide.startSec !== undefined && currentSlide.endSec !== undefined && currentSlide.pickedSec !== undefined) {
+            if (!currentSection.slides) currentSection.slides = [];
+            currentSection.slides.push({ startSec: currentSlide.startSec, endSec: currentSlide.endSec, pickedSec: currentSlide.pickedSec });
+          }
+          currentSlide = null;
+        }
+        inSlides = false;
         // Commit any previous partial section
         if (currentSection?.sectionId !== undefined && currentSection.startSec !== undefined) {
           sections.push({
@@ -181,6 +201,7 @@ function parseFrontmatter(fmText: string): ParsedFrontmatter {
             title: currentSection.title ?? '',
             generatedAt: currentSection.generatedAt ?? '',
             genVersion: currentSection.genVersion ?? 0,
+            ...(currentSection.slides ? { slides: currentSection.slides } : {}),
           });
         }
         currentSection = { sectionId: parseInt(listItemMatch[1], 10) };
@@ -211,8 +232,52 @@ function parseFrontmatter(fmText: string): ParsedFrontmatter {
         continue;
       }
 
+      // Slides sub-list: `    slides:` (4-space indent)
+      if (/^\s{4}slides\s*:/.test(line) && currentSection) {
+        inSlides = true;
+        currentSlide = null;
+        continue;
+      }
+
+      if (inSlides && currentSection) {
+        // New slide item: `      - startSec: N` (6-space indent)
+        const slideStartSecMatch = line.match(/^\s{6}-\s+startSec\s*:\s*(\d+)/);
+        if (slideStartSecMatch) {
+          // Commit any pending slide
+          if (currentSlide && currentSlide.startSec !== undefined && currentSlide.endSec !== undefined && currentSlide.pickedSec !== undefined) {
+            if (!currentSection.slides) currentSection.slides = [];
+            currentSection.slides.push({ startSec: currentSlide.startSec, endSec: currentSlide.endSec, pickedSec: currentSlide.pickedSec });
+          }
+          currentSlide = { startSec: parseInt(slideStartSecMatch[1], 10) };
+          continue;
+        }
+
+        // Slide field: `        endSec: N` (8-space indent)
+        const slideEndSecMatch = line.match(/^\s{8}endSec\s*:\s*(\d+)/);
+        if (slideEndSecMatch && currentSlide) {
+          currentSlide.endSec = parseInt(slideEndSecMatch[1], 10);
+          continue;
+        }
+
+        // Slide field: `        pickedSec: N.N` (8-space indent) — FLOAT: use ([\d.]+) + parseFloat
+        const slidePickedSecMatch = line.match(/^\s{8}pickedSec\s*:\s*([\d.]+)/);
+        if (slidePickedSecMatch && currentSlide) {
+          currentSlide.pickedSec = parseFloat(slidePickedSecMatch[1]);
+          continue;
+        }
+      }
+
       // A non-indented non-empty line signals end of sections block
       if (line.trim() !== '' && !line.startsWith(' ') && !line.startsWith('\t')) {
+        // Commit any pending slide before leaving
+        if (inSlides && currentSlide && currentSection) {
+          if (currentSlide.startSec !== undefined && currentSlide.endSec !== undefined && currentSlide.pickedSec !== undefined) {
+            if (!currentSection.slides) currentSection.slides = [];
+            currentSection.slides.push({ startSec: currentSlide.startSec, endSec: currentSlide.endSec, pickedSec: currentSlide.pickedSec });
+          }
+          currentSlide = null;
+        }
+        inSlides = false;
         inSections = false;
         // Fall through to scalar parsing below
       } else {
@@ -243,6 +308,14 @@ function parseFrontmatter(fmText: string): ParsedFrontmatter {
     }
   }
 
+  // Commit trailing slide (if parsing ended mid-slide-list)
+  if (inSlides && currentSlide && currentSection) {
+    if (currentSlide.startSec !== undefined && currentSlide.endSec !== undefined && currentSlide.pickedSec !== undefined) {
+      if (!currentSection.slides) currentSection.slides = [];
+      currentSection.slides.push({ startSec: currentSlide.startSec, endSec: currentSlide.endSec, pickedSec: currentSlide.pickedSec });
+    }
+  }
+
   // Commit trailing section
   if (currentSection?.sectionId !== undefined && currentSection.startSec !== undefined) {
     sections.push({
@@ -251,6 +324,7 @@ function parseFrontmatter(fmText: string): ParsedFrontmatter {
       title: currentSection.title ?? '',
       generatedAt: currentSection.generatedAt ?? '',
       genVersion: currentSection.genVersion ?? 0,
+      ...(currentSection.slides ? { slides: currentSection.slides } : {}),
     });
   }
 
@@ -269,7 +343,7 @@ function parseFrontmatter(fmText: string): ParsedFrontmatter {
  */
 function parseBodySections(
   bodyText: string,
-  fmSections: Array<{ sectionId: number; startSec: number; title: string; generatedAt: string; genVersion: number }>,
+  fmSections: Array<{ sectionId: number; startSec: number; title: string; generatedAt: string; genVersion: number; slides?: Array<{ startSec: number; endSec: number; pickedSec: number }> }>,
 ): Map<number, { title: string; bodyMarkdown: string }> {
   const result = new Map<number, { title: string; bodyMarkdown: string }>();
   if (!bodyText.trim()) return result;
@@ -330,6 +404,7 @@ export function parseDugSections(content: string): DugSection[] {
         bodyMarkdown: body.bodyMarkdown,
         generatedAt: s.generatedAt,
         genVersion: s.genVersion ?? 0,
+        ...(s.slides ? { slides: s.slides } : {}),
       },
     ];
   });
