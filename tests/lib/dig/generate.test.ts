@@ -251,7 +251,6 @@ describe('buildDigPrompt — slide selectivity', () => {
   it('instructs one collapsed token for a simple animated build, exception for staged progression', () => {
     const s = buildDigPrompt('en', 0, 100);
     expect(s).toMatch(/final settled frame alone is enough/i);
-    expect(s).toMatch(/per instructive stage/i);
   });
 
   it('allows a per-stage token for an instructive build progression', () => {

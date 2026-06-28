@@ -35,7 +35,7 @@ test('pipe in caption: split on first pipe; inner pipe removed', () => {
   expect(tokens[0].caption).toBe('perceive plan');
 });
 
-// ── Behavior 5: Dedupe by sec — first caption wins ────────────────────────────────────────
+// ── Behavior 5: Dedupe by (start, end) — first caption wins ──────────────────────────────
 test('dedupe by sec keeps first caption', () => {
   const t = parseSlideTokens('[[SLIDE:312|A]] [[SLIDE:312|B]]', 300, 400);
   expect(t).toHaveLength(1);

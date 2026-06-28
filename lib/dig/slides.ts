@@ -140,15 +140,7 @@ export async function resolveSlideTokens(
   // M3: also prune stale sectionId-* assets — a legitimate empty re-dig (Gemini
   // emitted ZERO slide tokens) should clear the prior set for this section.
   if (tokens.length === 0) {
-    const emptyDir = path.resolve(assetsRoot, videoId);
-    const emptyPrefix = `${sectionId}-`;
-    let emptyEntries: string[] = [];
-    try { emptyEntries = fs.readdirSync(emptyDir); } catch { emptyEntries = []; }
-    for (const name of emptyEntries) {
-      if (name.startsWith(emptyPrefix) && name.endsWith('.jpg')) {
-        try { fs.unlinkSync(path.join(emptyDir, name)); } catch { /* ignore */ }
-      }
-    }
+    pruneSectionAssets(path.resolve(assetsRoot, videoId), sectionId, new Set());
     return { markdown: stripUnresolvedSlideTokens(markdown), slides: [] };
   }
 
@@ -161,6 +153,7 @@ export async function resolveSlideTokens(
 
   let result = markdown;
   for (const token of tokens) {
+    // endComponent = Gemini's reported slide-end, used for the filename/frontmatter identity; note the SAMPLED window is separately capped at start+MAX_CAPTURE_SEC, so endComponent may exceed the sampled span (intentional — it records the semantic slide end, not the capture window).
     const endComponent = token.endSec ?? (token.sec + DEFAULT_FWD);
     const assetName = `${sectionId}-${token.sec}-${endComponent}.jpg`;
 
@@ -198,15 +191,7 @@ export async function resolveSlideTokens(
   // prior good set. The prefix `${sectionId}-` includes a trailing hyphen so section
   // 16 never matches section 160's files ('160-…'.startsWith('16-') is false).
   if (written.size > 0) {
-    const pruneDir = path.resolve(assetsRoot, videoId);
-    const prunePrefix = `${sectionId}-`;
-    let pruneEntries: string[] = [];
-    try { pruneEntries = fs.readdirSync(pruneDir); } catch { pruneEntries = []; }
-    for (const name of pruneEntries) {
-      if (name.startsWith(prunePrefix) && name.endsWith('.jpg') && !written.has(name)) {
-        try { fs.unlinkSync(path.join(pruneDir, name)); } catch { /* ignore */ }
-      }
-    }
+    pruneSectionAssets(path.resolve(assetsRoot, videoId), sectionId, written);
   }
 
   // Final safety net: strip any [[SLIDE:...]] that was never resolved to an
@@ -215,6 +200,19 @@ export async function resolveSlideTokens(
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+/** Delete stale `<sectionId>-*.jpg` assets in `dir`, keeping any name in `keep`.
+ *  Hyphen-bounded prefix so section 16 never matches section 160's files. */
+function pruneSectionAssets(dir: string, sectionId: number, keep: Set<string>): void {
+  const prefix = `${sectionId}-`;
+  let entries: string[] = [];
+  try { entries = fs.readdirSync(dir); } catch { return; }
+  for (const name of entries) {
+    if (name.startsWith(prefix) && name.endsWith('.jpg') && !keep.has(name)) {
+      try { fs.unlinkSync(path.join(dir, name)); } catch { /* ignore */ }
+    }
+  }
+}
 
 /**
  * Remove any `[[SLIDE:...]]` token not already rewritten to `![](...)` — a token
