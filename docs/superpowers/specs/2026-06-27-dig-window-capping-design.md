@@ -78,8 +78,11 @@ needed:
 - **Stop** when: a cut is crossed, OR the best frame is interior and the size has plateaued,
   OR a **hard safety cap** is reached (`sec + MAX_FWD`, e.g. 30s, bounded also by section end).
 
-Effect: regimes A & B finish in **one ~9s fetch**; regime C takes 2–3 fetches that stop
-exactly when the slide settles; no arbitrary forward constant; worst case bounded.
+Effect: regimes A & B finish in **one ~9s fetch**; regime C takes a few fetches that stop
+exactly when the slide settles. The extend count is **hard-bounded by `MAX_EXTENDS=3`** →
+≤ **4 `yt-dlp` calls/token** (≤12/section). The 403 that motivated this work came from *one
+sustained ~19-minute transfer*, not call count; four sequential ~6–9s clips are small and fast,
+so the count bound trades the rate-limit risk away rather than re-introducing it.
 
 **Per-call overhead note:** each segment is a separate `yt-dlp --download-sections`
 invocation (~1–2s startup + signed-URL re-extraction). Base segment is kept at ~8–10s so the
@@ -114,9 +117,14 @@ different slide?* Mechanism: **magnitude + spatial extent of inter-frame change*
 
 `ffmpeg`'s `scene` score (already used in `captureBestFrame`) is this metric. The **threshold
 must be recalibrated** against the spike's labeled frames (0.4 missed soft fades; too low
-mis-flags large build-steps as cuts). If a single `scene` threshold cannot separate the
-labeled set acceptably, fall back to a direct consecutive-frame difference metric. Calibration
-is an explicit early task.
+mis-flags large build-steps as cuts). Calibration is an explicit early task.
+
+**Threshold-only (M4 decision):** we do **not** add a second frame-difference metric even if no
+threshold cleanly separates the labeled set. The local-stability plateau (§3.4) is the safety
+net — a missed cut lets the walk run to the trailing edge and extend by at most one segment, it
+never silently selects a next-slide frame. So a slightly-wrong threshold degrades gracefully;
+the residual error is recorded in the calibration doc rather than chased with more machinery
+(YAGNI).
 
 ### 3.4 Settle / plateau (separate from the cut detector)
 
@@ -205,13 +213,13 @@ refactored/absorbed into the above. The single-frame `-y` fix (PR #34) is preser
 |---|---|---|
 | `BACK_PAD` | 3s | spike: backward error negligible, quantization pad |
 | `BASE_FWD` | 6s | spike: covers stable/fast-cut at `sec` |
-| `SEG` (extend step) | 6s | per-call overhead vs granularity |
-| `MAX_FWD` (safety cap) | 30s | spike: longest observed build settle ~18s + margin |
+| `EXTEND_SEC` (extend step) | 6s | per-call overhead vs granularity |
+| `MAX_EXTENDS` (call bound) | 3 | ≤4 yt-dlp/token; reaches `sec+24` ≥ longest observed settle ~18s |
 | `SCENE_THRESHOLD` | **recalibrate** | spike labeled set (0.4 too high) |
 | `SAMPLE_FPS` | 2 (current) | unchanged unless calibration suggests otherwise |
 
 The current fixed-forward `MAX_WINDOW_SEC` (8s) is **removed** — its role (bounding the
-forward search) is taken over by the cut detector (§3.3) plus the `MAX_FWD` safety cap. No
+forward search) is taken over by the cut detector (§3.3) plus the `MAX_EXTENDS` call bound. No
 code should retain an 8s forward assumption.
 
 All env-overridable, following the existing `numEnv` pattern (`DIG_*`).
