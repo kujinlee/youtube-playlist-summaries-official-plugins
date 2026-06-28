@@ -192,7 +192,7 @@ export async function GET(request: Request, { params }: Params) {
       }
     }
 
-    return serveHtml(renderDigDeeperDoc({ summary: parsed, envelope, dug, mdPath: summaryMdPath, videoId }));
+    return serveHtml(renderDigDeeperDoc({ summary: parsed, envelope, dug, mdPath: summaryMdPath, videoId, language: video.language }));
   }
 
   // type === 'deep-dive'

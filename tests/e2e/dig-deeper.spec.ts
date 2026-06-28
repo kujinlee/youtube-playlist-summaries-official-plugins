@@ -2247,3 +2247,67 @@ test('Z4 (zoom dismissal — image): clicking the enlarged image itself closes (
   await page.locator('#_dg-zoom-img').click();
   await expect(overlay).toBeHidden();
 });
+
+test('A1 (Ask-AI): clicking a link copies the prompt, shows the toast, and opens the gemini url', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.addInitScript(() => {
+    (window as unknown as { __opened: string[] }).__opened = [];
+    window.open = ((u?: string | URL) => {
+      (window as unknown as { __opened: string[] }).__opened.push(String(u));
+      return null;
+    }) as typeof window.open;
+  });
+  const html = makeCompanionHtmlWithSlides();
+  await page.route(`**/api/html/${VIDEO_ID_SLIDES}**`, (route) =>
+    route.fulfill({ status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' }, body: html }),
+  );
+  await page.goto(`http://localhost:3000/api/html/${VIDEO_ID_SLIDES}?outputFolder=${encodeURIComponent(OUTPUT_FOLDER)}&type=dig-deeper`);
+
+  // .first() is the top-bar WHOLE-VIDEO link; its prompt says "this video".
+  const ask = page.locator('.ask-ai').first();
+  await expect(ask).toBeVisible();
+  await ask.click();
+
+  await expect(page.locator('#_dg-ai-toast')).toBeVisible();
+
+  const clip = await page.evaluate(() => navigator.clipboard.readText());
+  expect(clip).toContain('this video');
+
+  const opened = await page.evaluate(() => (window as unknown as { __opened: string[] }).__opened);
+  expect(opened.some((u) => u.startsWith('https://gemini.google.com/app?prompt='))).toBe(true);
+});
+
+test('A2 (Ask-AI section link): clipboard round-trips the section prompt incl. &t=…s; opened url prompt matches clipboard', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.addInitScript(() => {
+    (window as unknown as { __opened: string[] }).__opened = [];
+    window.open = ((u?: string | URL) => {
+      (window as unknown as { __opened: string[] }).__opened.push(String(u));
+      return null;
+    }) as typeof window.open;
+  });
+  const html = makeCompanionHtmlWithSlides();
+  await page.route(`**/api/html/${VIDEO_ID_SLIDES}**`, (route) =>
+    route.fulfill({ status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' }, body: html }),
+  );
+  await page.goto(`http://localhost:3000/api/html/${VIDEO_ID_SLIDES}?outputFolder=${encodeURIComponent(OUTPUT_FOLDER)}&type=dig-deeper`);
+
+  // .nth(1) is the per-SECTION link (top-bar whole-video is .first()). It is the only
+  // section (startSec=120 → no next → "onward"), so its prompt embeds &t=120s.
+  const section = page.locator('.ask-ai').nth(1);
+  await expect(section).toBeVisible();
+  await section.click();
+
+  // toast text (not just visible)
+  await expect(page.locator('#_dg-ai-toast')).toContainText('copied');
+
+  // The escaping contract: &t=120s must round-trip through the attribute to the literal clipboard text.
+  const clip = await page.evaluate(() => navigator.clipboard.readText());
+  expect(clip).toContain('this section of the video');
+  expect(clip).toContain('&t=120s');
+
+  // The opened gemini url's decoded prompt param equals the clipboard text (no double-encoding/truncation).
+  const opened = await page.evaluate(() => (window as unknown as { __opened: string[] }).__opened);
+  const last = opened[opened.length - 1];
+  expect(new URL(last).searchParams.get('prompt')).toBe(clip);
+});
