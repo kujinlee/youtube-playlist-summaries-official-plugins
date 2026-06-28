@@ -3,7 +3,7 @@ import { parseSlideTokens, sanitizeCaption } from '@/lib/dig/slide-tokens';
 // ── Behavior 1: Valid token in range ──────────────────────────────────────────────────────
 test('valid token in range', () => {
   expect(parseSlideTokens('x [[SLIDE:312|Diagram]] y', 300, 400))
-    .toEqual([{ raw: '[[SLIDE:312|Diagram]]', sec: 312, caption: 'Diagram' }]);
+    .toEqual([{ raw: '[[SLIDE:312|Diagram]]', sec: 312, endSec: null, caption: 'Diagram' }]);
 });
 
 // ── Behavior 2: Out-of-range dropped ──────────────────────────────────────────────────────
@@ -113,7 +113,7 @@ test('clock H:MM:SS format is accepted and converted to integer seconds', () => 
 test('clock M:S with single-digit seconds is accepted (5:2 → 302)', () => {
   // Gemini sometimes emits non-zero-padded seconds; 5:2 = 5*60 + 2 = 302.
   const tokens = parseSlideTokens('x [[SLIDE:5:2|cap]] y', 300, 400);
-  expect(tokens).toEqual([{ raw: '[[SLIDE:5:2|cap]]', sec: 302, caption: 'cap' }]);
+  expect(tokens).toEqual([{ raw: '[[SLIDE:5:2|cap]]', sec: 302, endSec: null, caption: 'cap' }]);
 });
 
 test('clock M:S 6:0 → 360 (single-digit seconds, zero)', () => {
@@ -149,4 +149,40 @@ test('sec equal to endSec is included', () => {
   const tokens = parseSlideTokens('[[SLIDE:400|Edge]]', 300, 400);
   expect(tokens).toHaveLength(1);
   expect(tokens[0].sec).toBe(400);
+});
+
+// ── endSec (start|end|caption three-field form) ───────────────────────────────────────────
+
+it('parses start|end|caption into sec + endSec', () => {
+  expect(parseSlideTokens('[[SLIDE:333|339|code box]]', 300, 400))
+    .toEqual([{ raw: '[[SLIDE:333|339|code box]]', sec: 333, endSec: 339, caption: 'code box' }]);
+});
+
+it('parses clock start|end', () => {
+  const t = parseSlideTokens('[[SLIDE:5:33|5:39|cap]]', 300, 400);
+  expect(t[0].sec).toBe(333); expect(t[0].endSec).toBe(339);
+});
+
+it('old single-time format → endSec null (tolerant)', () => {
+  expect(parseSlideTokens('[[SLIDE:312|Diagram]]', 300, 400)[0].endSec).toBeNull();
+});
+
+it('end <= start is rejected → endSec null', () => {
+  expect(parseSlideTokens('[[SLIDE:333|333|x]]', 300, 400)[0].endSec).toBeNull();
+  expect(parseSlideTokens('[[SLIDE:333|330|x]]', 300, 400)[0].endSec).toBeNull();
+});
+
+it('end beyond the window is clamped to windowEnd', () => {
+  expect(parseSlideTokens('[[SLIDE:333|999|x]]', 300, 400)[0].endSec).toBe(400);
+});
+
+it('caption with a pipe still sanitizes (end absent)', () => {
+  expect(parseSlideTokens('[[SLIDE:312|perceive | plan]]', 300, 400)[0].caption).toBe('perceive plan');
+});
+
+it('numeric two-field caption is NOT eaten as an end (B-1)', () => {
+  // no trailing '|' after 2024 → lookahead fails → 2024 is the caption, not an end
+  expect(parseSlideTokens('[[SLIDE:333|2024]]', 300, 400))
+    .toEqual([{ raw: '[[SLIDE:333|2024]]', sec: 333, endSec: null, caption: '2024' }]);
+  expect(parseSlideTokens('[[SLIDE:333|42]]', 300, 400)[0].caption).toBe('42');
 });
