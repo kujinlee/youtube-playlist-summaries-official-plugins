@@ -176,7 +176,7 @@ git commit -m "feat(ask-ai): section + whole-video prompt builders + provider co
 
 - [ ] **Step 1: Write the failing jest tests**
 
-Add to `tests/lib/html-doc/render-dig-deeper.test.ts` (in the top-level describe building `html`, near the other markup assertions):
+Add to `tests/lib/html-doc/render-dig-deeper.test.ts` **inside the `Behavior 9` describe (≈line 876)** — its `html` is built (in a local `beforeAll`) from `makeSummary()` (≈line 426), which has two timed sections, so both a top-bar and a per-section `.ask-ai` render. (There is no module-level `html`; each behavior describe builds its own.)
 
 ```ts
     it('renders a whole-video Ask-AI link in the top bar', () => {
@@ -372,6 +372,8 @@ test('A1 (Ask-AI): clicking a section Ask-AI copies the prompt and shows the toa
   );
   await page.goto(`http://localhost:3000/api/html/${VIDEO_ID_SLIDES}?outputFolder=${encodeURIComponent(OUTPUT_FOLDER)}&type=dig-deeper`);
 
+  // .first() is the top-bar WHOLE-VIDEO link (top bar is emitted before sections);
+  // its prompt says "this video" (the section prompt builder is unit-tested in Task 1).
   const ask = page.locator('.ask-ai').first();
   await expect(ask).toBeVisible();
   await ask.click();
@@ -381,7 +383,7 @@ test('A1 (Ask-AI): clicking a section Ask-AI copies the prompt and shows the toa
 
   // clipboard holds the prompt
   const clip = await page.evaluate(() => navigator.clipboard.readText());
-  expect(clip).toContain('the video');
+  expect(clip).toContain('this video');
 
   // gemini url was opened
   const opened = await page.evaluate(() => (window as unknown as { __opened: string[] }).__opened);
