@@ -1,14 +1,18 @@
 /**
- * Resolves `[[SLIDE:sec|caption]]` tokens in "dig deeper" section markdown
- * into markdown image references by downloading a section clip via yt-dlp
- * and extracting frames via ffmpeg.
+ * Resolves `[[SLIDE:sec|end|caption]]` tokens in "dig deeper" section markdown
+ * into markdown image references. Each token triggers one bounded yt-dlp download
+ * of the slide's lifespan [startSec, min(endSec, startSec+MAX_CAPTURE_SEC)], then
+ * frames are sampled at SAMPLE_FPS and the most-built (largest) frame is written
+ * via `pickLargestFile`. Each token owns its own temp clip, which is always deleted
+ * in `finally` regardless of success or error.
  *
  * Security invariants:
  * - `videoId` is validated via `assertVideoId` (throws on traversal chars)
  *   BEFORE any exec call.
  * - `youtubeUrl` is always server-built from the validated videoId.
  * - `execFile` (argv array) is used exclusively — never `exec`/shell strings.
- * - Asset paths are containment-checked against `assetsRoot` before use.
+ * - Asset paths are containment-checked against `assetsRoot` BEFORE `captureSlideFrame`
+ *   writes to `outPath`.
  * - The temp clip is always deleted in `finally`.
  */
 
@@ -28,100 +32,12 @@ export function numEnv(name: string, def: number): number {
   return Number.isFinite(v) ? v : def;
 }
 
-/** Scene-change sensitivity: ignore intra-slide animation, catch slide swaps. */
-const SCENE_THRESHOLD = numEnv('DIG_SCENE_THRESHOLD', 0.4);
-/** Fallback window length when no slide transition is detected (seconds). */
-const MAX_WINDOW_SEC = numEnv('DIG_MAX_WINDOW_SEC', 8);
 /** Frame sampling density within the window (frames per second). */
 const SAMPLE_FPS = numEnv('DIG_SAMPLE_FPS', 2);
-
-/**
- * Parse the first scene-change timestamp (seconds, relative to the window start)
- * from ffmpeg `showinfo` output. Returns `maxFallbackSec` when none is found or
- * the value is non-positive / non-finite.
- */
-export function parseFirstSceneChange(ffmpegOutput: string, maxFallbackSec: number): number {
-  const m = ffmpegOutput.match(/pts_time:([0-9]+(?:\.[0-9]+)?)/);
-  if (!m) return maxFallbackSec;
-  const t = Number(m[1]);
-  return Number.isFinite(t) && t > 0 ? t : maxFallbackSec;
-}
-
-/**
- * Run a command capturing BOTH stdout and stderr. `util.promisify` of a mocked
- * `execFile` resolves to stdout only (the mock drops the promisify.custom symbol),
- * so the scene pass — which needs stderr — wraps `_execFile` explicitly.
- */
-function runCapture(cmd: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    _execFile(cmd, args, (err, stdout, stderr) => {
-      if (err) reject(err);
-      else resolve({ stdout: String(stdout ?? ''), stderr: String(stderr ?? '') });
-    });
-  });
-}
-
-/** Capture a single frame at `relStart` directly to `outPath` (the legacy path,
- *  used when the forward window is too small to sample). */
-async function singleFrameCapture(clipPath: string, relStart: number, outPath: string): Promise<void> {
-  // `-y`: force-overwrite outPath. On a re-dig the prior asset already exists;
-  // without this, ffmpeg blocks forever on an interactive "Overwrite? [y/N]" prompt.
-  await execFileAsync('ffmpeg', [
-    '-y', '-ss', String(relStart), '-i', clipPath, '-frames:v', '1', '-q:v', '2', outPath,
-  ]);
-}
-
-/**
- * Capture the most-complete frame of the slide at `relStart` (clip-relative
- * seconds). Detects the next slide transition (scene detection) to bound a
- * window, samples it at SAMPLE_FPS, and writes the largest frame to `outPath`.
- * Throws if no frame could be produced (caller drops the token).
- */
-async function captureBestFrame(opts: {
-  clipPath: string; relStart: number; maxWindowSec: number; outPath: string;
-}): Promise<void> {
-  const { clipPath, relStart, maxWindowSec, outPath } = opts;
-  const minSample = Math.max(0.5, 1 / SAMPLE_FPS);
-
-  // Too little forward room (e.g. token at endSec) → grab the frame at relStart.
-  if (maxWindowSec < minSample) {
-    await singleFrameCapture(clipPath, relStart, outPath);
-    return;
-  }
-
-  // 1. Scene detection → first transition offset (relative to relStart).
-  let sceneOffset = maxWindowSec;
-  try {
-    const { stderr } = await runCapture('ffmpeg', [
-      '-ss', String(relStart), '-t', String(maxWindowSec), '-i', clipPath,
-      '-vf', `select='gt(scene,${SCENE_THRESHOLD})',showinfo`, '-f', 'null', '-',
-    ]);
-    sceneOffset = parseFirstSceneChange(stderr, maxWindowSec);
-  } catch {
-    sceneOffset = maxWindowSec; // scene-detect failed → fall back to MAX window
-  }
-
-  // Slide ends almost immediately → relStart is already the settled frame.
-  if (sceneOffset < minSample) {
-    await singleFrameCapture(clipPath, relStart, outPath);
-    return;
-  }
-
-  // 2. Sample [relStart, relStart+winLen] at SAMPLE_FPS; keep the largest frame.
-  const winLen = Math.min(sceneOffset, maxWindowSec); // in [minSample, maxWindowSec]
-  const framesDir = fs.mkdtempSync(path.join(path.resolve('.cache'), 'frames-'));
-  try {
-    await execFileAsync('ffmpeg', [
-      '-ss', String(relStart), '-t', String(winLen), '-i', clipPath,
-      '-vf', `fps=${SAMPLE_FPS}`, '-q:v', '2', path.join(framesDir, 'f_%03d.jpg'),
-    ]);
-    const best = pickLargestFile(framesDir);
-    if (!best) throw new Error('no frames sampled');
-    fs.copyFileSync(best, outPath);
-  } finally {
-    fs.rmSync(framesDir, { recursive: true, force: true });
-  }
-}
+/** Maximum capture window length per slide (seconds). */
+const MAX_CAPTURE_SEC = numEnv('DIG_MAX_CAPTURE_SEC', 10);
+/** Forward window used when Gemini omits the slide end time (seconds). */
+const DEFAULT_FWD = numEnv('DIG_DEFAULT_FWD', 4);
 
 /** Return the path of the largest file in `dir`, or null if the dir has no files. */
 export function pickLargestFile(dir: string): string | null {
@@ -139,21 +55,57 @@ export function pickLargestFile(dir: string): string | null {
 }
 
 export interface ResolveSlideTokensOpts {
+  /** YouTube video ID (section-level, validated before any exec). */
   videoId: string;
+  /** Section start second — used to bound token sec values in `parseSlideTokens`. */
   startSec: number;
+  /** Section end second — used to bound token sec values in `parseSlideTokens`. */
   endSec: number;
   assetsRoot: string;
   sectionId: number;
 }
 
+/** Download exactly the slide's lifespan and write the most-built frame.
+ *  Window = [startSec, min(endSec, startSec+MAX_CAPTURE_SEC)] when endSec is usable,
+ *  else [startSec, startSec+DEFAULT_FWD]. SECURITY: trusts outPath — caller checks containment. */
+async function captureSlideFrame(opts: {
+  youtubeUrl: string; startSec: number; endSec: number | null; outPath: string;
+}): Promise<void> {
+  const { youtubeUrl, startSec, endSec, outPath } = opts;
+  const cacheDir = path.resolve('.cache');
+  fs.mkdirSync(cacheDir, { recursive: true });
+  const rawEnd = endSec != null && endSec > startSec
+    ? Math.min(endSec, startSec + MAX_CAPTURE_SEC)
+    : startSec + DEFAULT_FWD;
+  const winEnd = Math.max(rawEnd, startSec + 1);  // guard a degenerate window (e.g. DIG_DEFAULT_FWD="" → 0)
+
+  const clip = path.join(cacheDir, `clip-${crypto.randomUUID()}.mp4`);
+  const framesDir = fs.mkdtempSync(path.join(cacheDir, 'frames-'));
+  try {
+    await execFileAsync('yt-dlp', [
+      '--download-sections', `*${startSec}-${winEnd}`,
+      '-f', 'bv[height<=720]', '-o', clip, youtubeUrl,
+    ]);
+    await execFileAsync('ffmpeg', [
+      '-y', '-i', clip, '-vf', `fps=${SAMPLE_FPS}`, '-q:v', '2',
+      path.join(framesDir, 'f_%03d.jpg'),
+    ]);
+    const best = pickLargestFile(framesDir);
+    if (!best) throw new Error('no frames sampled');
+    fs.copyFileSync(best, outPath);
+  } finally {
+    fs.rmSync(framesDir, { recursive: true, force: true });
+    try { fs.unlinkSync(clip); } catch { /* ignore */ }
+  }
+}
+
 /**
- * Resolve all `[[SLIDE:sec|caption]]` tokens in `markdown` to markdown image
+ * Resolve all `[[SLIDE:sec|end|caption]]` tokens in `markdown` to markdown image
  * references pointing at extracted JPEG frames.
  *
  * - No tokens → returns `markdown` unchanged; no exec calls made.
  * - `videoId` validated (throws) before any exec.
- * - On ENOENT or non-zero exit from yt-dlp → all tokens stripped, text-only
- *   returned (no throw).
+ * - Per token: one bounded yt-dlp download; on failure the token is stripped.
  * - On per-frame ffmpeg failure → that token dropped, others kept.
  */
 export async function resolveSlideTokens(
@@ -177,76 +129,25 @@ export async function resolveSlideTokens(
   // Build YouTube URL server-side from the validated videoId.
   const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
-  // Temp clip path — directory created only once a valid token is confirmed
-  // (just before yt-dlp download, below).
-  const cacheDir = path.resolve('.cache');
-  const tmpClip = path.join(cacheDir, `clip-${crypto.randomUUID()}.mp4`);
-
   let result = markdown;
-
-  try {
-    // Ensure .cache/ exists only now that we know we have tokens to process.
-    fs.mkdirSync(cacheDir, { recursive: true });
-
-    // Download the section clip once for all tokens.
+  for (const token of tokens) {
+    const assetPath = resolveAssetPath(assetsRoot, videoId, sectionId, token.sec);
+    const resolvedRoot = path.resolve(assetsRoot);
+    if (!assetPath.startsWith(resolvedRoot + path.sep)) {            // containment BEFORE any write
+      console.warn('[dig-slide-miss] asset path escaped assetsRoot — skipping token:', token.raw);
+      result = result.replace(token.raw, '');
+      continue;
+    }
+    fs.mkdirSync(path.resolve(assetsRoot, videoId), { recursive: true });
     try {
-      await execFileAsync('yt-dlp', [
-        '--download-sections',
-        `*${startSec}-${endSec}`,
-        '-f',
-        'bv[height<=720]',
-        '-o',
-        tmpClip,
-        youtubeUrl,
-      ]);
+      await captureSlideFrame({ youtubeUrl, startSec: token.sec, endSec: token.endSec, outPath: assetPath });
+      const imgRef = `![${token.caption}](assets/${videoId}/${sectionId}-${token.sec}.jpg)`;
+      const escapedRaw = token.raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      result = result.replace(new RegExp(escapedRaw, 'g'), () => imgRef);
     } catch (err: unknown) {
-      // ENOENT (binary missing) or non-zero exit (download gated / unavailable) →
-      // strip all tokens and return text-only markdown.
-      console.warn('[dig-slide-miss] yt-dlp failed — stripping all tokens:', (err as Error).message);
-      return stripUnresolvedSlideTokens(markdown);
-    }
-
-    // Per-token frame extraction.
-    for (const token of tokens) {
-      const assetPath = resolveAssetPath(assetsRoot, videoId, sectionId, token.sec);
-
-      // Containment guard: asset path must stay within assetsRoot.
-      const resolvedRoot = path.resolve(assetsRoot);
-      if (!assetPath.startsWith(resolvedRoot + path.sep)) {
-        console.warn('[dig-slide-miss] asset path escaped assetsRoot — skipping token:', token.raw);
-        result = result.replace(token.raw, '');
-        continue;
-      }
-
-      // Create asset directory only after the containment check passes.
-      const assetsDir = path.resolve(assetsRoot, videoId);
-      fs.mkdirSync(assetsDir, { recursive: true });
-
-      try {
-        await captureBestFrame({
-          clipPath: tmpClip,
-          relStart: token.sec - startSec,
-          maxWindowSec: Math.min(MAX_WINDOW_SEC, endSec - token.sec),
-          outPath: assetPath,
-        });
-
-        // Rewrite token to markdown image reference.
-        const imgRef = `![${token.caption}](assets/${videoId}/${sectionId}-${token.sec}.jpg)`;
-        const escapedRaw = token.raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        result = result.replace(new RegExp(escapedRaw, 'g'), () => imgRef);
-      } catch (err: unknown) {
-        // Per-frame failure → drop that token, continue with remaining tokens.
-        console.warn('[dig-slide-miss] ffmpeg failed for token', token.raw, ':', (err as Error).message);
-        const escapedRaw2 = token.raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        result = result.replace(new RegExp(escapedRaw2, 'g'), () => '');
-      }
-    }
-  } finally {
-    // Always delete the temp clip, regardless of success or error.
-    try {
-      fs.unlinkSync(tmpClip);
-    } catch {
-      // Ignore cleanup errors (e.g. file never created if yt-dlp ENOENT).
+      console.warn('[dig-slide-miss] capture failed for token', token.raw, ':', (err as Error).message);
+      const escapedRaw2 = token.raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      result = result.replace(new RegExp(escapedRaw2, 'g'), () => '');
     }
   }
 

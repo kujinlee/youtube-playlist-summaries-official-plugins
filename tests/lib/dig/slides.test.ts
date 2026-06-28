@@ -40,6 +40,29 @@ beforeEach(() => {
   jest.clearAllMocks();
 });
 
+// ─── Shared ffmpeg-pipeline mock ───────────────────────────────────────────
+
+// Emulates the per-token yt-dlp + ffmpeg pipeline. The scene-detect pass is
+// gone; pass '' for the unused sceneStderr arg to preserve call-site clarity.
+function mockFfmpegPipeline(sceneStderr = '', frameSizes = [10, 500]) {
+  mockExecFile.mockImplementation(
+    (cmd: string, args: string[], cb: (e: Error | null, so: string, se: string) => void) => {
+      if (cmd === 'yt-dlp') return cb(null, '', '');
+      const a = args.join(' ');
+      if (a.includes('fps=')) {                                            // window sampling
+        const dir = path.dirname(args[args.length - 1]);                   // <dir>/f_%03d.jpg
+        frameSizes.forEach((sz, i) =>
+          fs.writeFileSync(path.join(dir, `f_${String(i + 1).padStart(3, '0')}.jpg`), Buffer.alloc(sz)));
+        return cb(null, '', '');
+      }
+      return cb(null, '', sceneStderr);
+    },
+  );
+}
+
+// Helper to get the args of the first yt-dlp call.
+const ytArgs = () => (mockExecFile.mock.calls.find((c: unknown[]) => c[0] === 'yt-dlp')![1] as string[]);
+
 // ─── Behavior 1: No tokens → no exec, unchanged ────────────────────────────
 
 test('no tokens → no exec called, markdown returned unchanged', async () => {
@@ -54,35 +77,83 @@ test('empty string → no exec called, empty string returned', async () => {
   expect(mockExecFile).not.toHaveBeenCalled();
 });
 
-// ─── Shared ffmpeg-pipeline mock ───────────────────────────────────────────
+// ─── Bounded capture window tests (new per-token model) ────────────────────
 
-// Emulates the ffmpeg pipeline: scene-detect (stderr), fps-extract (writes frames),
-// single-frame (writes the asset directly). One mock for all capture paths.
-function mockFfmpegPipeline(sceneStderr = 'pts_time:3.0\n', frameSizes = [10, 500]) {
-  mockExecFile.mockImplementation(
-    (cmd: string, args: string[], cb: (e: Error | null, so: string, se: string) => void) => {
-      if (cmd === 'yt-dlp') return cb(null, '', '');
-      const a = args.join(' ');
-      if (a.includes('scene')) return cb(null, '', sceneStderr);           // scene-detect → stderr
-      if (a.includes('fps=')) {                                            // window sampling
-        const dir = path.dirname(args[args.length - 1]);                   // <dir>/f_%03d.jpg
-        frameSizes.forEach((sz, i) =>
-          fs.writeFileSync(path.join(dir, `f_${String(i + 1).padStart(3, '0')}.jpg`), Buffer.alloc(sz)));
-        return cb(null, '', '');
-      }
-      if (a.includes('-frames:v')) {                                       // single-frame fallback
-        fs.writeFileSync(args[args.length - 1], Buffer.alloc(42));         // outPath
-        return cb(null, '', '');
-      }
-      return cb(null, '', '');
-    },
+test('endSec present → window [start, min(end, start+MAX_CAPTURE_SEC)], one call, largest written', async () => {
+  mockFfmpegPipeline('', [10, 500, 50]);                       // fps writes 3 frames; 500 is largest
+  const out = await resolveSlideTokens('see [[SLIDE:333|341|S]]', { ...getOpts(), startSec: 300, endSec: 400 });
+  expect(out).toContain('![S](assets/abc12345678/300-333.jpg)');
+  expect(mockExecFile.mock.calls.filter((c: unknown[]) => c[0] === 'yt-dlp').length).toBe(1);
+  expect(ytArgs().join(' ')).toContain('*333-341');           // min(341, 333+10)=341 — distinct from the other paths
+  expect(fs.statSync(path.join(tmpAssetsRoot, 'abc12345678', '300-333.jpg')).size).toBe(500);
+});
+
+test('endSec null → window [start, start+DEFAULT_FWD]', async () => {
+  mockFfmpegPipeline('', [100]);
+  await resolveSlideTokens('see [[SLIDE:333|S]]', { ...getOpts(), startSec: 300, endSec: 400 }); // no end → null
+  expect(ytArgs().join(' ')).toContain('*333-337');           // 333 + DEFAULT_FWD(4) — distinct path (H-1)
+});
+
+test('long slide → window capped at start+MAX_CAPTURE_SEC', async () => {
+  mockFfmpegPipeline('', [100]);
+  await resolveSlideTokens('see [[SLIDE:333|399|S]]', { ...getOpts(), startSec: 300, endSec: 400 });
+  expect(ytArgs().join(' ')).toContain('*333-343');           // 333 + MAX_CAPTURE(10) — distinct
+});
+
+test('B-2: one yt-dlp call PER token (download count = token count, locked cost)', async () => {
+  mockFfmpegPipeline('', [100]);
+  await resolveSlideTokens('a [[SLIDE:310|315|A]] b [[SLIDE:333|341|B]] c [[SLIDE:360|365|C]] d',
+    { ...getOpts(), startSec: 300, endSec: 400 });
+  expect(mockExecFile.mock.calls.filter((c: unknown[]) => c[0] === 'yt-dlp').length).toBe(3);
+});
+
+test('yt-dlp fails → token stripped, others kept', async () => {
+  mockExecFile.mockImplementation((cmd: string, _a: string[], cb: (e: Error|null, so?: string, se?: string) => void) =>
+    cmd === 'yt-dlp' ? cb(new Error('HTTP 403')) : cb(null, '', ''));
+  const out = await resolveSlideTokens('a [[SLIDE:333|339|S]] b', { ...getOpts(), startSec: 300, endSec: 400 });
+  expect(out).not.toContain('[[SLIDE:'); expect(out).not.toContain('![');
+});
+
+test('security: server-built URL + argv arrays only', async () => {
+  mockFfmpegPipeline('', [100]);
+  await resolveSlideTokens('see [[SLIDE:333|339|S]]', { ...getOpts(), startSec: 300, endSec: 400 });
+  expect(ytArgs()).toContain('https://www.youtube.com/watch?v=abc12345678');
+  mockExecFile.mock.calls.forEach((c: unknown[]) => expect(Array.isArray(c[1])).toBe(true));
+});
+
+// ─── Behavior: Happy path → basic token resolution ──────────────────────────
+
+test('happy path rewrites token and calls yt-dlp then ffmpeg with array argv', async () => {
+  mockFfmpegPipeline();
+
+  const out = await resolveSlideTokens('see [[SLIDE:352|Loop]]', getOpts());
+
+  expect(out).toContain('![Loop](assets/abc12345678/300-352.jpg)');
+
+  const cmds: string[] = mockExecFile.mock.calls.map((c: unknown[]) => c[0] as string);
+  expect(cmds).toContain('yt-dlp');
+  expect(cmds).toContain('ffmpeg');
+
+  // argv is always an array — never a shell string
+  mockExecFile.mock.calls.forEach((call: unknown[]) => {
+    expect(Array.isArray(call[1])).toBe(true);
+  });
+});
+
+test('happy path youtubeUrl is server-built from videoId', async () => {
+  mockExecFile.mockImplementation((_cmd: string, _args: string[], cb: (err: null, stdout: string, stderr: string) => void) =>
+    cb(null, '', ''),
   );
-}
 
-// ─── captureBestFrame tests ─────────────────────────────────────────────────
+  await resolveSlideTokens('[[SLIDE:352|x]]', getOpts());
 
-test('captureBestFrame: samples the window and writes the largest frame to the asset path', async () => {
-  mockFfmpegPipeline('pts_time:3.0\n', [10, 500]);
+  const ytDlpCall = mockExecFile.mock.calls.find((c: unknown[]) => c[0] === 'yt-dlp') as unknown[] | undefined;
+  const args = ytDlpCall![1] as string[];
+  expect(args).toContain('https://www.youtube.com/watch?v=abc12345678');
+});
+
+test('samples the window and writes the largest frame to the asset path', async () => {
+  mockFfmpegPipeline('', [10, 500]);
   const out = await resolveSlideTokens('see [[SLIDE:352|Build]]', getOpts());
   expect(out).toContain('![Build](assets/abc12345678/300-352.jpg)');
   const asset = path.join(tmpAssetsRoot, 'abc12345678', '300-352.jpg');
@@ -90,58 +161,11 @@ test('captureBestFrame: samples the window and writes the largest frame to the a
   expect(fs.statSync(asset).size).toBe(500); // the largest sampled frame
 });
 
-test('captureBestFrame: scene-detect argv uses the configured threshold + showinfo', async () => {
-  mockFfmpegPipeline();
-  await resolveSlideTokens('see [[SLIDE:352|Build]]', getOpts());
-  const sceneCall = mockExecFile.mock.calls.find(
-    (c: unknown[]) => Array.isArray(c[1]) && (c[1] as string[]).join(' ').includes('scene'),
-  ) as unknown[] | undefined;
-  expect(sceneCall).toBeDefined();
-  expect((sceneCall![1] as string[]).join(' ')).toMatch(/select='gt\(scene,0\.4\)',showinfo/);
-});
-
-test('captureBestFrame: sampling produces no frames → token dropped, no leak', async () => {
-  mockFfmpegPipeline('pts_time:3.0\n', []); // fps writes ZERO frames
+test('sampling produces no frames → token dropped, no leak', async () => {
+  mockFfmpegPipeline('', []); // fps writes ZERO frames
   const out = await resolveSlideTokens('see [[SLIDE:352|Build]]', getOpts());
   expect(out).not.toContain('[[SLIDE:');
   expect(out).not.toContain('![');
-});
-
-test('captureBestFrame: token at endSec → single-frame fallback (no sampling window)', async () => {
-  mockFfmpegPipeline();
-  // token.sec == endSec (400) → maxWindowSec = 0 → single-frame path
-  const out = await resolveSlideTokens('see [[SLIDE:400|Edge]]', getOpts());
-  expect(out).toContain('![Edge](assets/abc12345678/300-400.jpg)');
-  // exactly one ffmpeg capture happened, via -frames:v (no scene/fps calls)
-  const ffmpegArgs = mockExecFile.mock.calls
-    .filter((c: unknown[]) => c[0] === 'ffmpeg')
-    .map((c: unknown[]) => (c[1] as string[]).join(' '));
-  expect(ffmpegArgs.some((s) => s.includes('-frames:v'))).toBe(true);
-  expect(ffmpegArgs.some((s) => s.includes('scene') || s.includes('fps='))).toBe(false);
-});
-
-test('captureBestFrame: single-frame fallback passes -y so a re-dig overwrites an existing asset (no interactive prompt hang)', async () => {
-  mockFfmpegPipeline();
-  // token.sec == endSec (400) → single-frame path
-  await resolveSlideTokens('see [[SLIDE:400|Edge]]', getOpts());
-  const frameArgs = mockExecFile.mock.calls
-    .filter((c: unknown[]) => c[0] === 'ffmpeg')
-    .map((c: unknown[]) => c[1] as string[])
-    .find((a) => a.includes('-frames:v'));
-  expect(frameArgs).toBeDefined();
-  // Without -y, ffmpeg blocks on "Overwrite? [y/N]" when outPath already exists.
-  expect(frameArgs).toContain('-y');
-});
-
-test('captureBestFrame: scene change before MAX bounds the window (uses scene offset)', async () => {
-  mockFfmpegPipeline('pts_time:2.0\n', [10, 500]);
-  await resolveSlideTokens('see [[SLIDE:352|Build]]', getOpts());
-  const fpsCall = mockExecFile.mock.calls.find(
-    (c: unknown[]) => (c[1] as string[]).join(' ').includes('fps='),
-  ) as unknown[];
-  const argv = fpsCall[1] as string[];
-  const t = Number(argv[argv.indexOf('-t') + 1]);
-  expect(t).toBeCloseTo(2.0); // bounded by the scene change, not MAX_WINDOW_SEC (8)
 });
 
 // ─── Defense-in-depth: never leak a raw [[SLIDE:...]] token ────────────────
@@ -180,71 +204,7 @@ test('yt-dlp ENOENT with mixed in-range + out-of-range tokens → neither leaks 
   expect(out).toContain('c');
 });
 
-// ─── Behavior 2: Happy path → yt-dlp + ffmpeg with argv arrays ─────────────
-
-test('happy path rewrites token and calls yt-dlp then ffmpeg with array argv', async () => {
-  mockFfmpegPipeline();
-
-  const out = await resolveSlideTokens('see [[SLIDE:352|Loop]]', getOpts());
-
-  expect(out).toContain('![Loop](assets/abc12345678/300-352.jpg)');
-
-  const cmds: string[] = mockExecFile.mock.calls.map((c: unknown[]) => c[0] as string);
-  expect(cmds).toContain('yt-dlp');
-  expect(cmds).toContain('ffmpeg');
-
-  // argv is always an array — never a shell string
-  mockExecFile.mock.calls.forEach((call: unknown[]) => {
-    expect(Array.isArray(call[1])).toBe(true);
-  });
-});
-
-test('happy path yt-dlp argv contains --download-sections with correct range', async () => {
-  mockExecFile.mockImplementation((_cmd: string, _args: string[], cb: (err: null, stdout: string, stderr: string) => void) =>
-    cb(null, '', ''),
-  );
-
-  await resolveSlideTokens('[[SLIDE:352|x]]', getOpts());
-
-  const ytDlpCall = mockExecFile.mock.calls.find((c: unknown[]) => c[0] === 'yt-dlp') as unknown[] | undefined;
-  expect(ytDlpCall).toBeDefined();
-  const args = ytDlpCall![1] as string[];
-  const sectionIdx = args.indexOf('--download-sections');
-  expect(sectionIdx).not.toBe(-1);
-  // Range should cover startSec–endSec
-  expect(args[sectionIdx + 1]).toContain('300');
-  expect(args[sectionIdx + 1]).toContain('400');
-});
-
-test('happy path ffmpeg -ss is relative offset (sec - startSec)', async () => {
-  mockExecFile.mockImplementation((_cmd: string, _args: string[], cb: (err: null, stdout: string, stderr: string) => void) =>
-    cb(null, '', ''),
-  );
-
-  // sec=352, startSec=300 → offset=52
-  await resolveSlideTokens('[[SLIDE:352|x]]', getOpts());
-
-  const ffmpegCall = mockExecFile.mock.calls.find((c: unknown[]) => c[0] === 'ffmpeg') as unknown[] | undefined;
-  expect(ffmpegCall).toBeDefined();
-  const args = ffmpegCall![1] as string[];
-  const ssIdx = args.indexOf('-ss');
-  expect(ssIdx).not.toBe(-1);
-  expect(args[ssIdx + 1]).toBe('52');
-});
-
-test('happy path youtubeUrl is server-built from videoId', async () => {
-  mockExecFile.mockImplementation((_cmd: string, _args: string[], cb: (err: null, stdout: string, stderr: string) => void) =>
-    cb(null, '', ''),
-  );
-
-  await resolveSlideTokens('[[SLIDE:352|x]]', getOpts());
-
-  const ytDlpCall = mockExecFile.mock.calls.find((c: unknown[]) => c[0] === 'yt-dlp') as unknown[] | undefined;
-  const args = ytDlpCall![1] as string[];
-  expect(args).toContain('https://www.youtube.com/watch?v=abc12345678');
-});
-
-// ─── Behavior 3: Missing binary (ENOENT) → strip tokens, no throw ──────────
+// ─── Behavior: Missing binary (ENOENT) → strip tokens, no throw ────────────
 
 test('ENOENT on yt-dlp → strips all tokens, returns text-only, no throw', async () => {
   mockExecFile.mockImplementation((_cmd: string, _args: string[], cb: (err: Error) => void) =>
@@ -257,9 +217,7 @@ test('ENOENT on yt-dlp → strips all tokens, returns text-only, no throw', asyn
 });
 
 test('ENOENT on ffmpeg → strips that token, returns text-only, no throw', async () => {
-  let callCount = 0;
   mockExecFile.mockImplementation((cmd: string, _args: string[], cb: (err: Error | null, stdout?: string, stderr?: string) => void) => {
-    callCount++;
     if (cmd === 'yt-dlp') return cb(null, '', '');
     // ffmpeg → ENOENT
     return cb(Object.assign(new Error('enoent'), { code: 'ENOENT' }));
@@ -269,7 +227,7 @@ test('ENOENT on ffmpeg → strips that token, returns text-only, no throw', asyn
   expect(out).toBe('see ');
 });
 
-// ─── Behavior 4: Download gated (yt-dlp exits non-zero) → strip all tokens ──
+// ─── Behavior: Download gated (yt-dlp exits non-zero) → strip all tokens ───
 
 test('yt-dlp non-zero exit → all tokens stripped, text-only returned', async () => {
   mockExecFile.mockImplementation((_cmd: string, _args: string[], cb: (err: Error) => void) =>
@@ -282,7 +240,7 @@ test('yt-dlp non-zero exit → all tokens stripped, text-only returned', async (
   expect(out).not.toContain('![');
 });
 
-// ─── Behavior 5: One frame fails → drop that token, keep others ─────────────
+// ─── Behavior: One frame fails → drop that token, keep others ──────────────
 
 test('second token fps pass fails → first token kept, second dropped', async () => {
   let fpsCount = 0;
@@ -290,7 +248,6 @@ test('second token fps pass fails → first token kept, second dropped', async (
     (cmd: string, args: string[], cb: (e: Error | null, so?: string, se?: string) => void) => {
       if (cmd === 'yt-dlp') return cb(null, '', '');
       const a = args.join(' ');
-      if (a.includes('scene')) return cb(null, '', 'pts_time:3.0\n');
       if (a.includes('fps=')) {
         fpsCount++;
         if (fpsCount === 1) { // first token: write a frame
@@ -308,7 +265,46 @@ test('second token fps pass fails → first token kept, second dropped', async (
   expect(out).not.toContain('[[SLIDE:350|B]]');
 });
 
-// ─── Behavior 6: Crafted videoId rejected before exec ───────────────────────
+// ─── Behavior: yt-dlp per-token failure isolation ───────────────────────────
+
+test('yt-dlp fails for first token but not second → first stripped, second resolves to image', async () => {
+  let ytDlpCount = 0;
+  mockExecFile.mockImplementation(
+    (cmd: string, args: string[], cb: (e: Error | null, so?: string, se?: string) => void) => {
+      if (cmd === 'yt-dlp') {
+        ytDlpCount++;
+        if (ytDlpCount === 1) {
+          // First token (310s) download fails
+          return cb(new Error('HTTP 403'));
+        }
+        // Second token (360s) download succeeds
+        return cb(null, '', '');
+      }
+      // ffmpeg fps sampling — write a frame for the surviving token
+      const a = args.join(' ');
+      if (a.includes('fps=')) {
+        const dir = path.dirname(args[args.length - 1]);
+        fs.writeFileSync(path.join(dir, 'f_001.jpg'), Buffer.alloc(200));
+        return cb(null, '', '');
+      }
+      return cb(null, '', '');
+    },
+  );
+
+  const out = await resolveSlideTokens(
+    'a [[SLIDE:310|315|A]] b [[SLIDE:360|365|B]] c',
+    { ...getOpts(), startSec: 300, endSec: 400 },
+  );
+
+  // First token fails → no image, no raw token leaked
+  expect(out).not.toContain('![A]');
+  expect(out).not.toContain('[[SLIDE:310');
+
+  // Second token succeeds → resolves to image
+  expect(out).toContain('![B](assets/abc12345678/300-360.jpg)');
+});
+
+// ─── Behavior: Crafted videoId rejected before exec ─────────────────────────
 
 test('videoId with / rejected before exec', async () => {
   await expect(
@@ -331,7 +327,7 @@ test('empty videoId rejected before exec', async () => {
   expect(mockExecFile).not.toHaveBeenCalled();
 });
 
-// ─── Behavior 7: argv arrays, never exec/shell strings ──────────────────────
+// ─── Behavior: argv arrays, never exec/shell strings ────────────────────────
 
 test('execFile is always called with array argv — never a string command', async () => {
   mockExecFile.mockImplementation((_cmd: string, _args: string[], cb: (err: null, stdout: string, stderr: string) => void) =>
