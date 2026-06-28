@@ -78,8 +78,8 @@ function clockToSeconds(timeStr: string): number {
  * 4. If an end time is present and parses as a number > sec, set `endSec` (clamped to windowEnd);
  *    otherwise `endSec` is null.
  * 5. Sanitize the caption via `sanitizeCaption`.
- * 6. Deduplicate by `sec` — first occurrence wins.
- * 7. Return at most 3 tokens (first 3 unique seconds, in document order).
+ * 6. Deduplicate by composite `(sec, endSec)` key — first occurrence wins.
+ * 7. Return at most 5 tokens (first 5 unique (start, end) pairs, in document order).
  */
 export function parseSlideTokens(
   markdown: string,
@@ -87,19 +87,18 @@ export function parseSlideTokens(
   windowEnd: number,
 ): SlideToken[] {
   const results: SlideToken[] = [];
-  const seenSecs = new Set<number>();
+  const seen = new Set<string>();
 
   TOKEN_RE.lastIndex = 0;
   let match: RegExpExecArray | null;
 
   while ((match = TOKEN_RE.exec(markdown)) !== null) {
-    if (results.length >= 3) break;
+    if (results.length >= 5) break;
 
     const raw = match[0];
     const sec = clockToSeconds(match[1]);
     if (!Number.isFinite(sec) || sec < 0) continue;
     if (sec < windowStart || sec > windowEnd) continue;
-    if (seenSecs.has(sec)) continue;
 
     // match[2]: optional end-time field (only present in three-field form due to lookahead)
     let endSec: number | null = null;
@@ -108,10 +107,13 @@ export function parseSlideTokens(
       if (Number.isFinite(e) && e > sec) endSec = Math.min(e, windowEnd);
     }
 
+    const key = `${sec}:${endSec ?? 'n'}`;
+    if (seen.has(key)) continue;
+
     // match[3]: caption field (everything after the last '|' up to ']]')
     const caption = sanitizeCaption(match[3] ?? '');
 
-    seenSecs.add(sec);
+    seen.add(key);
     results.push({ raw, sec, endSec, caption });
   }
 

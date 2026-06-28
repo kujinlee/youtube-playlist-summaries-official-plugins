@@ -42,10 +42,10 @@ test('dedupe by sec keeps first caption', () => {
   expect(t[0].caption).toBe('A');
 });
 
-// ── Behavior 6: Cap at 3 ──────────────────────────────────────────────────────────────────
-test('cap at 3', () => {
-  const md = [310, 320, 330, 340, 350].map((s) => `[[SLIDE:${s}|c]]`).join(' ');
-  expect(parseSlideTokens(md, 300, 400)).toHaveLength(3);
+// ── Behavior 6: Cap at 5 ──────────────────────────────────────────────────────────────────
+test('cap at 5 (returns 5 of 6 available)', () => {
+  const md = [310, 320, 330, 340, 350, 360].map((s) => `[[SLIDE:${s}|c]]`).join(' ');
+  expect(parseSlideTokens(md, 300, 400)).toHaveLength(5);
 });
 
 // ── Behavior 7: Caption injection neutralized ─────────────────────────────────────────────
@@ -185,4 +185,24 @@ it('numeric two-field caption is NOT eaten as an end (B-1)', () => {
   expect(parseSlideTokens('[[SLIDE:333|2024]]', 300, 400))
     .toEqual([{ raw: '[[SLIDE:333|2024]]', sec: 333, endSec: null, caption: '2024' }]);
   expect(parseSlideTokens('[[SLIDE:333|42]]', 300, 400)[0].caption).toBe('42');
+});
+
+// ── Dedup by (start, end) composite key ───────────────────────────────────────────────────
+
+it('keeps same-start tokens with different ends (progression)', () => {
+  const t = parseSlideTokens('[[SLIDE:171|175|early]] [[SLIDE:171|185|final]]', 160, 233);
+  expect(t).toHaveLength(2);
+  expect(t.map(x => x.endSec)).toEqual([175, 185]);
+});
+
+it('drops an exact (start,end) duplicate', () => {
+  const t = parseSlideTokens('[[SLIDE:171|185|a]] [[SLIDE:171|185|b]]', 160, 233);
+  expect(t).toHaveLength(1);
+});
+
+// ── Cap at 5 ──────────────────────────────────────────────────────────────────────────────
+
+it('caps at 5 tokens', () => {
+  const md = Array.from({length: 7}, (_, i) => `[[SLIDE:${100+i*2}|${101+i*2}|c${i}]]`).join(' ');
+  expect(parseSlideTokens(md, 0, 400)).toHaveLength(5);
 });
