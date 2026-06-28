@@ -2189,3 +2189,53 @@ test('E6 (expand-all includes stale): ⤢ refreshes .dig-refresh sections too; d
   expect(postsSeen).toContain(SEC_EA_MIXED_STALE);
   expect(postsSeen).toHaveLength(2);
 });
+
+// ---------------------------------------------------------------------------
+// Slide zoom lightbox (Feature 1) — one test block per dismissal path.
+// ---------------------------------------------------------------------------
+
+// Route the slides fixture, navigate, return the overlay + the (closed-state) slide locator.
+async function openZoom(page: import('@playwright/test').Page) {
+  const html = makeCompanionHtmlWithSlides();
+  await page.route(`**/api/html/${VIDEO_ID_SLIDES}**`, (route) =>
+    route.fulfill({ status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' }, body: html }),
+  );
+  await page.goto(`http://localhost:3000/api/html/${VIDEO_ID_SLIDES}?outputFolder=${encodeURIComponent(OUTPUT_FOLDER)}&type=dig-deeper`);
+  const overlay = page.locator('#_dg-zoom');
+  const slide = page.locator('img.dig-slide').first();
+  await expect(slide).toBeVisible();
+  return { overlay, slide };
+}
+
+test('Z0 (zoom): Esc with lightbox CLOSED is a no-op', async ({ page }) => {
+  const { overlay } = await openZoom(page);
+  await expect(overlay).toBeHidden();
+  await page.keyboard.press('Escape');
+  await expect(overlay).toBeHidden();
+});
+
+test('Z1 (zoom dismissal — backdrop): click .dig-slide opens; backdrop click closes', async ({ page }) => {
+  const { overlay, slide } = await openZoom(page);
+  await slide.click();
+  await expect(overlay).toBeVisible();
+  // Overlay is a centered flexbox; the zoomed image is capped at 95vw/95vh, so on the
+  // default 1280×720 viewport the (5,5) corner is guaranteed backdrop (≥32px margin).
+  await overlay.click({ position: { x: 5, y: 5 } });
+  await expect(overlay).toBeHidden();
+});
+
+test('Z2 (zoom dismissal — Esc): open then Esc closes', async ({ page }) => {
+  const { overlay, slide } = await openZoom(page);
+  await slide.click();
+  await expect(overlay).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(overlay).toBeHidden();
+});
+
+test('Z3 (zoom dismissal — ✕): open then close button closes', async ({ page }) => {
+  const { overlay, slide } = await openZoom(page);
+  await slide.click();
+  await expect(overlay).toBeVisible();
+  await page.locator('#_dg-zoom-close').click();
+  await expect(overlay).toBeHidden();
+});

@@ -198,8 +198,8 @@ describe('buildRenderer (via renderDigDeeperDoc .dug block)', () => {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     });
 
-    it('emits <img src="data:image/jpeg;base64, for a present asset', () => {
-      expect(html).toContain('<img src="data:image/jpeg;base64,');
+    it('emits <img class="dig-slide" src="data:image/jpeg;base64, for a present asset', () => {
+      expect(html).toContain('<img class="dig-slide" src="data:image/jpeg;base64,');
     });
 
     it('preserves the alt attribute text', () => {
@@ -843,8 +843,19 @@ describe('renderDigDeeperDoc', () => {
       expect(html).toMatch(/border-top:2px/);
     });
 
-    it('includes generous margin (2em) around .dug img for screenshot breathing room', () => {
-      expect(html).toContain('.dug img{margin:2em 0}');
+    it('caps dug slide display size via .dg img.dig-slide (centered, height-capped, zoom cursor)', () => {
+      expect(html).toContain('.dg img.dig-slide{');
+      expect(html).toContain('max-height:360px');
+      expect(html).toContain('cursor:zoom-in');
+      expect(html).not.toContain('.dug img{margin:2em 0}'); // old generic rule removed
+    });
+
+    it('includes the zoom overlay markup and script (z-index 9500)', () => {
+      expect(html).toContain('class="dg-zoom"');
+      expect(html).toContain("createElement('img')"); // lightbox img is built in JS, not static markup
+      expect(html).toContain('id="_dg-zoom-close"');
+      expect(html).toContain('z-index:9500');
+      expect(html).toContain("getElementById('_dg-zoom')");
     });
 
     it('includes default hide-gist CSS for dug sections', () => {
@@ -979,5 +990,43 @@ describe('renderDigDeeperDoc', () => {
     it('includes a :hover underline rule for .dig-refresh', () => {
       expect(html).toMatch(/\.dg \.dig-refresh:hover\{text-decoration:underline\}/);
     });
+  });
+});
+
+describe('renderDigDeeperDoc — slide image class (dig-slide)', () => {
+  function summaryWithImageSection(): ParsedSummary {
+    return {
+      title: 'T', channel: null, duration: null,
+      url: 'https://www.youtube.com/watch?v=vid123', lang: 'EN', videoId: 'vid123',
+      tldr: null, takeaways: [], sourceMd: 'test.md',
+      sections: [{ numeral: '1', title: 'S', prose: 'p', timeRange: { startSec: 10, endSec: 20 } }],
+    } as unknown as ParsedSummary;
+  }
+  const dug = (md: string): DugSection[] => [{
+    sectionId: 10, startSec: 10, title: 'S', bodyMarkdown: md,
+    generatedAt: 'g', genVersion: DIG_GENERATOR_VERSION,
+  } as unknown as DugSection];
+
+  it('adds class="dig-slide" to a successfully inlined slide <img>', () => {
+    const dir = makeTempDir();
+    fs.mkdirSync(path.join(dir, 'assets', 'vid123'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'assets', 'vid123', 's.jpg'), MINIMAL_JPEG);
+    const html = renderDigDeeperDoc({
+      summary: summaryWithImageSection(), envelope: null,
+      dug: dug('![cap](assets/vid123/s.jpg)'),
+      mdPath: path.join(dir, 'doc.md'), videoId: 'vid123',
+    });
+    expect(html).toMatch(/<img class="dig-slide" src="data:image\/jpeg;base64,/);
+  });
+
+  it('does NOT add dig-slide to a missing-asset slide (renders missing-slide span)', () => {
+    const dir = makeTempDir();
+    const html = renderDigDeeperDoc({
+      summary: summaryWithImageSection(), envelope: null,
+      dug: dug('![cap](assets/vid123/nope.jpg)'),
+      mdPath: path.join(dir, 'doc.md'), videoId: 'vid123',
+    });
+    expect(html).toContain('class="missing-slide"');
+    expect(html).not.toContain('<img class="dig-slide"'); // 'dig-slide' appears in CSS/script always; assert no slide IMG carries it
   });
 });
