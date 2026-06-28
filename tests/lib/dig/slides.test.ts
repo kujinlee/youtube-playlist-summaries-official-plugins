@@ -265,6 +265,45 @@ test('second token fps pass fails → first token kept, second dropped', async (
   expect(out).not.toContain('[[SLIDE:350|B]]');
 });
 
+// ─── Behavior: yt-dlp per-token failure isolation ───────────────────────────
+
+test('yt-dlp fails for first token but not second → first stripped, second resolves to image', async () => {
+  let ytDlpCount = 0;
+  mockExecFile.mockImplementation(
+    (cmd: string, args: string[], cb: (e: Error | null, so?: string, se?: string) => void) => {
+      if (cmd === 'yt-dlp') {
+        ytDlpCount++;
+        if (ytDlpCount === 1) {
+          // First token (310s) download fails
+          return cb(new Error('HTTP 403'));
+        }
+        // Second token (360s) download succeeds
+        return cb(null, '', '');
+      }
+      // ffmpeg fps sampling — write a frame for the surviving token
+      const a = args.join(' ');
+      if (a.includes('fps=')) {
+        const dir = path.dirname(args[args.length - 1]);
+        fs.writeFileSync(path.join(dir, 'f_001.jpg'), Buffer.alloc(200));
+        return cb(null, '', '');
+      }
+      return cb(null, '', '');
+    },
+  );
+
+  const out = await resolveSlideTokens(
+    'a [[SLIDE:310|315|A]] b [[SLIDE:360|365|B]] c',
+    { ...getOpts(), startSec: 300, endSec: 400 },
+  );
+
+  // First token fails → no image, no raw token leaked
+  expect(out).not.toContain('![A]');
+  expect(out).not.toContain('[[SLIDE:310');
+
+  // Second token succeeds → resolves to image
+  expect(out).toContain('![B](assets/abc12345678/300-360.jpg)');
+});
+
 // ─── Behavior: Crafted videoId rejected before exec ─────────────────────────
 
 test('videoId with / rejected before exec', async () => {

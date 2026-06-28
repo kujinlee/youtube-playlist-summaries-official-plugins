@@ -92,7 +92,7 @@ Per token, **one** bounded download, no probing, no cut detection:
 - Write the chosen frame to the asset path; delete the temp clip in `finally`.
 
 `MAX_CAPTURE_SEC` (~10) bounds the download even for a slide that stays on screen for minutes
-(a stable slide's frame is identical throughout, so a short capture suffices). `DEFAULT_FWD` (~6)
+(a stable slide's frame is identical throughout, so a short capture suffices). `DEFAULT_FWD` (~4)
 is the fallback span when Gemini omits a usable `end`.
 
 ---
