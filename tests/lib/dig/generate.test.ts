@@ -184,8 +184,8 @@ test('two consecutive timeouts/transient network failures throws', async () => {
 // ── DIG_GENERATOR_VERSION ────────────────────────────────────────────────────────
 
 describe('DIG_GENERATOR_VERSION', () => {
-  it('is the integer 6', () => {
-    expect(DIG_GENERATOR_VERSION).toBe(6);
+  it('is the integer 7', () => {
+    expect(DIG_GENERATOR_VERSION).toBe(7);
   });
 });
 
@@ -229,8 +229,8 @@ describe('buildDigPrompt — slide selectivity', () => {
     expect(p()).not.toMatch(/code screen/i);
   });
 
-  it('keeps the ≤3 ceiling wording and [[TS:i]] citations', () => {
-    expect(p()).toMatch(/at most 3/i);
+  it('keeps the ≤4 ceiling wording and [[TS:i]] citations', () => {
+    expect(p()).toMatch(/at most 4/i);
     expect(p()).toMatch(/\[\[TS:i\]\]/);
   });
 
@@ -245,12 +245,26 @@ describe('buildDigPrompt — slide selectivity', () => {
   it('requests a start AND end timestamp for each slide', () => {
     const s = buildDigPrompt('en', 0, 100);
     expect(s).toMatch(/\[\[SLIDE:M:SS\|M:SS\|caption\]\]/);
-    expect(s).toMatch(/replaced by different content or leaves the screen/i);
+    expect(s).toMatch(/replaced or leaves the screen/i);
   });
 
-  it('instructs one collapsed token for an animated build', () => {
+  it('instructs one collapsed token for a simple animated build, exception for staged progression', () => {
     const s = buildDigPrompt('en', 0, 100);
-    expect(s).toMatch(/fully[- ]assembled/i);
-    expect(s).toMatch(/do not list each step/i);
+    expect(s).toMatch(/final settled frame alone is enough/i);
+    expect(s).toMatch(/per instructive stage/i);
+  });
+
+  it('allows a per-stage token for an instructive build progression', () => {
+    const s = buildDigPrompt('en', 0, 100);
+    expect(s).toMatch(/per instructive stage/i);
+    expect(s).toMatch(/teach something the final frame cannot/i);
+  });
+  it('curates to at most 4 essential slides', () => {
+    const s = buildDigPrompt('en', 0, 100);
+    expect(s).toMatch(/at most 4/i);
+    expect(s).toMatch(/do NOT reproduce every slide/i);
+  });
+  it('excludes a speaker on camera including split-screen', () => {
+    expect(buildDigPrompt('en', 0, 100)).toMatch(/split[- ]screen/i);
   });
 });
