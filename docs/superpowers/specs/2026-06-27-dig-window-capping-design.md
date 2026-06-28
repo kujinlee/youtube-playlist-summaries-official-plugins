@@ -1,236 +1,184 @@
-# Dig Window-Capping + Anchor-Aware Frame Selection (3′)
+# Dig Window-Capping via Gemini-Provided Slide Windows
 
 **Date:** 2026-06-27
-**Status:** Design — pending user review
-**Component:** `lib/dig/slides.ts` (slide-token → frame resolution)
+**Status:** Design (rev 3 — Gemini-window pivot) — pending user review
+**Component:** `lib/dig/generate.ts` (prompt), `lib/dig/slide-tokens.ts` (parser), `lib/dig/slides.ts` (capture)
 **Version impact:** `DIG_GENERATOR_VERSION` 5 → 6
+
+> **Supersedes** the rev-2 mechanical design (extend-on-demand probing + ffmpeg
+> scene-threshold cut detector). Two measurement spikes (below) showed Gemini emits the slide's
+> start/end **accurately** and **collapses animated builds** when asked plainly — so the boundary
+> moves from a fragile pixel-diff heuristic to Gemini's semantic understanding, and the capture
+> code shrinks dramatically.
 
 ---
 
 ## 1. Problem
 
-When a "dig deeper" section contains `[[SLIDE:sec|caption]]` tokens, `resolveSlideTokens`
-downloads **one clip spanning the entire section window** `[startSec, endSec]` and extracts
-a frame per token. The window's `endSec` is the *next section's* start (`windowForSection`),
-so on sparsely-sectioned long videos the download is enormous.
-
-**Observed incident (2026-06-27, v5 re-dig):** sections 1265 and 2435 of a 51-minute
-livestream (`7iic3Zj427M`) have windows of **1170s (19.5 min)** and **656s (11 min)**. The
-pipeline tried to download ~70 MB clips, blew past timeouts, and tripped YouTube **HTTP 403
-rate-limiting** (`[dig-slide-miss] yt-dlp failed`). We download ~20 minutes of video to use
-≤3 frames of ~8 seconds each.
-
-The download span is tied to **inter-section distance**, not to **where the slides are**.
+When a "dig deeper" section has `[[SLIDE:sec|caption]]` tokens, `resolveSlideTokens` downloads
+**one clip spanning the entire section window** `[startSec, endSec]` (the gap to the next
+section). On sparsely-sectioned long videos this is enormous: a 51-minute livestream's deep
+sections produced **19.5- and 11-minute** downloads (~70 MB), which blew past timeouts and tripped
+YouTube **HTTP 403 rate-limiting** (`[dig-slide-miss] yt-dlp failed`, 2026-06-27). We download ~20
+minutes of video to use ≤3 frames. The download span is tied to inter-section distance, not to
+where the slide actually is.
 
 ---
 
-## 2. Empirical grounding (accuracy spike, 2026-06-27)
+## 2. Empirical grounding (two spikes, 2026-06-27)
 
-Before designing, we measured where the *actually-settled* slide sits relative to Gemini's
-emitted `sec`, using **v5-emitted tokens only** (80 tokens across 9 videos; sampled 24,
-23 succeeded). For each token we downloaded `[sec−6, sec+18]`, sampled 1 fps, and inspected
-per-offset JPEG size + contact sheets.
+**Spike 1 — frame accuracy** (24 v5-emitted tokens, contact sheets): slides fall into three
+regimes — **stable** (~40%, complete at `sec`), **fast-cut** (~30%, complete at `sec` but replaced
+within seconds), **animated build** (~25%, still assembling at `sec`, settling up to ~15s later,
+beyond the old 8s window). It also showed the v5 "largest JPEG in an 8s forward window" heuristic
+**picks the wrong slide** in fast-cut decks and that `scene` detection at 0.4 **misses soft fades**.
 
-**Finding — slide behavior falls into three regimes:**
+**Spike 2 — duration reliability** (8 slides) and **Spike 3 — collapse prompt** (6 slides): asking
+Gemini (via the same clipped-video REST call the pipeline already uses) to emit each slide's
+`START|END` returned **well-formed, captioned `[[SLIDE:start|end|caption]]` for 100%** of slides,
+with boundaries within **~±1–2s** of the visual truth — *including the exact fast-cut case
+(`sec=333 → 333–339`) where the mechanical cut detector reported `scene:none`.* With a production-
+style prompt ("one entry per slide; for an animated build, point START at the FULLY ASSEMBLED
+moment"), Gemini **collapsed builds into a single settled token** (the 113 build: 5 step-tokens →
+one `135–137` at the fully-assembled diagram) while **not over-merging genuinely distinct slides**
+(the 333 fast-cut deck stayed 5 separate slides).
 
-| Regime | ~Share | Behavior at `sec` | Implication |
-|---|---|---|---|
-| **A. Stable slide** | ~40% | Complete slide at `sec`, unchanged across window | tiny window suffices |
-| **B. Fast-cut deck** | ~30% | Complete slide at `sec`, *replaced by different slides within seconds* | short window is **safer** |
-| **C. Animated build** | ~25% | Slide **still assembling** at `sec`; settles **up to ~15s later** (beyond current `MAX_WINDOW_SEC=8`) | needs longer forward reach |
-
-**Key conclusions:**
-
-1. **`sec` is reliable as "the slide, or its build-start."** In A/B the complete slide is
-   *at* `sec`; in C, `sec` is the build-*start* (Gemini points early despite the prompt's
-   "fully built and settled" instruction). **Backward error is negligible** — no case showed
-   the intended slide meaningfully *before* `sec`.
-2. **The "largest JPEG in window" heuristic is unreliable** — in regime B it grabs a
-   *different, busier later slide*. This is the root capture-quality defect, independent of
-   download size. The current v5 `pickLargestFile` over an 8s forward window **can pick the
-   wrong slide in fast-cut decks and under-captures builds longer than 8s**.
-3. **`scene` detection at threshold 0.4 failed to fire** on visibly-cutting decks
-   (`scene_offsets: none` for `333`), so the window-bounding it was meant to provide never
-   engaged. Threshold needs recalibration (some transitions are soft fades).
-
-Spike artifacts (frame strips + contact sheets for 23 tokens across all regimes) are retained
-as a **labeled calibration set** for tuning the cut detector.
+**Conclusion:** Gemini reliably supplies an accurate, build-aware `[start, end]` window per slide.
+The boundary problem the rev-2 mechanical layer solved badly is solved well upstream, for free
+(the dig call already watches the clip). The local pipeline keeps only its one reliable job:
+pick the most-built frame within a known window.
 
 ---
 
-## 3. Design — (3′): extend-on-demand download + anchor-aware selection
-
-The existing shape is already **two-stage**: download a clip, then search it for a frame.
-(3′) fixes both stages and makes them interdependent.
-
-### 3.1 Stage 1 — Download (the cap): extend-on-demand, per token
-
-Replace the single full-section download with a **per-token** download that grows only as
-needed:
-
-- Start with a **base window** `[sec − BACK_PAD, sec + BASE_FWD]` (≈ 9s; `BACK_PAD ≈ 3`,
-  `BASE_FWD ≈ 6`). Clamp the lower bound to `max(0, …)` and the upper bound to the video /
-  section end.
-- **Extend forward** by one segment (`SEG ≈ 6s`) *only while* both hold:
-  1. no hard **cut** has been crossed after the anchor (see §3.3), and
-  2. the current best frame sits at the **trailing edge** of the downloaded span (i.e. the
-     slide is still improving — see §3.4).
-- **Stop** when: a cut is crossed, OR the best frame is interior and the size has plateaued,
-  OR a **hard safety cap** is reached (`sec + MAX_FWD`, e.g. 30s, bounded also by section end).
-
-Effect: regimes A & B finish in **one ~9s fetch**; regime C takes a few fetches that stop
-exactly when the slide settles. The extend count is **hard-bounded by `MAX_EXTENDS=3`** →
-≤ **4 `yt-dlp` calls/token** (≤12/section). The 403 that motivated this work came from *one
-sustained ~19-minute transfer*, not call count; four sequential ~6–9s clips are small and fast,
-so the count bound trades the rate-limit risk away rather than re-introducing it.
-
-**Per-call overhead note:** each segment is a separate `yt-dlp --download-sections`
-invocation (~1–2s startup + signed-URL re-extraction). Base segment is kept at ~8–10s so the
-common case is a single call; truly tiny segments would let per-call overhead dominate.
-
-### 3.2 Stage 2 — Selection: anchor + cut-bound + settle
-
-Within the (possibly extended) downloaded frames, sampled at `SAMPLE_FPS`:
+## 3. Design — Gemini-provided window
 
 ```
-anchor   = frame nearest sec                  # Gemini's pick — reliable per the spike
-segment  = [anchor]
-for each later frame f (forward):
-    if cut_detected(prev, f):  break          # different slide starts → boundary
-    segment.append(f)
-# segment now contains ONLY the slide Gemini meant
-if sizes(segment) ~flat:   choose anchor       # STABLE (A): use sec itself
-else (grow → plateau):     choose plateau frame # BUILD (C): the settled frame
-# FAST-CUT (B): cut fires early → segment tiny → anchor chosen, never the next slide
+Dig prompt  ──►  Gemini emits  [[SLIDE:start | end | caption]]   (start = settled, end = replaced)
+                                      │
+                                      ▼
+            download  [start, min(end, start + MAX_CAPTURE_SEC)]   ── ONE yt-dlp call, exact lifespan
+                                      │
+                                      ▼
+            sample @ SAMPLE_FPS ──► pick the largest JPEG (most-built frame) ──► write asset
 ```
 
-This composes with Stage 1: **cut-awareness decides whether to extend; extend-on-demand
-decides how much to fetch.**
+### 3.1 Prompt (`buildDigPrompt`)
+Extend the SLIDE instruction to request a **start and end** and to **collapse builds**:
+- Emit `[[SLIDE:M:SS|M:SS|caption]]` where the **first** time is the moment the slide is **fully
+  built/settled** and the **second** is when it is **replaced or leaves the screen**.
+- For an animated build/diagram that assembles in steps, emit **ONE** entry at the fully-assembled
+  moment — do not list each step.
+- All other rules unchanged (only true graphics/code/CLI; never title cards/bullets/speaker; caption
+  has no `[ ] ( ) |`; ≤3 per section; most sections emit zero).
 
-### 3.3 Cut / same-slide detector (the keystone)
+### 3.2 Parser (`parseSlideTokens`)
+Grammar becomes `[[SLIDE:<time>|<time>|<caption>]]`. Parsing is **tolerant** (Gemini may
+occasionally drift): the first field must be a time (`start`); if the second field also parses as a
+time it is `end`, otherwise it is treated as the caption and `end` is `null`. `SlideToken` carries
+`{ startSec, endSec: number | null, caption, raw }`. Validation: `start ∈ [windowStart, windowEnd]`;
+if `end` present, require `end > start` and clamp `end` to `windowEnd`; else `end = null`. Dedup by
+`startSec`, cap at 3 (unchanged).
 
-Answers, per consecutive frame pair: *is this still the same slide (even if building) or a
-different slide?* Mechanism: **magnitude + spatial extent of inter-frame change**.
+### 3.3 Capture (`captureSlideFrame`)
+Per token, **one** bounded download, no probing, no cut detection:
+- `winEnd = (endSec && endSec > startSec) ? min(endSec, startSec + MAX_CAPTURE_SEC) : startSec + DEFAULT_FWD`
+- `yt-dlp --download-sections *startSec-winEnd` (one clip).
+- Sample at `SAMPLE_FPS`; **`pickLargestFile`** over the sampled frames = the most-built frame.
+  Because the window starts at Gemini's *settled* `start` and is bounded by its `end`, the largest
+  frame is the settled slide — and never the previous or next slide (they are outside the window).
+- Write the chosen frame to the asset path; delete the temp clip in `finally`.
 
-- Same slide building → localized, additive change → **low** score → keep.
-- Cut to new slide → most of the frame replaced → **high** score → boundary.
-
-`ffmpeg`'s `scene` score (already used in `captureBestFrame`) is this metric. The **threshold
-must be recalibrated** against the spike's labeled frames (0.4 missed soft fades; too low
-mis-flags large build-steps as cuts). Calibration is an explicit early task.
-
-**Threshold-only (M4 decision):** we do **not** add a second frame-difference metric even if no
-threshold cleanly separates the labeled set. The local-stability plateau (§3.4) is the safety
-net — a missed cut lets the walk run to the trailing edge and extend by at most one segment, it
-never silently selects a next-slide frame. So a slightly-wrong threshold degrades gracefully;
-the residual error is recorded in the calibration doc rather than chased with more machinery
-(YAGNI).
-
-### 3.4 Settle / plateau (separate from the cut detector)
-
-Within a same-slide run, pick the **most-complete** frame via the **JPEG-size profile**:
-flat → anchor; rising-then-plateau → first plateau frame. "Best at trailing edge" = size still
-rising at the span's end → signal to extend (§3.1).
+`MAX_CAPTURE_SEC` (~10) bounds the download even for a slide that stays on screen for minutes
+(a stable slide's frame is identical throughout, so a short capture suffices). `DEFAULT_FWD` (~6)
+is the fallback span when Gemini omits a usable `end`.
 
 ---
 
 ## 4. Architecture & units
 
-Keep I/O and decision logic separate so the decision logic is pure and testable against the
-spike calibration set.
-
-| Unit | Responsibility | Purity |
+| File | Change | Why |
 |---|---|---|
-| `detectCut(prevMetric, currMetric, threshold)` | boundary classification | pure |
-| `chooseFrame(frames[])` → `{ bestIdx, atTrailingEdge }` | anchor/plateau selection over a labeled frame sequence | pure |
-| `extendPlan(...)` | given current best + cut state, decide stop / extend | pure |
-| download/sample orchestrator in `resolveSlideTokens` | runs `yt-dlp`/`ffmpeg`, feeds the pure units, writes the asset | I/O |
+| `lib/dig/generate.ts` | `buildDigPrompt` SLIDE rule → start/end + collapse; bump version | semantic window source |
+| `lib/dig/slide-tokens.ts` | grammar + `SlideToken.endSec`; tolerant parse + validation | carries the window |
+| `lib/dig/slides.ts` | `captureSlideFrame` = bounded one-call download + `pickLargestFile`; delete `captureBestFrame`, `singleFrameCapture`, `parseFirstSceneChange` | shrinks to one reliable job |
 
-`parseFirstSceneChange` and `pickLargestFile` already exist and are unit-tested; they are
-refactored/absorbed into the above. The single-frame `-y` fix (PR #34) is preserved.
+**Reused as-is:** `pickLargestFile` (already pure + unit-tested), `clockToSeconds`,
+`sanitizeCaption`, `stripUnresolvedSlideTokens`, `resolveAssetPath`, `assertVideoId`,
+the `[dig-slide-miss]` degradation pattern. **Net deletion** of the rev-2 cut-detector / extend
+machinery — `frame-select.ts` is **not** created.
 
 ---
 
 ## 5. Error handling & degradation
 
-- **`yt-dlp` fails on the base segment** → strip the token (current `[dig-slide-miss]`
-  behavior), per-token (one token failing does not drop the others).
-- **Extension segment fails** after a successful base → **use best-so-far** rather than
-  dropping the token (graceful: a slightly-less-settled frame beats no slide).
-- **No frames sampled** → drop the token.
-- Temp clips deleted in `finally` (existing pattern); per-token clips never accumulate.
-- All existing security invariants unchanged: `assertVideoId` first, server-built URL,
-  `execFile` argv only, asset-path containment under `assetsRoot`.
+- **Gemini omits/!parses `end`** → `endSec = null` → capture uses `startSec + DEFAULT_FWD` (a sane
+  bounded window). No failure.
+- **`end <= start` or out of range** → treated as missing (fallback window); `end` clamped to the
+  section `endSec` when valid-but-too-large.
+- **`yt-dlp` fails (ENOENT / 403 / gated)** → strip that token (`[dig-slide-miss]`), per-token; other
+  tokens unaffected.
+- **No frames sampled** → drop that token.
+- Temp clip always deleted in `finally`. Security invariants unchanged: `assertVideoId` before any
+  exec; server-built `youtubeUrl`; `execFile` argv-only; asset-path containment before write.
 
 ---
 
 ## 6. Testing strategy
 
-- **Pure units** (`detectCut`, `chooseFrame`, `extendPlan`): table-driven unit tests over
-  synthetic frame sequences representing A / B / C.
-- **Calibration test**: assert the chosen `scene` threshold correctly classifies the spike's
-  labeled boundary set (checked-in fixture of per-frame metrics, not the raw images).
-- **Orchestrator**: mock `child_process` at the module boundary (existing `slides.test.ts`
-  pattern) — assert per-token extend-on-demand makes the expected `yt-dlp` calls for A (1 call),
-  B (1 call, cut bounds it), C (2–3 calls, stops on plateau), and the safety cap.
-- **Regression**: existing `slides.test.ts` / `slides-helpers.test.ts` stay green (adapt the
-  mock to per-token windows).
-- TDD: behaviors enumerated before tests; `npm test` + `tsc --noEmit` gate before commit.
+- **Parser** (`slide-tokens.test.ts`): `start|end|caption` parses to `{startSec, endSec, caption}`;
+  tolerant fallback (`start|caption` → `endSec null`); `end<=start` → null; `end>windowEnd` → clamp;
+  out-of-range `start` dropped; dedup by start; ≤3 cap; caption sanitation unchanged.
+- **Prompt** (`generate.test.ts`): `buildDigPrompt` contains the start/end + collapse instruction;
+  version assertion → 6.
+- **Capture** (`slides.test.ts`, mocked `child_process`): one `yt-dlp` call per token; window =
+  `[start, min(end, start+MAX_CAPTURE_SEC)]`; `endSec null` → `[start, start+DEFAULT_FWD]`; largest
+  frame written; yt-dlp fail → token stripped, others kept; security (server-built URL, argv-only).
+- **Regression:** existing suites green; delete tests for removed helpers.
+- TDD; `tsc --noEmit` gate (Jest = SWC, no typecheck).
 
 ---
 
 ## 7. Scope
 
-**In scope:**
-- Per-token extend-on-demand capped download.
-- Anchor-aware, cut-bounded, settle-based frame selection.
-- Recalibrate the cut threshold (or replace the metric) using spike data.
-- `DIG_GENERATOR_VERSION` 5 → 6.
-
-**Out of scope (documented follow-ups):**
-- **3-token-per-section cap.** The spike gave no strong signal to change it; the coverage
-  concern on very long sections is real but separate (it's a *prompt/policy* lever, not a
-  capture lever). Tracked as its own future spec.
-- **Backward extension.** Backward error appeared negligible; a fixed `BACK_PAD` covers
-  quantization. Symmetric backward walking is deferred unless evidence emerges.
-- **Re-sectioning long livestreams** (upstream summary concern).
+**In:** prompt start/end + collapse; parser grammar + `endSec`; bounded one-call capture +
+`pickLargestFile`; delete cut-detector/extend helpers; version 5 → 6.
+**Out (follow-ups):** 3-token-per-section cap (editorial/coverage, a prompt-policy lever);
+re-asking Gemini to *pick the frame* (only if the size-profile backstop proves too crude in
+practice); re-sectioning long livestreams (upstream summary concern).
 
 ---
 
 ## 8. Migration
 
-- Bumping to v6 makes existing dug sections show the `↻ outdated` affordance (version-gated,
-  lazy — no Gemini on page load). Re-dig applies the new capture. No data migration needed;
-  companion-doc schema is unchanged (still `genVersion` per section).
-- Re-dig of the previously-pathological livestream sections (1265, 2435) becomes fast and
-  rate-limit-safe under the cap.
+v5 → 6 makes existing dug sections show the `↻ outdated` affordance (version-gated, lazy — no Gemini
+on page load). Re-dig applies the new prompt + bounded capture. Companion-doc schema unchanged
+(`genVersion` per section). The previously-pathological livestream sections re-dig fast and
+rate-limit-safe (download is now the slide's own ~seconds-long lifespan).
 
 ---
 
-## 9. Constants (initial; finalize via calibration)
+## 9. Constants (env-overridable via `numEnv`, `DIG_` prefix)
 
 | Constant | Initial | Source |
 |---|---|---|
-| `BACK_PAD` | 3s | spike: backward error negligible, quantization pad |
-| `BASE_FWD` | 6s | spike: covers stable/fast-cut at `sec` |
-| `EXTEND_SEC` (extend step) | 6s | per-call overhead vs granularity |
-| `MAX_EXTENDS` (call bound) | 3 | ≤4 yt-dlp/token; reaches `sec+24` ≥ longest observed settle ~18s |
-| `SCENE_THRESHOLD` | **recalibrate** | spike labeled set (0.4 too high) |
-| `SAMPLE_FPS` | 2 (current) | unchanged unless calibration suggests otherwise |
+| `MAX_CAPTURE_SEC` | 10 | bounds download for long-lived slides; covers slight-early `start` |
+| `DEFAULT_FWD` | 6 | fallback window when Gemini omits a usable `end` |
+| `SAMPLE_FPS` | 2 | unchanged |
 
-The current fixed-forward `MAX_WINDOW_SEC` (8s) is **removed** — its role (bounding the
-forward search) is taken over by the cut detector (§3.3) plus the `MAX_EXTENDS` call bound. No
-code should retain an 8s forward assumption.
-
-All env-overridable, following the existing `numEnv` pattern (`DIG_*`).
+Removed: `SCENE_THRESHOLD`, `MAX_WINDOW_SEC`, and the rev-2 `BACK_PAD`/`BASE_FWD`/`EXTEND_SEC`/`MAX_EXTENDS`.
 
 ---
 
 ## 10. Open risks
 
-1. **Cut detector accuracy on soft fades** — primary technical risk; mitigated by calibration
-   and by anchoring on `sec` (a wrong "no-cut" only extends a bit further; a wrong "cut" stops
-   at the anchor, which is still the right slide). The anchor makes the heuristic fault-tolerant.
-2. **Per-call latency** if many builds need 3 segments — bounded by `MAX_FWD`; acceptable vs.
-   the 19-min status quo.
-3. **Calibration set size** (23 tokens) — expand toward the full 80 if the threshold is noisy.
+1. **Gemini collapse-prompt compliance** — validated on 6 slides across regimes (builds collapsed,
+   fast-cuts preserved), but not guaranteed on every style. **Backstop:** `pickLargestFile` within
+   `[start, end]` selects the most-built frame even if `start` is slightly early, and the window
+   bound prevents wandering into adjacent slides. A missed-collapse degrades to "a slightly less
+   complete frame," never a wrong-slide frame.
+2. **`end` accuracy too generous** (Gemini overshoots into the next slide) — bounded by
+   `MAX_CAPTURE_SEC`, and `pickLargestFile` favors the current slide's settled frame over a
+   just-appearing next slide within the short capture window. If observed in practice, tighten
+   `MAX_CAPTURE_SEC` or revisit.
+3. **3-token cap interaction** — busy fast-cut sections still cap at 3 real slides (unchanged,
+   out of scope).
