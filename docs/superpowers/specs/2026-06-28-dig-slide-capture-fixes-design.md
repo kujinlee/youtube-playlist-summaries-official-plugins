@@ -61,15 +61,19 @@ Six coupled changes, all under `DIG_GENERATOR_VERSION` 6 → 7.
 
 ### 3.1 Fix (A) — trailing-edge frame selection (the core bug fix)
 `end` reliably marks the slide; `start` is the contaminated edge. So select the most-built frame
-from the **trailing portion** of the window, not the whole window:
-- Sample `[startSec, winEnd]` at `SAMPLE_FPS` as today.
-- `pickLargestFile` only over frames with `offset ≥ startSec + (winEnd − startSec) · TAIL_FRACTION`
-  (`TAIL_FRACTION = 0.5` default). This skips the leading previous-slide contamination while still
-  landing on the settled frame (for builds, the settled state is in the latter part too).
-- Worked through the bug: YAML window `[171,181]` → trailing half `[176,181]` = settled YAML ✓;
-  directory `[160,171]` → trailing half `[165.5,171]` = directory ✓ (stays correct).
-- Capture **returns the picked frame's absolute timestamp** (`pickedSec`, sub-second per
-  `1/SAMPLE_FPS`) for persistence.
+from the **trailing seconds** of the window, in JS (version-independent, testable):
+- Sample the WHOLE `[startSec, winEnd]` at `SAMPLE_FPS` (as v6, tested), then select with
+  `pickLargestFrom(framesDir, minOrdinal)` — largest JPEG whose frame ordinal corresponds to
+  `offset ≥ tailStart`, where `tailStart = max(startSec, winEnd − TRAIL_SEC)` (`TRAIL_SEC = 4`s).
+- **Absolute** trailing cut (anchored on the reliable `end`), not a fraction — the contamination is
+  an absolute ~1–3s lead, so a fixed-fraction window is the wrong knob (a 1s progression window would
+  leave no room). Tiny windows (`< TRAIL_SEC`) fall back to the whole sample.
+- Worked through the bug: YAML window `[171,181]` → trailing `[177,181]` = settled YAML ✓;
+  directory `[160,171]` → trailing `[167,171]` = directory ✓ (stays correct).
+- Selection is **JS-side** (not ffmpeg `-ss`) so it doesn't depend on ffmpeg seek/PTS behavior and
+  is unit-testable with the existing mock.
+- Capture **returns the picked frame's absolute timestamp** (`pickedSec = startSec + (ord−1)/SAMPLE_FPS`,
+  clamped to `[startSec, winEnd]`, sub-second) for persistence.
 
 ### 3.2 Prompt — curated count + progression exception
 - **Progression:** keep one-token-per-visual by default, but allow one token **per instructive
@@ -91,6 +95,9 @@ from the **trailing portion** of the window, not the whole window:
   even for same-start progression. (`pickedSec` is sub-second → goes in frontmatter, not the name.)
 - When `endSec` is null (Gemini omitted it), use the fallback window's end: `start + DEFAULT_FWD`,
   so the filename always has a definite second value.
+- **Collision guard (B2):** because a null-end token and an explicit-end token can resolve to the
+  same `endComponent` (e.g. `171|null`→175 and `171|175`), `resolveSlideTokens` dedups the captured
+  set by the resolved `assetName` (first-wins) so two tokens never overwrite one file.
 
 ### 3.5 Delete-on-re-dig — orphan elimination
 Gemini non-determinism makes orphans inevitable (`start`/`end` change each re-dig → new filenames).
@@ -172,7 +179,7 @@ frontmatter persistence. No bulk migration; lazy per-section on re-dig.
 ## 9. Constants (env-overridable via `numEnv`, `DIG_` prefix)
 | Constant | Initial | Note |
 |---|---|---|
-| `TAIL_FRACTION` | 0.5 | selection considers only the back half of the window |
+| `TRAIL_SEC` | 4 | selection considers only the last `TRAIL_SEC`s of the window (absolute, anchored on `end`) |
 | `MAX_CAPTURE_SEC` | 10 | unchanged (download cap) |
 | `DEFAULT_FWD` | 4 | unchanged (null-end fallback) |
 | `SAMPLE_FPS` | 2 | unchanged (→ pickedSec 0.5s resolution) |
@@ -181,9 +188,10 @@ frontmatter persistence. No bulk migration; lazy per-section on re-dig.
 ---
 
 ## 10. Open risks
-1. **`start` *very* early (>½ window before the slide)** → even the trailing half could include the
-   previous slide. Rare (variance is 1–3s, window ≥ ~8s); if seen, lower `TAIL_FRACTION` further or
-   anchor strictly on `end`. `pickedSec` in frontmatter makes such cases diagnosable.
+1. **`start` early by more than `TRAIL_SEC`** → the trailing window could still include the previous
+   slide. Bounded: `TRAIL_SEC=4` vs. observed variance 1–3s; if seen, lower `TRAIL_SEC`.
+   `pickedSec` in frontmatter makes such cases diagnosable. Tiny windows (`< TRAIL_SEC`, e.g. a 1s
+   progression token) fall back to whole-sample selection — best effort.
 2. **Curated cap vs. genuinely dense sections** — capping at 4 drops some real visuals on slide-deck
    videos (deliberate product choice; expressiveness vs. download cost).
 3. **Prompt drift on "at most 4"** — bounded hard by the parser ceiling (5); verify on re-dig.
