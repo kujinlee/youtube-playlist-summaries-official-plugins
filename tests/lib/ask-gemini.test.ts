@@ -1,4 +1,7 @@
-import { buildGeminiPrompt, buildGeminiUrl } from '../../lib/ask-gemini';
+import {
+  buildGeminiPrompt, buildGeminiUrl,
+  buildWholeVideoPrompt, buildSectionPrompt, AI_PROVIDER,
+} from '../../lib/ask-gemini';
 import type { Video } from '@/types';
 
 function video(extra: Partial<Video> = {}): Video {
@@ -43,5 +46,47 @@ describe('buildGeminiUrl', () => {
     expect(url).toContain('prompt=' + encodeURIComponent('질문: a&b?'));
     expect(url).toContain('&autosubmit=false');
     expect(new URL(url).searchParams.get('prompt')).toBe('질문: a&b?');
+  });
+});
+
+const URL_W = 'https://www.youtube.com/watch?v=abc';
+
+describe('buildWholeVideoPrompt', () => {
+  it('en', () => {
+    expect(buildWholeVideoPrompt(URL_W, 'en'))
+      .toBe(`Please review this video first; I'd like to ask questions about it: ${URL_W}`);
+  });
+  it('ko', () => {
+    expect(buildWholeVideoPrompt(URL_W, 'ko'))
+      .toBe(`아래 영상을 먼저 검토해 주세요. 이 영상에 대해 질문하고 싶습니다: ${URL_W}`);
+  });
+});
+
+describe('buildSectionPrompt', () => {
+  it('en with range', () => {
+    expect(buildSectionPrompt(URL_W, 75, 130, 'en'))
+      .toBe(`Please review this section of the video (from 1:15 to 2:10), then I'd like to ask questions about it: ${URL_W}&t=75s`);
+  });
+  it('en onward (null end)', () => {
+    expect(buildSectionPrompt(URL_W, 75, null, 'en'))
+      .toBe(`Please review this section of the video (from 1:15 onward), then I'd like to ask questions about it: ${URL_W}&t=75s`);
+  });
+  it('ko with range', () => {
+    expect(buildSectionPrompt(URL_W, 75, 130, 'ko'))
+      .toBe(`이 영상의 해당 구간(1:15부터 2:10까지)을 먼저 검토해 주세요. 이 부분에 대해 질문하고 싶습니다: ${URL_W}&t=75s`);
+  });
+  it('ko onward (null end)', () => {
+    expect(buildSectionPrompt(URL_W, 75, null, 'ko'))
+      .toBe(`이 영상의 해당 구간(1:15부터)을 먼저 검토해 주세요. 이 부분에 대해 질문하고 싶습니다: ${URL_W}&t=75s`);
+  });
+});
+
+describe('AI_PROVIDER', () => {
+  it('builds a Gemini url that percent-encodes only the prompt', () => {
+    const url = AI_PROVIDER.buildUrl('hi: https://www.youtube.com/watch?v=abc&t=1s');
+    const u = new URL(url);
+    expect(u.origin + u.pathname).toBe('https://gemini.google.com/app');
+    expect(u.searchParams.get('prompt')).toBe('hi: https://www.youtube.com/watch?v=abc&t=1s');
+    expect(u.searchParams.get('autosubmit')).toBe('false');
   });
 });
