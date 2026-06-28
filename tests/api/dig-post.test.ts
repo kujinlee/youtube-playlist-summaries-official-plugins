@@ -161,7 +161,7 @@ beforeEach(() => {
   mockWindowForSection.mockReturnValue(MOCK_WINDOW);
   mockGenerateDig.mockResolvedValue('# Dig Deeper\n\nElaborated content here.');
   mockResolveTranscriptTokens.mockReturnValue('# Dig Deeper\n\nWith timestamps.');
-  mockResolveSlideTokens.mockResolvedValue('# Dig Deeper\n\nFinal markdown.');
+  mockResolveSlideTokens.mockResolvedValue({ markdown: '# Dig Deeper\n\nFinal markdown.', slides: [] });
   mockUpsertDugSection.mockResolvedValue(undefined);
   mockUpdateVideoFields.mockImplementation(() => {});
 });
@@ -437,7 +437,7 @@ describe('B7: Gemini failure', () => {
 describe('B8: yt-dlp gated', () => {
   it('resolveSlideTokens returns text-only markdown; done event still emitted', async () => {
     // Simulate yt-dlp failure → tokens stripped, text-only returned
-    mockResolveSlideTokens.mockResolvedValue('# Dig Deeper\n\nText only, no slides.');
+    mockResolveSlideTokens.mockResolvedValue({ markdown: '# Dig Deeper\n\nText only, no slides.', slides: [] });
 
     const res = await post(VIDEO_ID, SECTION_ID, { outputFolder: HOME });
     expect(res.status).toBe(200);
@@ -459,7 +459,7 @@ describe('B9: assets-before-doc ordering', () => {
 
     mockResolveSlideTokens.mockImplementation(async () => {
       callOrder.push('resolveSlideTokens');
-      return '# Final';
+      return { markdown: '# Final', slides: [] };
     });
     mockUpsertDugSection.mockImplementation(async () => {
       callOrder.push('upsertDugSection');

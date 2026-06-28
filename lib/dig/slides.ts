@@ -2,9 +2,10 @@
  * Resolves `[[SLIDE:sec|end|caption]]` tokens in "dig deeper" section markdown
  * into markdown image references. Each token triggers one bounded yt-dlp download
  * of the slide's lifespan [startSec, min(endSec, startSec+MAX_CAPTURE_SEC)], then
- * frames are sampled at SAMPLE_FPS and the most-built (largest) frame is written
- * via `pickLargestFile`. Each token owns its own temp clip, which is always deleted
- * in `finally` regardless of success or error.
+ * frames are sampled at SAMPLE_FPS over the whole window but selected only from the
+ * trailing TRAIL_SEC seconds (anchored on the reliable `end`) via `pickLargestFrom`.
+ * Each token owns its own temp clip, which is always deleted in `finally` regardless
+ * of success or error.
  *
  * Security invariants:
  * - `videoId` is validated via `assertVideoId` (throws on traversal chars)
@@ -38,18 +39,20 @@ const SAMPLE_FPS = numEnv('DIG_SAMPLE_FPS', 2);
 const MAX_CAPTURE_SEC = numEnv('DIG_MAX_CAPTURE_SEC', 10);
 /** Forward window used when Gemini omits the slide end time (seconds). */
 const DEFAULT_FWD = numEnv('DIG_DEFAULT_FWD', 4);
+/** Trailing window for frame selection — select from the last TRAIL_SEC seconds of the window. */
+const TRAIL_SEC = numEnv('DIG_TRAIL_SEC', 4);
 
-/** Return the path of the largest file in `dir`, or null if the dir has no files. */
-export function pickLargestFile(dir: string): string | null {
+/** Largest .jpg in `dir` whose 1-based ordinal (f_NNN) is >= minOrdinal. Null if none qualify. */
+export function pickLargestFrom(dir: string, minOrdinal: number): string | null {
   let best: string | null = null;
   let bestSize = -1;
   for (const name of fs.readdirSync(dir)) {
+    const m = name.match(/(\d+)\.jpg$/);
+    if (!m) continue;
+    if (parseInt(m[1], 10) < minOrdinal) continue;            // skip leading frames
     const p = path.join(dir, name);
     const st = fs.statSync(p);
-    if (st.isFile() && st.size > bestSize) {
-      bestSize = st.size;
-      best = p;
-    }
+    if (st.isFile() && st.size > bestSize) { bestSize = st.size; best = p; }
   }
   return best;
 }
@@ -65,12 +68,13 @@ export interface ResolveSlideTokensOpts {
   sectionId: number;
 }
 
-/** Download exactly the slide's lifespan and write the most-built frame.
- *  Window = [startSec, min(endSec, startSec+MAX_CAPTURE_SEC)] when endSec is usable,
- *  else [startSec, startSec+DEFAULT_FWD]. SECURITY: trusts outPath — caller checks containment. */
+/** Download [startSec, winEnd], sample the whole window, but select the largest (most-built)
+ *  frame only from the trailing TRAIL_SEC seconds. Trailing-only because Gemini's `end` reliably
+ *  brackets the slide while `start` can be early (previous slide lingers at the leading edge).
+ *  Returns the chosen frame's absolute timestamp (pickedSec). SECURITY: trusts outPath. */
 async function captureSlideFrame(opts: {
   youtubeUrl: string; startSec: number; endSec: number | null; outPath: string;
-}): Promise<void> {
+}): Promise<number> {
   const { youtubeUrl, startSec, endSec, outPath } = opts;
   const cacheDir = path.resolve('.cache');
   fs.mkdirSync(cacheDir, { recursive: true });
@@ -78,6 +82,8 @@ async function captureSlideFrame(opts: {
     ? Math.min(endSec, startSec + MAX_CAPTURE_SEC)
     : startSec + DEFAULT_FWD;
   const winEnd = Math.max(rawEnd, startSec + 1);  // guard a degenerate window (e.g. DIG_DEFAULT_FWD="" → 0)
+  const tailStart = Math.max(startSec, winEnd - TRAIL_SEC);          // absolute, anchored on end
+  const minOrdinal = Math.floor((tailStart - startSec) * SAMPLE_FPS) + 1; // 1-based; frames before are leading
 
   const clip = path.join(cacheDir, `clip-${crypto.randomUUID()}.mp4`);
   const framesDir = fs.mkdtempSync(path.join(cacheDir, 'frames-'));
@@ -90,9 +96,14 @@ async function captureSlideFrame(opts: {
       '-y', '-i', clip, '-vf', `fps=${SAMPLE_FPS}`, '-q:v', '2',
       path.join(framesDir, 'f_%03d.jpg'),
     ]);
-    const best = pickLargestFile(framesDir);
+    let best = pickLargestFrom(framesDir, minOrdinal);
+    if (!best) best = pickLargestFrom(framesDir, 1);   // tiny window → fall back to whole sample
     if (!best) throw new Error('no frames sampled');
     fs.copyFileSync(best, outPath);
+    const ord = parseInt(path.basename(best).match(/(\d+)\.jpg$/)![1], 10);
+    let pickedSec = startSec + (ord - 1) / SAMPLE_FPS;
+    pickedSec = Math.min(Math.max(pickedSec, startSec), winEnd);     // clamp
+    return Math.round(pickedSec * 10) / 10;
   } finally {
     fs.rmSync(framesDir, { recursive: true, force: true });
     try { fs.unlinkSync(clip); } catch { /* ignore */ }
@@ -103,15 +114,19 @@ async function captureSlideFrame(opts: {
  * Resolve all `[[SLIDE:sec|end|caption]]` tokens in `markdown` to markdown image
  * references pointing at extracted JPEG frames.
  *
- * - No tokens → returns `markdown` unchanged; no exec calls made.
+ * - No tokens → returns `{ markdown: stripped, slides: [] }`; no exec calls made.
  * - `videoId` validated (throws) before any exec.
  * - Per token: one bounded yt-dlp download; on failure the token is stripped.
  * - On per-frame ffmpeg failure → that token dropped, others kept.
+ * - Duplicate asset names (B2): first-wins; second token with same name is skipped.
+ *
+ * Returns `{ markdown, slides }` where `slides` carries `{ startSec, endSec, pickedSec }`
+ * metadata for each successfully captured slide.
  */
 export async function resolveSlideTokens(
   markdown: string,
   opts: ResolveSlideTokensOpts,
-): Promise<string> {
+): Promise<{ markdown: string; slides: Array<{ startSec: number; endSec: number; pickedSec: number }> }> {
   const { videoId, startSec, endSec, assetsRoot, sectionId } = opts;
 
   // Always validate videoId first — throws on traversal chars or invalid format.
@@ -123,37 +138,49 @@ export async function resolveSlideTokens(
   // [[SLIDE:...]] that the parser rejected (out-of-range / malformed) so it
   // never leaks into the rendered doc as literal text.
   if (tokens.length === 0) {
-    return stripUnresolvedSlideTokens(markdown);
+    return { markdown: stripUnresolvedSlideTokens(markdown), slides: [] };
   }
 
   // Build YouTube URL server-side from the validated videoId.
   const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
+  const slides: Array<{ startSec: number; endSec: number; pickedSec: number }> = [];
+  const usedNames = new Set<string>();  // B2: guarantee filename uniqueness (first-wins) across this run
+
   let result = markdown;
   for (const token of tokens) {
-    const assetPath = resolveAssetPath(assetsRoot, videoId, sectionId, token.sec);
+    const endComponent = token.endSec ?? (token.sec + DEFAULT_FWD);
+    const assetName = `${sectionId}-${token.sec}-${endComponent}.jpg`;
+
+    if (usedNames.has(assetName)) continue;   // B2: two tokens resolving to the same file → keep the first only
+    usedNames.add(assetName);
+
+    const assetPath = path.resolve(assetsRoot, videoId, assetName);
     const resolvedRoot = path.resolve(assetsRoot);
     if (!assetPath.startsWith(resolvedRoot + path.sep)) {            // containment BEFORE any write
       console.warn('[dig-slide-miss] asset path escaped assetsRoot — skipping token:', token.raw);
       result = result.replace(token.raw, '');
+      usedNames.delete(assetName);
       continue;
     }
     fs.mkdirSync(path.resolve(assetsRoot, videoId), { recursive: true });
     try {
-      await captureSlideFrame({ youtubeUrl, startSec: token.sec, endSec: token.endSec, outPath: assetPath });
-      const imgRef = `![${token.caption}](assets/${videoId}/${sectionId}-${token.sec}.jpg)`;
+      const pickedSec = await captureSlideFrame({ youtubeUrl, startSec: token.sec, endSec: token.endSec, outPath: assetPath });
+      const imgRef = `![${token.caption}](assets/${videoId}/${assetName})`;
       const escapedRaw = token.raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       result = result.replace(new RegExp(escapedRaw, 'g'), () => imgRef);
+      slides.push({ startSec: token.sec, endSec: endComponent, pickedSec });
     } catch (err: unknown) {
       console.warn('[dig-slide-miss] capture failed for token', token.raw, ':', (err as Error).message);
       const escapedRaw2 = token.raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       result = result.replace(new RegExp(escapedRaw2, 'g'), () => '');
+      usedNames.delete(assetName); // failed capture: free the name
     }
   }
 
   // Final safety net: strip any [[SLIDE:...]] that was never resolved to an
   // image (e.g. dropped as out-of-range, or malformed) so no raw token ships.
-  return stripUnresolvedSlideTokens(result);
+  return { markdown: stripUnresolvedSlideTokens(result), slides };
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -171,13 +198,4 @@ export async function resolveSlideTokens(
  */
 function stripUnresolvedSlideTokens(markdown: string): string {
   return markdown.replace(/\[\[SLIDE:.*?\]\]/g, '');
-}
-
-function resolveAssetPath(
-  assetsRoot: string,
-  videoId: string,
-  sectionId: number,
-  sec: number,
-): string {
-  return path.resolve(assetsRoot, videoId, `${sectionId}-${sec}.jpg`);
 }

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { numEnv, pickLargestFile } from '@/lib/dig/slides';
+import { numEnv, pickLargestFrom } from '@/lib/dig/slides';
 
 describe('numEnv', () => {
   const KEY = 'DIG_TEST_NUMENV';
@@ -44,18 +44,28 @@ describe('numEnv', () => {
   });
 });
 
-describe('pickLargestFile', () => {
+describe('pickLargestFrom', () => {
   let dir: string;
   beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pick-')); });
   afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
 
-  it('returns the largest file by byte size', () => {
-    fs.writeFileSync(path.join(dir, 'a.jpg'), Buffer.alloc(10));
-    fs.writeFileSync(path.join(dir, 'b.jpg'), Buffer.alloc(100));
-    fs.writeFileSync(path.join(dir, 'c.jpg'), Buffer.alloc(50));
-    expect(pickLargestFile(dir)).toBe(path.join(dir, 'b.jpg'));
+  it('returns the largest file by byte size (minOrdinal=1 → all frames eligible)', () => {
+    fs.writeFileSync(path.join(dir, 'f_001.jpg'), Buffer.alloc(10));
+    fs.writeFileSync(path.join(dir, 'f_002.jpg'), Buffer.alloc(100));
+    fs.writeFileSync(path.join(dir, 'f_003.jpg'), Buffer.alloc(50));
+    expect(pickLargestFrom(dir, 1)).toBe(path.join(dir, 'f_002.jpg'));
   });
   it('returns null for an empty directory', () => {
-    expect(pickLargestFile(dir)).toBeNull();
+    expect(pickLargestFrom(dir, 1)).toBeNull();
+  });
+  it('skips frames below minOrdinal', () => {
+    fs.writeFileSync(path.join(dir, 'f_001.jpg'), Buffer.alloc(999));
+    fs.writeFileSync(path.join(dir, 'f_005.jpg'), Buffer.alloc(50));
+    expect(pickLargestFrom(dir, 3)).toBe(path.join(dir, 'f_005.jpg'));
+  });
+  it('returns null when all frames are below minOrdinal', () => {
+    fs.writeFileSync(path.join(dir, 'f_001.jpg'), Buffer.alloc(999));
+    fs.writeFileSync(path.join(dir, 'f_002.jpg'), Buffer.alloc(200));
+    expect(pickLargestFrom(dir, 5)).toBeNull();
   });
 });
