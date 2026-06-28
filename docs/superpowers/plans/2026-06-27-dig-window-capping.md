@@ -134,6 +134,12 @@ it('end beyond the window is clamped to windowEnd', () => {
 it('caption with a pipe still sanitizes (end absent)', () => {
   expect(parseSlideTokens('[[SLIDE:312|perceive | plan]]', 300, 400)[0].caption).toBe('perceive plan');
 });
+it('numeric two-field caption is NOT eaten as an end (B-1)', () => {
+  // no trailing '|' after 2024 → lookahead fails → 2024 is the caption, not an end
+  expect(parseSlideTokens('[[SLIDE:333|2024]]', 300, 400))
+    .toEqual([{ raw: '[[SLIDE:333|2024]]', sec: 333, endSec: null, caption: '2024' }]);
+  expect(parseSlideTokens('[[SLIDE:333|42]]', 300, 400)[0].caption).toBe('42');
+});
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -147,9 +153,12 @@ Expected: FAIL — `endSec` undefined / shape mismatch.
 // SlideToken: add endSec
 export interface SlideToken { raw: string; sec: number; endSec: number | null; caption: string; }
 
-// Grammar: <time>(|<time>)?(|caption)?  — second time optional (tolerant)
+// Grammar: <time>(|<end-time>)?(|caption)?  — the end-time group has a (?=\|) lookahead so it
+// ONLY matches when a caption field follows it (three-field form). This prevents a numeric two-field
+// caption like [[SLIDE:333|2024]] from being mis-grabbed as an end (B-1): with no trailing '|', the
+// lookahead fails and '2024' falls through to the caption group. Two-field start|X is always start+caption.
 const TOKEN_RE =
-  /\[\[SLIDE:(\d{1,2}:\d{1,2}(?::\d{1,2})?|\d+)(?:\|(\d{1,2}:\d{1,2}(?::\d{1,2})?|\d+))?(?:\|([^\]]*))?\]\]/g;
+  /\[\[SLIDE:(\d{1,2}:\d{1,2}(?::\d{1,2})?|\d+)(?:\|(\d{1,2}:\d{1,2}(?::\d{1,2})?|\d+)(?=\|))?(?:\|([^\]]*))?\]\]/g;
 
 export function parseSlideTokens(markdown: string, windowStart: number, windowEnd: number): SlideToken[] {
   const results: SlideToken[] = [];
@@ -221,21 +230,27 @@ const ytArgs = () => (mockExecFile.mock.calls.find((c: unknown[]) => c[0] === 'y
 
 test('endSec present → window [start, min(end, start+MAX_CAPTURE_SEC)], one call, largest written', async () => {
   mockFfmpegPipeline('', [10, 500, 50]);                       // fps writes 3 frames; 500 is largest
-  const out = await resolveSlideTokens('see [[SLIDE:333|339|S]]', { ...getOpts(), startSec: 300, endSec: 400 });
+  const out = await resolveSlideTokens('see [[SLIDE:333|341|S]]', { ...getOpts(), startSec: 300, endSec: 400 });
   expect(out).toContain('![S](assets/abc12345678/300-333.jpg)');
   expect(mockExecFile.mock.calls.filter((c: unknown[]) => c[0] === 'yt-dlp').length).toBe(1);
-  expect(ytArgs().join(' ')).toContain('*333-339');           // end within MAX_CAPTURE
+  expect(ytArgs().join(' ')).toContain('*333-341');           // min(341, 333+10)=341 — distinct from the other paths
   expect(fs.statSync(path.join(tmpAssetsRoot, 'abc12345678', '300-333.jpg')).size).toBe(500);
 });
 test('endSec null → window [start, start+DEFAULT_FWD]', async () => {
   mockFfmpegPipeline('', [100]);
   await resolveSlideTokens('see [[SLIDE:333|S]]', { ...getOpts(), startSec: 300, endSec: 400 }); // no end → null
-  expect(ytArgs().join(' ')).toContain('*333-339');           // 333 + DEFAULT_FWD(6)
+  expect(ytArgs().join(' ')).toContain('*333-337');           // 333 + DEFAULT_FWD(4) — distinct path (H-1)
 });
 test('long slide → window capped at start+MAX_CAPTURE_SEC', async () => {
   mockFfmpegPipeline('', [100]);
   await resolveSlideTokens('see [[SLIDE:333|399|S]]', { ...getOpts(), startSec: 300, endSec: 400 });
-  expect(ytArgs().join(' ')).toContain('*333-343');           // 333 + MAX_CAPTURE(10)
+  expect(ytArgs().join(' ')).toContain('*333-343');           // 333 + MAX_CAPTURE(10) — distinct
+});
+test('B-2: one yt-dlp call PER token (download count = token count, locked cost)', async () => {
+  mockFfmpegPipeline('', [100]);
+  await resolveSlideTokens('a [[SLIDE:310|315|A]] b [[SLIDE:333|341|B]] c [[SLIDE:360|365|C]] d',
+    { ...getOpts(), startSec: 300, endSec: 400 });
+  expect(mockExecFile.mock.calls.filter((c: unknown[]) => c[0] === 'yt-dlp').length).toBe(3);
 });
 test('yt-dlp fails → token stripped, others kept', async () => {
   mockExecFile.mockImplementation((cmd: string, _a: string[], cb: (e: Error|null, so?: string, se?: string) => void) =>
@@ -261,7 +276,7 @@ test('security: server-built URL + argv arrays only', async () => {
 // constants near the existing ones (delete SCENE_THRESHOLD, MAX_WINDOW_SEC)
 const SAMPLE_FPS = numEnv('DIG_SAMPLE_FPS', 2);
 const MAX_CAPTURE_SEC = numEnv('DIG_MAX_CAPTURE_SEC', 10);
-const DEFAULT_FWD = numEnv('DIG_DEFAULT_FWD', 6);
+const DEFAULT_FWD = numEnv('DIG_DEFAULT_FWD', 4);   // M-3: shorter blind window when Gemini omits end
 
 /** Download exactly the slide's lifespan and write the most-built frame.
  *  Window = [startSec, min(endSec, startSec+MAX_CAPTURE_SEC)] when endSec is usable,
@@ -272,9 +287,10 @@ async function captureSlideFrame(opts: {
   const { youtubeUrl, startSec, endSec, outPath } = opts;
   const cacheDir = path.resolve('.cache');
   fs.mkdirSync(cacheDir, { recursive: true });
-  const winEnd = endSec != null && endSec > startSec
+  const rawEnd = endSec != null && endSec > startSec
     ? Math.min(endSec, startSec + MAX_CAPTURE_SEC)
     : startSec + DEFAULT_FWD;
+  const winEnd = Math.max(rawEnd, startSec + 1);  // M-1: guard a degenerate window (e.g. DIG_DEFAULT_FWD="" → 0)
 
   const clip = path.join(cacheDir, `clip-${crypto.randomUUID()}.mp4`);
   const framesDir = fs.mkdtempSync(path.join(cacheDir, 'frames-'));
@@ -326,7 +342,9 @@ return stripUnresolvedSlideTokens(result);
 
 Delete `captureBestFrame`, `singleFrameCapture`, `parseFirstSceneChange`, `runCapture`, and the `SCENE_THRESHOLD`/`MAX_WINDOW_SEC` consts. **Keep** `pickLargestFile`, `numEnv`, `SAMPLE_FPS`, `resolveAssetPath`, `stripUnresolvedSlideTokens`.
 
-- [ ] **Step 4: Remove obsolete tests.** In `slides-helpers.test.ts`, delete the `parseFirstSceneChange` describe block; **keep** `pickLargestFile` and `numEnv`. In `slides.test.ts`, delete legacy cases that assert the removed internals (`-ss <relStart>`, `--download-sections *300-400`, `-frames:v 1` single-frame, the `-y` single-frame test, scene-bounds-window, `captureBestFrame: …`).
+**Rewrite the module header (H-2)** — `lib/dig/slides.ts:1-13` currently describes "downloading a section clip" and scene detection. Replace it to describe the new model: per-token bounded download `[start, min(end, start+MAX_CAPTURE_SEC)]` from the Gemini-supplied window, most-built frame via `pickLargestFile`, each token owning its temp clip (deleted in `finally`). Keep the security-invariant list verbatim. Also confirm `ResolveSlideTokensOpts.startSec`/`endSec` are documented as the *section* window (distinct from `SlideToken.endSec`, the per-slide end).
+
+- [ ] **Step 4: Remove obsolete tests + the dead import (H-3).** In `tests/lib/dig/slides-helpers.test.ts`: delete the `parseFirstSceneChange` `describe` block **and remove `parseFirstSceneChange` from the import on line 4** (`import { numEnv, pickLargestFile } from '@/lib/dig/slides';`) — leaving it there fails `tsc` once the function is deleted. **Keep** `pickLargestFile` and `numEnv` blocks (both functions are retained). In `slides.test.ts`, delete legacy cases that assert the removed internals (`-ss <relStart>`, `--download-sections *300-400`, `-frames:v 1` single-frame, the `-y` single-frame test, scene-bounds-window, `captureBestFrame: …`).
 
 - [ ] **Step 5: Verify no dangling refs**
 

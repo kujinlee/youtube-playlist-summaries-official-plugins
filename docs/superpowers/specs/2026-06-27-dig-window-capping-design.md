@@ -85,7 +85,10 @@ Per token, **one** bounded download, no probing, no cut detection:
 - `yt-dlp --download-sections *startSec-winEnd` (one clip).
 - Sample at `SAMPLE_FPS`; **`pickLargestFile`** over the sampled frames = the most-built frame.
   Because the window starts at Gemini's *settled* `start` and is bounded by its `end`, the largest
-  frame is the settled slide — and never the previous or next slide (they are outside the window).
+  frame is the settled slide — the previous slide is excluded (window starts at `start`), and the
+  next slide is excluded *when `end` is accurate*. The residual exposure is the **null-end fallback**
+  on a fast-cut deck (a blind `DEFAULT_FWD` window can reach into the next slide) — kept small by
+  `DEFAULT_FWD=4` and rare because Gemini emits `end` reliably (spike 3); see §10.
 - Write the chosen frame to the asset path; delete the temp clip in `finally`.
 
 `MAX_CAPTURE_SEC` (~10) bounds the download even for a slide that stays on screen for minutes
@@ -162,7 +165,7 @@ rate-limit-safe (download is now the slide's own ~seconds-long lifespan).
 | Constant | Initial | Source |
 |---|---|---|
 | `MAX_CAPTURE_SEC` | 10 | bounds download for long-lived slides; covers slight-early `start` |
-| `DEFAULT_FWD` | 6 | fallback window when Gemini omits a usable `end` |
+| `DEFAULT_FWD` | 4 | short fallback window when Gemini omits a usable `end` (kept small to limit the null-end wrong-slide risk on fast-cut decks — M-3) |
 | `SAMPLE_FPS` | 2 | unchanged |
 
 Removed: `SCENE_THRESHOLD`, `MAX_WINDOW_SEC`, and the rev-2 `BACK_PAD`/`BASE_FWD`/`EXTEND_SEC`/`MAX_EXTENDS`.
@@ -173,12 +176,21 @@ Removed: `SCENE_THRESHOLD`, `MAX_WINDOW_SEC`, and the rev-2 `BACK_PAD`/`BASE_FWD
 
 1. **Gemini collapse-prompt compliance** — validated on 6 slides across regimes (builds collapsed,
    fast-cuts preserved), but not guaranteed on every style. **Backstop:** `pickLargestFile` within
-   `[start, end]` selects the most-built frame even if `start` is slightly early, and the window
-   bound prevents wandering into adjacent slides. A missed-collapse degrades to "a slightly less
-   complete frame," never a wrong-slide frame.
+   `[start, end]` selects the most-built frame even if `start` is slightly early. A missed-collapse
+   degrades to "a slightly less complete frame." **Wrong-slide caveat (M-3):** the window excludes
+   the previous slide always, and the next slide *when `end` is accurate*; the one path that can pick
+   a next-slide frame is the **null-end fallback on a fast-cut deck** (blind `DEFAULT_FWD` window). It
+   is rare (Gemini emits `end` reliably — spike 3) and bounded small (`DEFAULT_FWD=4`); not "never."
 2. **`end` accuracy too generous** (Gemini overshoots into the next slide) — bounded by
-   `MAX_CAPTURE_SEC`, and `pickLargestFile` favors the current slide's settled frame over a
-   just-appearing next slide within the short capture window. If observed in practice, tighten
-   `MAX_CAPTURE_SEC` or revisit.
-3. **3-token cap interaction** — busy fast-cut sections still cap at 3 real slides (unchanged,
+   `MAX_CAPTURE_SEC`; `pickLargestFile` favors the current slide's settled frame over a just-appearing
+   next slide. If observed, tighten `MAX_CAPTURE_SEC`.
+3. **Download count 1 → N (B-2)** — the old pipeline made **one** `yt-dlp` call per section; this
+   makes **one per slide token (≤3)**. This is a *deliberate* trade, not an oversight: slides can be
+   spread across a long section (spike data: one section's slides at 279/487/526s span ~4min), so a
+   single combined download would re-create the very multi-minute span that caused the 403. Per-token
+   clips are each tiny (~5–10s). The 403 we hit came from *one sustained ~19-minute transfer*; the
+   v5 re-dig empirically ran many small sequential downloads without tripping 403 (only the 19-min
+   ones failed). The per-token call count is locked by a test (≤3/section). If frequency-based 403s
+   appear in practice, add inter-token spacing — do **not** combine into one span.
+4. **3-token cap interaction** — busy fast-cut sections still cap at 3 real slides (unchanged,
    out of scope).
