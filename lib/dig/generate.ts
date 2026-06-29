@@ -10,7 +10,7 @@ import type { SectionWindow } from '@/lib/dig/section-window';
 
 /** Dig generation policy version. Bump when the slide/code policy changes so existing
  *  dug sections become stale and can be deliberately refreshed. */
-export const DIG_GENERATOR_VERSION = 8;
+export const DIG_GENERATOR_VERSION = 9;
 
 const DEEPDIVE_MODEL =
   process.env.GEMINI_DEEPDIVE_MODEL ?? 'gemini-2.5-pro';
@@ -48,6 +48,7 @@ function getApiKey(): string {
  * echoed the indexed-transcript display format as `[[i @m:ss]]`, which leaked as literal text,
  * and resolveTranscriptTokens only ever rendered OWN-LINE citations (it strips inline ones).
  * Each dug section already carries the summary's own-line ▶ timestamp link directly above it.
+ * Note: v9 adds length-conditional ### sub-headings to long sections (re-dig to apply).
  */
 export function buildDigPrompt(
   lang: 'en' | 'ko',
@@ -72,6 +73,7 @@ Your task:
 - Usually emit ONE token per visual, at its settled moment. EXCEPTION: if a visual builds in stages and the intermediate stages each teach something the final frame cannot (e.g. a diagram that reveals a relationship piece by piece), emit one token per instructive stage, each pointed at the moment that stage is complete. If the build merely animates into place, the final settled frame alone is enough.
 - The caption is a short plain-English description of the slide. It MUST NOT contain the characters [ ] ( ) or | — describe the slide in words; never paste raw code, YAML, or shell into the caption. (example: [[SLIDE:3:51|4:02|Diagram showing four capabilities]])
 - Select at most 4 — typically 1-3 — only the most essential visuals. In a slide-heavy talk, do NOT reproduce every slide; curate the handful a reader most needs, and omit any visual whose point the prose already carries. Most sections need zero or one; emitting none is fine.
+- For a LONG elaboration, structure the prose with short \`###\` sub-headings (e.g. "How it works", "Where it breaks down", "What to use instead") that group it into labeled subsections. Use \`###\` ONLY — never \`#\` or \`##\` (the section title is rendered separately). Keep each sub-heading short, plain, and descriptive, in the SAME language as the rest of your response (do NOT switch to English), with no markdown, code, or the characters [ ] ( ) |. Add sub-headings ONLY when the section is long enough to benefit — a short one-or-two-paragraph section needs none. Sub-headings group THIS section's elaboration; they do not restate the section title or the summary's bullet points.
 - Output markdown only — no preamble, no headings for the section title, no meta-commentary.
 
 Transcript and summary follow:

@@ -188,8 +188,36 @@ test('two consecutive timeouts/transient network failures throws', async () => {
 // ── DIG_GENERATOR_VERSION ────────────────────────────────────────────────────────
 
 describe('DIG_GENERATOR_VERSION', () => {
-  it('is the integer 8', () => {
-    expect(DIG_GENERATOR_VERSION).toBe(8);
+  it('is the integer 9', () => {
+    expect(DIG_GENERATOR_VERSION).toBe(9);
+  });
+});
+
+// ── buildDigPrompt — section sub-headings (PR2) ──────────────────────────────
+
+describe('buildDigPrompt — section sub-headings (PR2)', () => {
+  it('instructs length-conditional ### sub-headings', () => {
+    const p = buildDigPrompt('en', 0, 300);
+    expect(p).toMatch(/###/);
+    expect(p).toMatch(/sub-heading/i);
+    expect(p).toMatch(/long/i);                 // length-conditional
+  });
+
+  it('restricts sub-headings to ### only (never # or ##)', () => {
+    const p = buildDigPrompt('en', 0, 300);
+    expect(p).toMatch(/never `#` or `##`|`###` ONLY|only `###`/i);
+  });
+
+  it('requires sub-headings in the SAME language as the response, not English (Korean-safe)', () => {
+    const p = buildDigPrompt('en', 0, 300);
+    expect(p).toMatch(/same language as (the rest of )?your response/i);
+    expect(p).toContain('do NOT switch to English');   // exact Korean-safety anchor (Codex Low)
+    // Must NOT force English for the sub-heading text (would break the lang=ko contract).
+    expect(p).not.toMatch(/sub-headings? (in|must be in) english/i);
+  });
+
+  it('still mandates Korean output overall under lang=ko (unchanged)', () => {
+    expect(buildDigPrompt('ko', 0, 300)).toMatch(/한국어/);
   });
 });
 
