@@ -146,8 +146,8 @@ function buildRenderer(mdPath: string, cropMap: Map<string, CropBox | null>): Ma
 const DIG_DOC_CSS = `
 section{padding:2.4em 0;border-top:2px solid var(--rule)}
 section:first-of-type{border-top:0}
-.dg img.dig-slide{margin:2em auto;max-height:300px;border:1px solid var(--rule);cursor:zoom-in}
-.dg figure.dig-slide-crop{display:block;overflow:hidden;margin:2em auto;width:min(100%,540px);border:1px solid var(--rule);border-radius:6px}
+.dg img.dig-slide{margin:2em auto;max-width:100%;max-height:calc(300px * var(--dig-slide-scale, 1));border:1px solid var(--rule);cursor:zoom-in}
+.dg figure.dig-slide-crop{display:block;overflow:hidden;margin:2em auto;width:min(100%, calc(540px * var(--dig-slide-scale, 1)));border:1px solid var(--rule);border-radius:6px}
 .dg figure.dig-slide-crop>img.dig-slide{display:block;width:100%;height:100%;max-height:none;margin:0;border:0;border-radius:0;object-fit:cover;cursor:zoom-in}
 .dg .dig-trigger,.dg .dig-toggle,.dg .dig-refresh{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--meta);font-size:.8rem;font-weight:400;text-decoration:none;white-space:nowrap;cursor:pointer}
 .dg .dig-trigger:hover,.dg .dig-toggle:hover,.dg .dig-refresh:hover{text-decoration:underline}
@@ -155,7 +155,7 @@ section[data-dug="true"] .gist{display:none}
 section[data-dug="true"] .dug{display:block}
 section[data-dug="true"].show-gist .gist{display:block}
 section[data-dug="true"].show-gist .dug{display:none}
-.dg-topbar{display:flex;align-items:center;gap:1em;margin-bottom:1.6em;font-size:.85rem}
+.dg-topbar{display:flex;flex-wrap:wrap;align-items:center;gap:1em;margin-bottom:1.6em;font-size:.85rem}
 .dg-expand-all{background:none;border:1px solid var(--rule);border-radius:4px;padding:.2em .6em;cursor:pointer;font-size:.85rem;color:var(--meta)}
 .dg-orphans{margin-top:3em;padding-top:1.5em;border-top:2px dashed var(--rule)}
 .dg-orphan-note{font-size:.82rem;color:var(--meta);font-style:italic}
@@ -174,7 +174,22 @@ section[data-dug="true"].show-gist .dug{display:none}
 .dg .ask-ai:hover{text-decoration:underline}
 #_dg-ai-toast{display:none;position:fixed;left:50%;bottom:1.4rem;transform:translateX(-50%);z-index:9600;background:var(--card,#222);color:var(--ink,#fff);border:1px solid var(--rule);border-radius:6px;padding:.5em .9em;font-size:.85rem;box-shadow:0 4px 18px rgba(0,0,0,.2)}
 #_dg-ai-toast[data-show]{display:block}
+.dg-size{display:inline-flex;align-items:center;gap:.3em;color:var(--meta);font-size:.85rem}
+.dg-size button{background:none;border:1px solid var(--rule);border-radius:4px;cursor:pointer;color:var(--meta);font-size:.85rem;line-height:1;padding:.15em .45em}
+.dg-size-range{width:7rem;flex:0 0 auto}
+.dg-size-val{min-width:3.2em;text-align:center;flex:0 0 auto}
+/* print base-size is enforced by the element-level overrides above; the scale var is intentionally NOT reset via @media because the size script's inline style on documentElement outranks an @media :root rule */
+@media print{.dg-size{display:none!important}.dg img.dig-slide{max-height:300px}.dg figure.dig-slide-crop{width:min(100%,540px)}}
 `;
+
+// Shared sanitizer — used verbatim in both SIZE_HEAD_SCRIPT (head) and sizeScript (body) to avoid duplication.
+export const DIG_SLIDE_SANITIZE_JS = "function s(raw){if(raw==null){return 100;}if(typeof raw==='string'&&raw.trim()===''){return 100;}var n=Number(raw);if(!Number.isFinite(n)){return 100;}n=Math.round(n/10)*10;return Math.min(150,Math.max(50,n));}";
+
+// Pre-paint: set --dig-slide-scale from sanitized localStorage BEFORE first paint (no FOUC).
+const SIZE_HEAD_SCRIPT = `<script>(function(){try{${DIG_SLIDE_SANITIZE_JS}` +
+  `var v=s(localStorage.getItem('digSlideScale'));` +
+  `document.documentElement.style.setProperty('--dig-slide-scale',v/100);` +
+  `}catch(e){}})();</script>`;
 
 /**
  * Render a dig-deeper doc using the structured merge result (Task 6).
@@ -217,7 +232,12 @@ export function renderDigDeeperDoc(args: {
     ? digControl('summary', firstStartSec)
     : `<a class="dig" data-type="summary">↑ summary</a>`;
   const wholeAsk = askAi(buildWholeVideoPrompt(videoUrl, language), '💬 Ask AI about this video');
-  const topBar = `<div class="dg-topbar">${summaryLink} <button class="dg-expand-all">⤢ expand all</button> ${wholeAsk}</div>`;
+  const sizeControl = `<span class="dg-size" role="group" aria-label="Slide image size">` +
+    `<button class="dg-size-dec" type="button" aria-label="Smaller slides">−</button>` +
+    `<input class="dg-size-range" type="range" min="50" max="150" step="10" value="100" aria-label="Slide image size percent">` +
+    `<button class="dg-size-inc" type="button" aria-label="Larger slides">+</button>` +
+    `<button class="dg-size-val" type="button" aria-label="Reset slide image size to 100%">100%</button></span>`;
+  const topBar = `<div class="dg-topbar">${summaryLink} <button class="dg-expand-all">⤢ expand all</button> ${wholeAsk} ${sizeControl}</div>`;
 
   // ── Sections ──────────────────────────────────────────────────────────────
   const sectionsHtml = sections.map((ms, i) => {
@@ -364,6 +384,23 @@ export function renderDigDeeperDoc(args: {
   });
 })();</script>`;
 
+  const sizeScript = `<script>(function(){
+  var root=document.documentElement;
+  var range=document.querySelector('.dg-size-range');
+  var dec=document.querySelector('.dg-size-dec');
+  var inc=document.querySelector('.dg-size-inc');
+  var val=document.querySelector('.dg-size-val');
+  if(!range||!val)return;
+  ${DIG_SLIDE_SANITIZE_JS}
+  function read(){try{return s(localStorage.getItem('digSlideScale'));}catch(e){return 100;}}
+  function apply(p,persist){p=s(p);root.style.setProperty('--dig-slide-scale',p/100);range.value=String(p);val.textContent=p+'%';if(persist){try{localStorage.setItem('digSlideScale',String(p));}catch(e){}}}
+  apply(read(),false);
+  range.addEventListener('input',function(){apply(range.value,true);});
+  if(dec)dec.addEventListener('click',function(){apply(Number(range.value)-10,true);});
+  if(inc)inc.addEventListener('click',function(){apply(Number(range.value)+10,true);});
+  val.addEventListener('click',function(){apply(100,true);});
+})();</script>`;
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -373,6 +410,7 @@ export function renderDigDeeperDoc(args: {
 <meta name="source-md" content="${esc(path.basename(mdPath))}">
 <title>${esc(title)}</title>
 ${THEME_HEAD_SCRIPT}
+${SIZE_HEAD_SCRIPT}
 <style>${themeStyleBlock(LIGHT, DARK)}${STRUCTURAL_CSS}${NAV_CSS}${DIG_DOC_CSS}</style>
 </head>
 <body>
@@ -381,7 +419,7 @@ ${THEME_TOGGLE_BUTTON}${PRINT_BUTTON}
 ${bodyHtml}
 </article>
 ${expandAllDialogs}${zoomOverlay}${aiToast}
-${NAV_SCRIPT}${THEME_TOGGLE_SCRIPT}${zoomScript}${askAiScript}
+${NAV_SCRIPT}${THEME_TOGGLE_SCRIPT}${zoomScript}${askAiScript}${sizeScript}
 </body>
 </html>`;
 }
