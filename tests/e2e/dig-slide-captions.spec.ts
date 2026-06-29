@@ -80,3 +80,19 @@ test('C4 survives blocked localStorage (default shown, no page errors)', async (
   await expect(page.locator('.dig-cap')).toBeVisible();       // defaulted to shown
   expect(errs).toEqual([]);
 });
+
+test('C5 zoom overlay shows the slide caption', async ({ page }) => {
+  await stub(page); await page.goto(URL);
+  await page.locator('.dig-slide').click();
+  await expect(page.locator('#_dg-zoom')).toHaveAttribute('data-open', '');
+  await expect(page.locator('#_dg-zoom-cap')).toHaveText('A clear caption');
+  await expect(page.locator('#_dg-zoom-cap')).toBeVisible();
+});
+
+test('C6 zoom caption hidden when captions toggled off', async ({ page }) => {
+  await stub(page); await page.goto(URL);
+  await page.locator('.dg-caps-toggle').click();      // captions off
+  await page.locator('.dig-slide').click();
+  await expect(page.locator('#_dg-zoom')).toHaveAttribute('data-open', '');
+  await expect(page.locator('#_dg-zoom-cap')).toBeHidden();
+});

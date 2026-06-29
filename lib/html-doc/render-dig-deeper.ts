@@ -163,10 +163,11 @@ section[data-dug="true"].show-gist .dug{display:none}
 ._dg-box button{padding:.3em .9em;border-radius:4px;font-size:.88rem;cursor:pointer;border:1px solid var(--rule)}
 #_dg-ea-confirm{background:var(--link,#b07700);color:#fff;border-color:transparent;margin-right:.6em}
 #_dg-ea-cancel-dlg,#_dg-ea-cancel-prog{background:none;color:var(--meta)}
-.dg-zoom{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9500;align-items:center;justify-content:center;cursor:zoom-out}
+.dg-zoom{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9500;flex-direction:column;align-items:center;justify-content:center;cursor:zoom-out}
 .dg-zoom[data-open]{display:flex}
 .dg-zoom img{max-width:95vw;max-height:95vh;object-fit:contain;border-radius:4px}
 .dg-zoom-close{position:fixed;top:1rem;right:1.2rem;font-size:1.6rem;line-height:1;color:#fff;background:none;border:none;cursor:pointer;z-index:9501}
+.dg-zoom-cap{color:#fff;font-size:.85rem;line-height:1.4;margin-top:1rem;max-width:95vw;text-align:center}
 .dg .ask-ai{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--meta);font-size:.8rem;font-weight:400;text-decoration:none;white-space:nowrap;cursor:pointer}
 .dg .ask-ai:hover{text-decoration:underline}
 #_dg-ai-toast{display:none;position:fixed;left:50%;bottom:1.4rem;transform:translateX(-50%);z-index:9600;background:var(--card,#222);color:var(--ink,#fff);border:1px solid var(--rule);border-radius:6px;padding:.5em .9em;font-size:.85rem;box-shadow:0 4px 18px rgba(0,0,0,.2)}
@@ -342,6 +343,7 @@ export function renderDigDeeperDoc(args: {
   const zoomOverlay = `
 <div class="dg-zoom" id="_dg-zoom" role="dialog" aria-modal="true" aria-label="Enlarged slide">
   <button class="dg-zoom-close" id="_dg-zoom-close" aria-label="Close">✕</button>
+  <div class="dg-zoom-cap" id="_dg-zoom-cap"></div>
 </div>`;
 
   // ES5-plain to match NAV_SCRIPT. Click delegation on document so dynamically
@@ -350,11 +352,25 @@ export function renderDigDeeperDoc(args: {
   const zoomScript = `<script>(function(){
   var ov=document.getElementById('_dg-zoom');
   if(!ov)return;
-  var im=document.createElement('img');im.id='_dg-zoom-img';im.alt='';ov.appendChild(im);
-  function close(){ov.removeAttribute('data-open');im.removeAttribute('src');}
+  var cap=document.getElementById('_dg-zoom-cap');
+  // img is inserted BEFORE the caption node so the overlay stacks img-over-caption (flex column).
+  var im=document.createElement('img');im.id='_dg-zoom-img';im.alt='';ov.insertBefore(im,cap);
+  // close() fully resets the caption; because any click while open closes first, opening a
+  // different slide is always a fresh open (consecutive-slide zoom = two clicks: close, then open).
+  function close(){ov.removeAttribute('data-open');im.removeAttribute('src');if(cap){cap.textContent='';cap.style.display='none';}}
   document.addEventListener('click',function(e){
     var t=e.target;
-    if(t&&t.classList&&t.classList.contains('dig-slide')){im.src=t.getAttribute('src');im.alt=t.getAttribute('alt')||'';ov.setAttribute('data-open','');return;}
+    if(t&&t.classList&&t.classList.contains('dig-slide')){
+      im.src=t.getAttribute('src');im.alt=t.getAttribute('alt')||'';
+      if(cap){
+        var fig=t.closest?t.closest('.dig-slide-fig'):null;
+        var capEl=fig?fig.querySelector('.dig-cap'):null;
+        var txt=capEl?capEl.textContent:'';
+        cap.textContent=txt||'';
+        cap.style.display=(txt&&!document.documentElement.classList.contains('dg-hide-caps'))?'':'none';
+      }
+      ov.setAttribute('data-open','');return;
+    }
     if(ov.hasAttribute('data-open')){close();} // when open the overlay covers the viewport → any click (backdrop, image, or ✕) closes, matching the zoom-out cursor
   });
   document.addEventListener('keydown',function(e){
