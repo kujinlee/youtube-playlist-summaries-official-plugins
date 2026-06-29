@@ -330,7 +330,17 @@ export function renderDigDeeperDoc(args: {
     if(!a)return;
     e.preventDefault();
     var p=a.getAttribute('data-ai-prompt')||'',u=a.getAttribute('data-ai-url')||'';
-    if(u)window.open(u,'_blank','noopener,noreferrer');
+    if(u){
+      // Open Gemini as a resizable popup window on the right (uses the real
+      // gemini.google.com + the user's subscription — a top-level window, not an
+      // embeddable frame). No noopener: some browsers ignore the size/position
+      // features when it is set, and we want a usable handle. The opener back-ref
+      // is then severed best-effort (Gemini is trusted; this doc has no sensitive
+      // state). If the popup is blocked, the prompt is already on the clipboard.
+      var sw=screen.availWidth||1280,w=Math.max(420,Math.round(sw*0.42)),h=screen.availHeight||800;
+      var win=window.open(u,'_blank','popup=1,width='+w+',height='+h+',left='+(sw-w)+',top=0');
+      try{if(win)win.opener=null;}catch(_e){}
+    }
     if(navigator.clipboard&&navigator.clipboard.writeText){
       navigator.clipboard.writeText(p).then(function(){show('✓ copied — paste (⌘V) into Gemini');},function(){show('Could not copy — select the link text and copy it');});
     }else{show('Could not copy — select the link text and copy it');}

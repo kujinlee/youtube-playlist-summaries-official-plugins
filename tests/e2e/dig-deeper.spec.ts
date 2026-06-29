@@ -2311,3 +2311,36 @@ test('A2 (Ask-AI section link): clipboard round-trips the section prompt incl. &
   const last = opened[opened.length - 1];
   expect(new URL(last).searchParams.get('prompt')).toBe(clip);
 });
+
+test('A3 (Ask-AI sized popup): window.open is called with a sized-popup features string (not a plain tab)', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.addInitScript(() => {
+    const W = window as unknown as { __feat: string[]; __u: string[] };
+    W.__feat = []; W.__u = [];
+    window.open = ((u?: string | URL, _t?: string, f?: string) => {
+      W.__feat.push(String(f ?? '')); W.__u.push(String(u ?? ''));
+      return null; // simulate noopener-less open; null is fine (sever guard checks `if(win)`)
+    }) as typeof window.open;
+  });
+  const html = makeCompanionHtmlWithSlides();
+  await page.route(`**/api/html/${VIDEO_ID_SLIDES}**`, (route) =>
+    route.fulfill({ status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' }, body: html }),
+  );
+  await page.goto(`http://localhost:3000/api/html/${VIDEO_ID_SLIDES}?outputFolder=${encodeURIComponent(OUTPUT_FOLDER)}&type=dig-deeper`);
+
+  await page.locator('.ask-ai').first().click();
+
+  const { feat, urls } = await page.evaluate(() => {
+    const W = window as unknown as { __feat: string[]; __u: string[] };
+    return { feat: W.__feat, urls: W.__u };
+  });
+  expect(feat.length).toBeGreaterThan(0);
+  const f = feat[feat.length - 1];
+  expect(f).toContain('popup=1');
+  expect(f).toMatch(/width=\d+/);
+  expect(f).toMatch(/height=\d+/);
+  expect(f).toMatch(/left=-?\d+/); // left may be negative on a degenerate narrow screen; browser clamps
+  expect(f).not.toContain('noopener'); // dropped so the browser honors the sizing
+  // same call opened the gemini url (URL + features asserted together)
+  expect(urls[urls.length - 1]).toContain('https://gemini.google.com/app?prompt=');
+});
