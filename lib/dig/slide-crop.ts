@@ -49,3 +49,48 @@ export function computeTrim(
 
   return { trimTop, trimBot };
 }
+
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
+
+/** Native pixel dimensions via ffprobe. Throws on failure (callers fail closed). */
+export async function imageDims(assetPath: string): Promise<{ width: number; height: number }> {
+  const { stdout } = await execFileAsync('ffprobe', [
+    '-v', 'error', '-select_streams', 'v:0',
+    '-show_entries', 'stream=width,height', '-of', 'csv=s=x:p=0', assetPath,
+  ]);
+  const [w, h] = String(stdout).trim().split('x').map((n) => parseInt(n, 10));
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+    throw new Error(`imageDims: bad output "${stdout}"`);
+  }
+  return { width: w, height: h };
+}
+
+/** Per-row fraction (0..1) of pixels brighter than `threshold`, length = image height. */
+export async function profileRows(assetPath: string, threshold: number): Promise<number[]> {
+  const vf =
+    `format=gray,geq=lum='if(gte(lum(X\\,Y)\\,${threshold})\\,255\\,0)',scale=1:ih:flags=area`;
+  const { stdout } = await execFileAsync('ffmpeg', [
+    '-v', 'error', '-i', assetPath, '-vf', vf, '-f', 'rawvideo', '-pix_fmt', 'gray', '-',
+  ], { encoding: 'buffer', maxBuffer: 1 << 24 });
+  return Array.from(stdout as Buffer).map((v) => v / 255);
+}
+
+/** Resolve a crop box for one asset. Fail-closed: any error or length mismatch → null. */
+export async function resolveCropBox(assetPath: string): Promise<CropBox | null> {
+  let dims: { width: number; height: number };
+  try { dims = await imageDims(assetPath); } catch { return null; }
+  let top: number[];
+  let bot: number[];
+  try {
+    [top, bot] = await Promise.all([
+      profileRows(assetPath, THR_TOP),
+      profileRows(assetPath, THR_BOT),
+    ]);
+  } catch { return null; }
+  if (top.length !== dims.height || bot.length !== dims.height) return null;  // M1: fail closed
+  const trim = computeTrim(top, bot);
+  return trim ? { ...trim, width: dims.width, height: dims.height } : null;
+}
