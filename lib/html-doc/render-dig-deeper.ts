@@ -99,38 +99,33 @@ function buildRenderer(mdPath: string, cropMap: Map<string, CropBox | null>): Ma
       ? token.children.map((t) => t.content).join('')
       : (token.attrGet('alt') ?? '');
 
-    // Only inline relative `assets/` paths; leave absolute URLs untouched.
     if (srcAttr.startsWith('assets/')) {
       const absPath = path.resolve(docDir, srcAttr);
-      // Containment check: resolved path must stay inside assetsRoot.
-      // Blocks traversal like assets/../../etc/passwd (passes startsWith but
-      // resolves outside the doc's assets directory → arbitrary file disclosure).
-      // SECURITY-CRITICAL: containment violation → silent drop.
-      // No placeholder, no attacker-controlled alt text in the output.
       if (!absPath.startsWith(assetsRoot + path.sep)) return '';
       let data: Buffer | null = null;
       try {
         data = fs.readFileSync(absPath);
       } catch {
-        // Benign missing file (e.g. slide not captured) — show a visible placeholder
-        // so readers know a frame was expected here.
+        // Benign missing file — visible placeholder, UNCHANGED (no figure/figcaption).
         return `<span class="missing-slide">${esc(altAttr)}</span>`;
       }
       const b64 = data.toString('base64');
       const box = cropMap.get(absPath) ?? null;
+      // figcaption only when a caption is present (empty caption is a supported state).
+      const cap = altAttr ? `<figcaption class="dig-cap">${esc(altAttr)}</figcaption>` : '';
+      let inner: string;
       if (box) {
         const keepFrac = 1 - box.trimTop - box.trimBot;
         const keepH = Math.round(box.height * keepFrac);
         const posPct = (box.trimTop / (box.trimTop + box.trimBot)) * 100;
-        // Only the native-dim aspect-ratio is per-image; the displayed-WIDTH cap
-        // lives in CSS (.dig-slide-crop). Capping width (not height) keeps short
-        // cropped frames modest in flow — a height cap would inflate their width.
-        const figStyle = `aspect-ratio:${box.width} / ${keepH}`;
-        return `<figure class="dig-slide-crop" style="${figStyle}">` +
-               `<img class="dig-slide" style="object-position:0 ${posPct.toFixed(1)}%" ` +
-               `src="data:image/jpeg;base64,${b64}" alt="${esc(altAttr)}"></figure>`;
+        const cropStyle = `aspect-ratio:${box.width} / ${keepH}`;
+        inner = `<div class="dig-slide-crop" style="${cropStyle}">` +
+                `<img class="dig-slide" style="object-position:0 ${posPct.toFixed(1)}%" ` +
+                `src="data:image/jpeg;base64,${b64}" alt="${esc(altAttr)}"></div>`;
+      } else {
+        inner = `<img class="dig-slide" src="data:image/jpeg;base64,${b64}" alt="${esc(altAttr)}">`;
       }
-      return `<img class="dig-slide" src="data:image/jpeg;base64,${b64}" alt="${esc(altAttr)}">`;
+      return `<figure class="dig-slide-fig">${inner}${cap}</figure>`;
     }
 
     // Non-assets src (external URL): rendered escaped, but intentionally NOT a
@@ -146,9 +141,11 @@ function buildRenderer(mdPath: string, cropMap: Map<string, CropBox | null>): Ma
 const DIG_DOC_CSS = `
 section{padding:2.4em 0;border-top:2px solid var(--rule)}
 section:first-of-type{border-top:0}
-.dg img.dig-slide{margin:2em auto;max-width:100%;max-height:calc(300px * var(--dig-slide-scale, 1));border:1px solid var(--rule);cursor:zoom-in}
-.dg figure.dig-slide-crop{display:block;overflow:hidden;margin:2em auto;width:min(100%, calc(540px * var(--dig-slide-scale, 1)));border:1px solid var(--rule);border-radius:6px}
-.dg figure.dig-slide-crop>img.dig-slide{display:block;width:100%;height:100%;max-height:none;margin:0;border:0;border-radius:0;object-fit:cover;cursor:zoom-in}
+.dig-slide-fig{margin:2em auto;max-width:100%}
+.dg img.dig-slide{display:block;margin:0 auto;max-width:100%;max-height:calc(300px * var(--dig-slide-scale, 1));border:1px solid var(--rule);cursor:zoom-in}
+.dg .dig-slide-crop{display:block;margin:0 auto;overflow:hidden;width:min(100%, calc(540px * var(--dig-slide-scale, 1)));border:1px solid var(--rule);border-radius:6px}
+.dg .dig-slide-crop>img.dig-slide{display:block;width:100%;height:100%;max-height:none;margin:0;border:0;border-radius:0;object-fit:cover;cursor:zoom-in}
+.dig-cap{margin:.5em auto 0;text-align:center;font-size:.8rem;color:var(--meta);line-height:1.4}
 .dg .dig-trigger,.dg .dig-toggle,.dg .dig-refresh{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--meta);font-size:.8rem;font-weight:400;text-decoration:none;white-space:nowrap;cursor:pointer}
 .dg .dig-trigger:hover,.dg .dig-toggle:hover,.dg .dig-refresh:hover{text-decoration:underline}
 section[data-dug="true"] .gist{display:none}
@@ -179,7 +176,7 @@ section[data-dug="true"].show-gist .dug{display:none}
 .dg-size-range{width:7rem;flex:0 0 auto}
 .dg-size-val{min-width:3.2em;text-align:center;flex:0 0 auto}
 /* print base-size is enforced by the element-level overrides above; the scale var is intentionally NOT reset via @media because the size script's inline style on documentElement outranks an @media :root rule */
-@media print{.dg-size{display:none!important}.dg img.dig-slide{max-height:300px}.dg figure.dig-slide-crop{width:min(100%,540px)}}
+@media print{.dg-size{display:none!important}.dg img.dig-slide{max-height:300px}.dg .dig-slide-crop{width:min(100%,540px)}}
 `;
 
 // Shared sanitizer — used verbatim in both SIZE_HEAD_SCRIPT (head) and sizeScript (body) to avoid duplication.

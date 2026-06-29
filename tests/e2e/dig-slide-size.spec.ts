@@ -20,7 +20,7 @@ function buildHtml(): string {
       timeRange: { startSec: 60, endSec: 120, label: '1:00–2:00', url: 'u&t=60s' } }] } as ParsedSummary;
   const dug = [{ sectionId: 60, startSec: 60, title: 'S', bodyMarkdown: '![a](assets/v/0-0.jpg)',
     generatedAt: '2026-01-01T00:00:00.000Z', genVersion: 1 }] as unknown as DugSection[];
-  // PB2: pass a cropMap so a `figure.dig-slide-crop` is actually emitted (S7 needs it).
+  // PB2: pass a cropMap so a `.dig-slide-crop` is actually emitted (S7 needs it).
   // mdPath's dir == the asset dir, so the renderer resolves the ref to exactly assetAbs.
   const cropMap = new Map<string, CropBox | null>([[assetAbs, { trimTop: 0.25, trimBot: 0.05, width: 1280, height: 720 }]]);
   return renderDigDeeperDoc({ summary, envelope: null, dug, mdPath: path.join(dir, 'vid-size-test-dig-deeper.md'), videoId: 'v', cropMap });
@@ -130,13 +130,13 @@ test('S7 print keeps base size + hides control, on a locked wide viewport (PH2)'
   await stub(page);
   await page.addInitScript(() => localStorage.setItem('digSlideScale', '150'));
   await page.goto(URL);
-  const fig = page.locator('figure.dig-slide-crop').first();
+  const fig = page.locator('.dig-slide-crop').first();
   await expect(fig).toHaveCount(1);
   const before = parseFloat(await fig.evaluate((el) => getComputedStyle(el).width));
   expect(before).toBeGreaterThan(541);                   // 150% genuinely inflates (precondition, not vacuous)
   await page.emulateMedia({ media: 'print' });
   await expect(page.locator('.dg-size')).toBeHidden();
-  // Print base-size is enforced by element-level overrides (.dg img.dig-slide, .dg figure.dig-slide-crop),
+  // Print base-size is enforced by element-level overrides (.dg img.dig-slide, .dg .dig-slide-crop),
   // not a var reset — the size script's inline style on documentElement outranks @media :root.
   // We assert the figure WIDTH resets to base size rather than the var.
   const after = parseFloat(await fig.evaluate((el) => getComputedStyle(el).width));

@@ -47,7 +47,10 @@ describe('dig slide size control', () => {
   });
 
   it('hides the control and resets slide size in print', () => {
-    expect(html).toContain('@media print{.dg-size{display:none!important}.dg img.dig-slide{max-height:300px}.dg figure.dig-slide-crop{width:min(100%,540px)}}');
+    expect(html).toContain('@media print{');
+    expect(html).toContain('.dg-size{display:none!important}');
+    expect(html).toContain('.dg img.dig-slide{max-height:300px}');
+    expect(html).toContain('.dg .dig-slide-crop{width:min(100%,540px)}');
     expect(html).toContain('.dg-topbar{display:flex;flex-wrap:wrap');
   });
 });

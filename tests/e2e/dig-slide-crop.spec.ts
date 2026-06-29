@@ -102,12 +102,12 @@ test.beforeEach(async ({ page }) => {
 });
 
 // ---------------------------------------------------------------------------
-// Z1: cropped slide renders a crop wrapper (figure.dig-slide-crop) in flow,
+// Z1: cropped slide renders a crop wrapper (.dig-slide-crop) in flow,
 //     with overflow:hidden and object-fit:cover on the inner img.
 // ---------------------------------------------------------------------------
 
-test('Z1 (crop wrapper in flow): figure.dig-slide-crop visible; overflow hidden; img object-fit cover', async ({ page }) => {
-  const fig = page.locator('figure.dig-slide-crop').first();
+test('Z1 (crop wrapper in flow): .dig-slide-crop visible; overflow hidden; img object-fit cover', async ({ page }) => {
+  const fig = page.locator('.dig-slide-crop').first();
   await expect(fig).toBeVisible();
   await expect(fig).toHaveCSS('overflow', 'hidden');
   await expect(fig.locator('img.dig-slide')).toHaveCSS('object-fit', 'cover');
@@ -119,7 +119,7 @@ test('Z1 (crop wrapper in flow): figure.dig-slide-crop visible; overflow hidden;
 // ---------------------------------------------------------------------------
 
 test('Z2 (lightbox full original): click cropped img → lightbox opens with full src; zoom img has no crop ancestor (L1)', async ({ page }) => {
-  const inFlow = page.locator('figure.dig-slide-crop img.dig-slide').first();
+  const inFlow = page.locator('.dig-slide-crop img.dig-slide').first();
 
   // Capture the base64 src from the in-flow img (this IS the full original —
   // the renderer embeds the full b64 for both the in-flow and lightbox paths;
@@ -136,7 +136,7 @@ test('Z2 (lightbox full original): click cropped img → lightbox opens with ful
   // Zoom img src must equal the full original (same b64 blob)
   await expect(zoom).toHaveAttribute('src', src!);
 
-  // Zoom img must NOT be inside a .dig-slide-crop element
+  // Zoom img must NOT be inside a .dig-slide-crop element (div)
   const hasCropAncestor = await zoom.evaluate(
     (el) => !!el.closest('.dig-slide-crop'),
   );

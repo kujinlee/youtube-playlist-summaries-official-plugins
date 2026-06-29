@@ -32,15 +32,15 @@ describe('renderDigDeeperDoc crop wrapper', () => {
     // The inline figure style is aspect-ratio ONLY — the display-size cap lives in
     // CSS (width-based). A per-image width/height in the inline style would be the
     // capPx regression that inflated cropped frames to full width.
-    expect(html).not.toMatch(/<figure[^>]*style="[^"]*width:/);
-    expect(html).not.toMatch(/<figure[^>]*style="[^"]*capPx/);
+    expect(html).not.toMatch(/<(figure|div)[^>]*style="[^"]*width:/);
+    expect(html).not.toMatch(/<(figure|div)[^>]*style="[^"]*capPx/);
   });
 
   it('caps cropped-figure display WIDTH in CSS (not height) so short crops stay modest', () => {
     const { mdPath, assetAbs } = makeDoc();
     const box: CropBox = { trimTop: 0.25, trimBot: 0.05, width: 1280, height: 720 };
     const html = renderDigDeeperDoc(baseArgs(mdPath, new Map([[assetAbs, box]])));
-    expect(html).toMatch(/\.dg figure\.dig-slide-crop\{[^}]*width:min\(100%,540px\)/);
+    expect(html).toMatch(/\.dg \.dig-slide-crop\{[^}]*width:min\(100%,540px\)/);
   });
 
   it('renders a plain dig-slide img (no wrapper) when box is null', () => {
