@@ -845,7 +845,7 @@ describe('renderDigDeeperDoc', () => {
 
     it('caps dug slide display size via .dg img.dig-slide (centered, height-capped, zoom cursor)', () => {
       expect(html).toContain('.dg img.dig-slide{');
-      expect(html).toContain('max-height:360px');
+      expect(html).toContain('max-height:300px');
       expect(html).toContain('cursor:zoom-in');
       expect(html).not.toContain('.dug img{margin:2em 0}'); // old generic rule removed
     });

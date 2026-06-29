@@ -78,15 +78,16 @@ The image rule emits a `<figure>` crop wrapper (preserves `alt` on the img as th
 ```
 with per-instance inline values for `aspect-ratio` (W/keepH) and `object-position` (`0 P%`, `P% = trimTop/(trimTop+trimBot)×100`).
 
-**Full CSS contract (addresses B1).** The existing `.dig-slide{margin:2em auto;max-height:360px;border:…;cursor:zoom-in}` rule conflicts with cover-cropping, so the wrapped img must override it:
+**Full CSS contract (addresses B1).** The bare-img rule is reduced to `max-height:300px` (a slightly smaller "initial resize" so slides don't disturb prose flow). The wrapped img must override it:
 ```css
-.dig-slide-crop{display:block;overflow:hidden;margin:2em auto;max-width:100%;
-  /* width capped where the bare img's max-height:360px used to cap; aspect-ratio set inline per-image */
-  border:1px solid var(--rule);border-radius:6px;cursor:zoom-in}
-.dig-slide-crop > img.dig-slide{display:block;width:100%;height:100%;
+.dg img.dig-slide{margin:2em auto;max-height:300px;border:1px solid var(--rule);cursor:zoom-in}
+.dg figure.dig-slide-crop{display:block;overflow:hidden;margin:2em auto;
+  width:min(100%,540px);                /* cap DISPLAYED WIDTH — see note */
+  border:1px solid var(--rule);border-radius:6px}
+.dg figure.dig-slide-crop > img.dig-slide{display:block;width:100%;height:100%;
   max-height:none;margin:0;border:0;border-radius:0;object-fit:cover;cursor:zoom-in}
 ```
-`object-fit:cover` only crops when the img has a concrete box matching the wrapper — the rules above give it `width:100%;height:100%` inside an `overflow:hidden`, `aspect-ratio`-sized figure. The size cap moves from the img to the wrapper.
+`object-fit:cover` only crops when the img has a concrete box matching the wrapper — the rules above give it `width:100%;height:100%` inside an `overflow:hidden`, `aspect-ratio`-sized figure. The figure's **inline style carries only `aspect-ratio:${width} / ${round(height·keepFrac)}`** (per-image); the **display-size cap is a CSS constant on WIDTH** (`width:min(100%,540px)`), not height. Capping width is essential: a cropped frame is *short*, so a height cap would inflate its width (a 1280×720 frame kept at ~69% would need ~927px to reach 360px tall → full-width). Width-capping keeps cropped (~540×210) and uncropped (~535×302, from `max-height:300px`) slides at a consistent modest size.
 
 **Lightbox unchanged.** It builds its own `<img>` from the same data-URI with **no** `.dig-slide-crop` ancestor, so zoom always shows the full uncropped original.
 

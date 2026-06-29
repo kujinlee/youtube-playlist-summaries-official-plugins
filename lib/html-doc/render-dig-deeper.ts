@@ -120,10 +120,12 @@ function buildRenderer(mdPath: string, cropMap: Map<string, CropBox | null>): Ma
       const box = cropMap.get(absPath) ?? null;
       if (box) {
         const keepFrac = 1 - box.trimTop - box.trimBot;
-        const keepH = box.height * keepFrac;
+        const keepH = Math.round(box.height * keepFrac);
         const posPct = (box.trimTop / (box.trimTop + box.trimBot)) * 100;
-        const capPx = Math.round(360 * box.width / keepH);   // cap displayed height ≈360px
-        const figStyle = `aspect-ratio:${box.width} / ${Math.round(keepH)};width:min(100%,${capPx}px)`;
+        // Only the native-dim aspect-ratio is per-image; the displayed-WIDTH cap
+        // lives in CSS (.dig-slide-crop). Capping width (not height) keeps short
+        // cropped frames modest in flow — a height cap would inflate their width.
+        const figStyle = `aspect-ratio:${box.width} / ${keepH}`;
         return `<figure class="dig-slide-crop" style="${figStyle}">` +
                `<img class="dig-slide" style="object-position:0 ${posPct.toFixed(1)}%" ` +
                `src="data:image/jpeg;base64,${b64}" alt="${esc(altAttr)}"></figure>`;
@@ -144,8 +146,8 @@ function buildRenderer(mdPath: string, cropMap: Map<string, CropBox | null>): Ma
 const DIG_DOC_CSS = `
 section{padding:2.4em 0;border-top:2px solid var(--rule)}
 section:first-of-type{border-top:0}
-.dg img.dig-slide{margin:2em auto;max-height:360px;border:1px solid var(--rule);cursor:zoom-in}
-.dg figure.dig-slide-crop{display:block;overflow:hidden;margin:2em auto;max-width:100%;border:1px solid var(--rule);border-radius:6px}
+.dg img.dig-slide{margin:2em auto;max-height:300px;border:1px solid var(--rule);cursor:zoom-in}
+.dg figure.dig-slide-crop{display:block;overflow:hidden;margin:2em auto;width:min(100%,540px);border:1px solid var(--rule);border-radius:6px}
 .dg figure.dig-slide-crop>img.dig-slide{display:block;width:100%;height:100%;max-height:none;margin:0;border:0;border-radius:0;object-fit:cover;cursor:zoom-in}
 .dg .dig-trigger,.dg .dig-toggle,.dg .dig-refresh{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--meta);font-size:.8rem;font-weight:400;text-decoration:none;white-space:nowrap;cursor:pointer}
 .dg .dig-trigger:hover,.dg .dig-toggle:hover,.dg .dig-refresh:hover{text-decoration:underline}
