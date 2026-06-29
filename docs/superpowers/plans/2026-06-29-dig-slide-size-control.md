@@ -17,7 +17,11 @@
 - **No new npm dependency.** Vanilla JS only.
 - **Render-only.** No `DIG_GENERATOR_VERSION`/doc-version bump, no re-dig. The dig-deeper route live-renders per GET (`route.ts` → `serveHtml(renderDigDeeperDoc(...))`), so changes reach all docs on next load.
 - **Locked values:** range `50–150`, step `10`, default `100`; CSS var = percent/100; localStorage key `digSlideScale`.
-- **Sanitizer (use verbatim, both scripts):** `var n=Number(raw);if(!Number.isFinite(n))return 100;n=Math.round(n/10)*10;return Math.min(150,Math.max(50,n));` — `Number` not `parseInt`, snap-to-10, clamp [50,150].
+- **Sanitizer — define ONCE, interpolate into both scripts (PM1); the null/'' guard is mandatory and FIRST (PB1):**
+  ```ts
+  const DIG_SLIDE_SANITIZE_JS = "function s(raw){if(raw==null||raw===''){return 100;}var n=Number(raw);if(!Number.isFinite(n)){return 100;}n=Math.round(n/10)*10;return Math.min(150,Math.max(50,n));}";
+  ```
+  `Number(null)===0`/`Number('')===0` would snap to 50, so missing/empty MUST short-circuit to 100 before `Number()`. `Number` (not `parseInt`) so `"120px"`/NaN/Infinity → 100; else snap-to-10, clamp [50,150]. Both `SIZE_HEAD_SCRIPT` and `sizeScript` embed `${DIG_SLIDE_SANITIZE_JS}` and call `s(...)`.
 - **Fail-safe:** all localStorage access in try/catch; CSS `var(--dig-slide-scale,1)` fallback renders at 100% if JS never runs.
 - **Tests under `tests/`** (Jest `testMatch`): unit at `tests/lib/html-doc/`, E2E at `tests/e2e/`.
 
@@ -71,6 +75,7 @@ describe('dig slide size control', () => {
     expect(html).toMatch(/<input class="dg-size-range" type="range" min="50" max="150" step="10" value="100"/);
     expect(html).toContain('class="dg-size-dec"');
     expect(html).toContain('class="dg-size-inc"');
+    expect(html).toContain('aria-label="Smaller slides">−</button>'); // U+2212 minus, not ASCII hyphen (PL1)
     expect(html).toMatch(/<button class="dg-size-val" type="button"[^>]*>100%<\/button>/);
   });
 
@@ -136,13 +141,14 @@ Define just above the `topBar` line, then append it:
   const topBar = `<div class="dg-topbar">${summaryLink} <button class="dg-expand-all">⤢ expand all</button> ${wholeAsk} ${sizeControl}</div>`;
 ```
 
-- [ ] **Step 6: Add the pre-paint head script and inject it in `<head>`**
+- [ ] **Step 6: Add the shared sanitizer const + the pre-paint head script; inject in `<head>`**
 
-Define near the other module-level script consts:
+Define near the other module-level script consts (the sanitizer is shared by both scripts — PM1):
 ```ts
+const DIG_SLIDE_SANITIZE_JS = "function s(raw){if(raw==null||raw===''){return 100;}var n=Number(raw);if(!Number.isFinite(n)){return 100;}n=Math.round(n/10)*10;return Math.min(150,Math.max(50,n));}";
+
 // Pre-paint: set --dig-slide-scale from sanitized localStorage BEFORE first paint (no FOUC).
-const SIZE_HEAD_SCRIPT = `<script>(function(){try{` +
-  `var s=function(r){var n=Number(r);if(!Number.isFinite(n))return 100;n=Math.round(n/10)*10;return Math.min(150,Math.max(50,n));};` +
+const SIZE_HEAD_SCRIPT = `<script>(function(){try{${DIG_SLIDE_SANITIZE_JS}` +
   `var v=s(localStorage.getItem('digSlideScale'));` +
   `document.documentElement.style.setProperty('--dig-slide-scale',v/100);` +
   `}catch(e){}})();</script>`;
@@ -164,7 +170,7 @@ ${SIZE_HEAD_SCRIPT}
   var inc=document.querySelector('.dg-size-inc');
   var val=document.querySelector('.dg-size-val');
   if(!range||!val)return;
-  function s(r){var n=Number(r);if(!Number.isFinite(n))return 100;n=Math.round(n/10)*10;return Math.min(150,Math.max(50,n));}
+  ${DIG_SLIDE_SANITIZE_JS}
   function read(){try{return s(localStorage.getItem('digSlideScale'));}catch(e){return 100;}}
   function apply(p,persist){p=s(p);root.style.setProperty('--dig-slide-scale',p/100);range.value=String(p);val.textContent=p+'%';if(persist){try{localStorage.setItem('digSlideScale',String(p));}catch(e){}}}
   apply(read(),false);
@@ -217,20 +223,25 @@ import { expect, test } from '@playwright/test';
 import { renderDigDeeperDoc } from '../../lib/html-doc/render-dig-deeper';
 import type { ParsedSummary } from '../../lib/html-doc/types';
 import type { DugSection } from '../../lib/dig/companion-doc';
+import type { CropBox } from '../../lib/dig/slide-crop';
 
 const B64 = '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKwAB/9k=';
 
 function buildHtml(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dig-size-e2e-'));
   fs.mkdirSync(path.join(dir, 'assets', 'v'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'assets', 'v', '0-0.jpg'), Buffer.from(B64, 'base64'));
+  const assetAbs = path.join(dir, 'assets', 'v', '0-0.jpg');
+  fs.writeFileSync(assetAbs, Buffer.from(B64, 'base64'));
   const summary = { title: 'Size Test', channel: null, duration: null, url: 'u', lang: 'EN',
     videoId: 'v', tldr: null, takeaways: [], sourceMd: 'x.md',
     sections: [{ numeral: '1', title: 'S', prose: 'p',
       timeRange: { startSec: 60, endSec: 120, label: '1:00–2:00', url: 'u&t=60s' } }] } as ParsedSummary;
   const dug = [{ sectionId: 60, startSec: 60, title: 'S', bodyMarkdown: '![a](assets/v/0-0.jpg)',
     generatedAt: '2026-01-01T00:00:00.000Z', genVersion: 1 }] as unknown as DugSection[];
-  return renderDigDeeperDoc({ summary, envelope: null, dug, mdPath: path.join(dir, 'vid-size-test-dig-deeper.md'), videoId: 'v' });
+  // PB2: pass a cropMap so a `figure.dig-slide-crop` is actually emitted (S7 needs it).
+  // mdPath's dir == the asset dir, so the renderer resolves the ref to exactly assetAbs.
+  const cropMap = new Map<string, CropBox | null>([[assetAbs, { trimTop: 0.25, trimBot: 0.05, width: 1280, height: 720 }]]);
+  return renderDigDeeperDoc({ summary, envelope: null, dug, mdPath: path.join(dir, 'vid-size-test-dig-deeper.md'), videoId: 'v', cropMap });
 }
 
 const ROUTE = '**/api/html/vid-size-test**';
@@ -257,12 +268,27 @@ test('S2 + button steps to 110', async ({ page }) => {
   await expect(page.locator('.dg-size-val')).toHaveText('110%');
 });
 
-test('S3 persists across reload with NO 100% flash (head script applies pre-paint)', async ({ page }) => {
-  await stub(page); await page.goto(URL);
-  await page.locator('.dg-size-range').fill('120');
-  await page.locator('.dg-size-range').dispatchEvent('input');
-  await page.reload();
-  expect(await scale(page)).toBe('1.2');                 // already 1.2 immediately after reload, not 1
+test('S3 head script applies the saved scale PRE-PAINT, before the control exists (PH1)', async ({ page }) => {
+  await stub(page);
+  await page.addInitScript(() => {
+    (window as any).__firstScaleSet = null;
+    const orig = CSSStyleDeclaration.prototype.setProperty;
+    CSSStyleDeclaration.prototype.setProperty = function (prop: string, ...rest: any[]) {
+      if (prop === '--dig-slide-scale' && (window as any).__firstScaleSet === null) {
+        (window as any).__firstScaleSet = {
+          ready: document.readyState,
+          hasControl: !!document.querySelector('.dg-size-range'),
+        };
+      }
+      return (orig as any).call(this, prop, ...rest);
+    };
+    localStorage.setItem('digSlideScale', '120');
+  });
+  await page.goto(URL);
+  const first = await page.evaluate(() => (window as any).__firstScaleSet);
+  expect(first).not.toBeNull();
+  expect(first.hasControl).toBe(false);                  // proves the HEAD script set it, not the body fallback
+  expect(await scale(page)).toBe('1.2');
   await expect(page.locator('.dg-size-range')).toHaveValue('120');
 });
 
@@ -278,36 +304,53 @@ test('S4 reset button works by click AND keyboard', async ({ page }) => {
   await expect(page.locator('.dg-size-val')).toHaveText('100%');
 });
 
-test('S5 clamps/sanitizes a bad stored value on load', async ({ page }) => {
-  await stub(page);
-  await page.addInitScript(() => localStorage.setItem('digSlideScale', '999'));
-  await page.goto(URL);
-  expect(await scale(page)).toBe('1.5');                 // 999 → 150
-  await expect(page.locator('.dg-size-range')).toHaveValue('150');
+// S5 table-driven sanitizer contract (PM2): snap-to-10 + clamp [50,150]; bad/missing → 100.
+for (const [stored, expected] of ([['999', '1.5'], ['-1', '0.5'], ['44', '0.5'], ['120px', '1'], ['', '1']] as const)) {
+  test(`S5 sanitize stored "${stored}" → scale ${expected}`, async ({ page }) => {
+    await stub(page);
+    await page.addInitScript((v) => localStorage.setItem('digSlideScale', v as string), stored);
+    await page.goto(URL);
+    expect(await scale(page)).toBe(expected);
+  });
+}
+test('S5 missing storage → 100% (PB1 — Number(null) must NOT default to 50)', async ({ page }) => {
+  await stub(page); await page.goto(URL);
+  expect(await scale(page)).toBe('1');
+  await expect(page.locator('.dg-size-range')).toHaveValue('100');
 });
 
-test('S6 survives blocked localStorage', async ({ page }) => {
+test('S6 survives blocked localStorage and proves it is actually blocked (PM3)', async ({ page }) => {
   await stub(page);
   await page.addInitScript(() => {
-    const t = () => { throw new Error('blocked'); };
-    Object.defineProperty(window, 'localStorage', { get: () => ({ getItem: t, setItem: t }) });
+    const thrower = () => { throw new Error('blocked'); };
+    try {
+      Object.defineProperty(window, 'localStorage', { configurable: true, get: () => ({ getItem: thrower, setItem: thrower }) });
+      (window as any).__lsBlocked = true;
+    } catch { (window as any).__lsBlocked = false; }
   });
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(String(e)));
   await page.goto(URL);
-  expect(await scale(page)).toBe('1');                   // defaults, no throw
+  expect(await page.evaluate(() => (window as any).__lsBlocked)).toBe(true);         // override took
+  expect(await page.evaluate(() => { try { (window as any).localStorage.getItem('x'); return 'no-throw'; } catch { return 'throws'; } })).toBe('throws'); // really blocked
+  expect(await scale(page)).toBe('1');                   // defaulted, no FOUC crash
   await page.locator('.dg-size-inc').click();
-  expect(await scale(page)).toBe('1.1');                 // still operable
+  expect(await scale(page)).toBe('1.1');                 // still operable for the session
+  expect(pageErrors).toEqual([]);                        // no uncaught errors leaked
 });
 
-test('S7 print keeps base size + hides control', async ({ page }) => {
+test('S7 print keeps base size + hides control, on a locked wide viewport (PH2)', async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 900 });   // wide enough that 150% > base cap
   await stub(page);
   await page.addInitScript(() => localStorage.setItem('digSlideScale', '150'));
   await page.goto(URL);
+  const fig = page.locator('figure.dig-slide-crop').first();
+  const before = parseFloat(await fig.evaluate((el) => getComputedStyle(el).width));
+  expect(before).toBeGreaterThan(541);                   // 150% genuinely inflates (precondition, not vacuous)
   await page.emulateMedia({ media: 'print' });
   await expect(page.locator('.dg-size')).toBeHidden();
-  // figure width cap falls back to the base 540px under print, not 150%
-  const w = await page.locator('figure.dig-slide-crop').first().evaluate((el) => getComputedStyle(el).width);
-  // base cap is 540px or the column width, never the 150% (810px) inflation
-  expect(parseFloat(w)).toBeLessThanOrEqual(540 + 1);
+  const after = parseFloat(await fig.evaluate((el) => getComputedStyle(el).width));
+  expect(after).toBeLessThanOrEqual(541);                // print override → base 540 cap, not 150%
 });
 ```
 
@@ -339,3 +382,5 @@ git commit -m "test(dig): E2E — size control interactivity, persistence, print
 **Type consistency:** localStorage key `digSlideScale`, var `--dig-slide-scale`, control classes `dg-size-range/dec/inc/val`, and the sanitizer body are identical across head script, body script, control markup, and tests.
 
 **Dependency:** Global Constraints state the rebase-onto-post-#41 prerequisite and locate-by-content guidance, since line numbers shift after the #41 merge.
+
+**Codex plan-review items (`docs/reviews/plan-dig-slide-size-control-codex.md`) addressed:** PB1 sanitizer null/'' guard (was a real 50%-default bug) ✓; PB2 E2E fixture now passes `cropMap` so a figure exists ✓; PH1 S3 instruments `setProperty` to prove the head script ran pre-control ✓; PH2 S7 locks a wide viewport + asserts pre-print inflation ✓; PM1 sanitizer DRYed to one `DIG_SLIDE_SANITIZE_JS` const ✓; PM2 S5 table-driven ✓; PM3 S6 proves storage actually blocked + no page errors ✓; PL1 U+2212 minus asserted ✓.

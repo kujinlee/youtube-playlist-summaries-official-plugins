@@ -77,11 +77,11 @@ Appended to the top bar (which today holds `↑ summary`, `⤢ expand all`, and 
 ## Persistence — `localStorage`, sticky across docs
 
 - Key: `digSlideScale`, value = integer percent string (e.g. `"120"`).
-- **One shared sanitizer (M4)** — every load/change path runs values through this exact function before touching the CSS var, control, readout, or storage:
+- **One shared sanitizer (M4 + PB1/PM1)** — defined ONCE as a TS string constant `DIG_SLIDE_SANITIZE_JS` and interpolated into both the head script and the body script (not copy-pasted), so it cannot drift:
   ```js
-  function sanitize(raw){var n=Number(raw);if(!Number.isFinite(n))return 100;n=Math.round(n/10)*10;return Math.min(150,Math.max(50,n));}
+  function s(raw){if(raw==null||raw===''){return 100;}var n=Number(raw);if(!Number.isFinite(n)){return 100;}n=Math.round(n/10)*10;return Math.min(150,Math.max(50,n));}
   ```
-  (`Number` — not `parseInt` — so `"120px"`, `""`, `NaN`, `Infinity` all fail to `Number.isFinite` → default 100; valid numbers snap to the nearest 10 then clamp to [50,150].)
+  **The `raw==null||raw===''` guard is mandatory and comes FIRST:** `localStorage.getItem` returns `null` when unset and `Number(null)===0` / `Number('')===0` would otherwise snap to 50 — defaulting first load to 50% instead of 100% (the PB1 bug). After the guard: `Number` (not `parseInt`) so `"120px"`/`NaN`/`Infinity` → 100; valid numbers snap to nearest 10, clamp to [50,150].
 - **Pre-paint (H1 — no FOUC):** a tiny **head script** (placed next to the existing `THEME_HEAD_SCRIPT`, before first paint) reads `localStorage.digSlideScale`, runs `sanitize`, and sets `document.documentElement.style.setProperty('--dig-slide-scale', n/100)`. This guarantees the page paints at the *saved* size, not 100%-then-jump. Wrapped in try/catch (blocked storage → no-op, CSS `var(...,1)` fallback → 100%).
 - **On load (body script):** read+`sanitize` the same key and **sync the control** (range value + readout text) to match the already-applied var.
 - **On change** (range `input`, +/− click, reset click): `sanitize` → set the CSS var, update the readout, and write the percent to `localStorage` (try/catch).
