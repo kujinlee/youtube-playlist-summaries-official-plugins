@@ -52,6 +52,7 @@ describe('buildDigPrompt — section sub-headings (PR2)', () => {
   it('requires sub-headings in the SAME language as the response, not English (Korean-safe)', () => {
     const p = buildDigPrompt('en', 0, 300);
     expect(p).toMatch(/same language as (the rest of )?your response/i);
+    expect(p).toContain('do NOT switch to English');   // exact Korean-safety anchor (Codex Low)
     // Must NOT force English for the sub-heading text (would break the lang=ko contract).
     expect(p).not.toMatch(/sub-headings? (in|must be in) english/i);
   });
@@ -99,8 +100,9 @@ Update the version-history comment (~:47, which documents the v8 change) by appe
 
 Run: `npx jest tests/lib/dig/generate.test.ts`
 Expected: PASS (new sub-heading tests + version is 9).
-Run: `npx jest render-dig-deeper`
-Expected: PASS — the render tests import `DIG_GENERATOR_VERSION` and compute stale/fresh relative to it (`DIG_GENERATOR_VERSION - 1`, etc.), so they auto-track the bump. Confirm none asserts a literal old version.
+Run the **version blast-radius suites** (Codex M1 — these import `DIG_GENERATOR_VERSION` and exercise staleness/route-stamping/companion-doc paths):
+`npx jest render-dig-deeper tests/lib/html-doc/dig-merge.test.ts tests/api/dig-post.test.ts tests/lib/dig/companion-doc.test.ts`
+Expected: PASS — these compute stale/fresh relative to the constant (`DIG_GENERATOR_VERSION - 1`, etc.) and stamp with the imported constant, so they auto-track the bump. The ONLY test asserting a literal version is `generate.test.ts` (updated to 9 in Step 1); confirm no other suite asserts a literal `8`.
 Run: `npx tsc --noEmit`
 Expected: clean.
 
@@ -133,8 +135,8 @@ describe('dig section sub-headings (PR2 render)', () => {
     // render any doc; assert the CSS rule is present with its distinct properties
     const html = renderDocWith(makeDugWithBody(312, '### How it works\n\nBody.'));
     expect(html).toMatch(/\.dg \.dug h3\{[^}]*font-weight:700/);
-    expect(html).toContain('<div class="dug">');
-    expect(html).toMatch(/<h3>How it works<\/h3>/);   // ### rendered as h3 inside .dug
+    // ONE structural assertion (Codex M2) — proves the h3 is INSIDE .dug, not merely both-present:
+    expect(html).toMatch(/<div class="dug">[\s\S]*<h3>How it works<\/h3>/);
   });
 
   it('wraps orphan dug bodies in .dug so their ### sub-headings are covered', () => {
