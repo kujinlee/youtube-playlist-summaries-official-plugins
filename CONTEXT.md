@@ -27,5 +27,8 @@ The skim-level artifact is the **summary**. Below it sits a detail layer, genera
 
 A summary section that has been elaborated into the dig-deeper doc is **dug**; one that has not is **undug**.
 
+- **Section sub-heading** — a heading (rendered `<h3>`, authored as `###`) that divides a single dug section's elaboration into labeled subsections (e.g. "How it works", "Where it breaks down"). Present only when a section's prose is long enough to warrant structure; a short dug section has none. It is never the section's own title (that remains the `<h2>` numeral + title). Distinct from **sub-title** — a single tagline under a title — which this project deliberately does **not** use. Do not call it a "subtitle" (that reads as a video subtitle/caption track).
+
 - **Slide** — an informative on-screen visual in the video worth capturing because it conveys something the speech alone does not. Defined broadly: a presentation slide, a diagram, a chart, or a code/terminal/screen demo. Not every on-screen moment is a slide — only one that adds information beyond what is said.
 - **Slide screenshot** — the captured still image of a slide, embedded inline in the dig-deeper doc at the point in the elaboration where it is relevant.
+- **Slide caption** — the short plain-English description of a slide screenshot, authored by Gemini at generation time and carried as the screenshot's alt text. Rendered (optionally) as a visible `<figcaption>` beneath the screenshot. **Always qualified as "slide caption"** — never bare "caption" — to avoid collision with **captions** in the YouTube sense (the transcript/caption tracks used for transcript sourcing; see "caption-gated" videos). The two are unrelated concepts.
