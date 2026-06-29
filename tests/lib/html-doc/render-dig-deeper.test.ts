@@ -934,6 +934,13 @@ describe('renderDigDeeperDoc', () => {
       expect(html).toContain("closest('.ask-ai')");
       expect(html).toContain('clipboard');
     });
+
+    it('opens Ask-AI as a sized popup (screen-derived width/height) and severs the opener', () => {
+      expect(html).toContain('screen.availWidth');
+      expect(html).toContain("'popup=1,width='");
+      expect(html).toContain('win.opener=null');
+      expect(html).not.toContain("window.open(u,'_blank','noopener,noreferrer')"); // old full-tab call gone
+    });
   });
 
   describe('renderDigDeeperDoc — Ask-AI language threading', () => {

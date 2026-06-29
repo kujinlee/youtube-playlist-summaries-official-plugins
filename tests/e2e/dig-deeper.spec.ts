@@ -2311,3 +2311,30 @@ test('A2 (Ask-AI section link): clipboard round-trips the section prompt incl. &
   const last = opened[opened.length - 1];
   expect(new URL(last).searchParams.get('prompt')).toBe(clip);
 });
+
+test('A3 (Ask-AI sized popup): window.open is called with a sized-popup features string (not a plain tab)', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.addInitScript(() => {
+    (window as unknown as { __feat: string[] }).__feat = [];
+    window.open = ((_u?: string | URL, _t?: string, f?: string) => {
+      (window as unknown as { __feat: string[] }).__feat.push(String(f ?? ''));
+      return null; // simulate noopener-less open; null is fine (sever guard checks `if(win)`)
+    }) as typeof window.open;
+  });
+  const html = makeCompanionHtmlWithSlides();
+  await page.route(`**/api/html/${VIDEO_ID_SLIDES}**`, (route) =>
+    route.fulfill({ status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' }, body: html }),
+  );
+  await page.goto(`http://localhost:3000/api/html/${VIDEO_ID_SLIDES}?outputFolder=${encodeURIComponent(OUTPUT_FOLDER)}&type=dig-deeper`);
+
+  await page.locator('.ask-ai').first().click();
+
+  const feat = await page.evaluate(() => (window as unknown as { __feat: string[] }).__feat);
+  expect(feat.length).toBeGreaterThan(0);
+  const f = feat[feat.length - 1];
+  expect(f).toContain('popup=1');
+  expect(f).toMatch(/width=\d+/);
+  expect(f).toMatch(/height=\d+/);
+  expect(f).toMatch(/left=\d+/);
+  expect(f).not.toContain('noopener'); // dropped so the browser honors the sizing
+});
