@@ -1,9 +1,9 @@
 # Dig-Deeper Doc: Slide Image-Size Control (viewer slider)
 
 **Date:** 2026-06-29
-**Status:** Design — awaiting Codex adversarial review, then user spec review, then writing-plans.
+**Status:** Design — Codex adversarial review addressed (`docs/reviews/spec-dig-slide-size-control-codex.md`: 1 Blocking rejected w/ evidence as a false positive, 2 High + 4 Medium + 2 Low folded in). Ready for writing-plans. Implementation holds until PR #41 merges.
 **Component:** `lib/html-doc/render-dig-deeper.ts` (CSS + top-bar control markup + a vanilla-JS IIFE)
-**Version impact:** none — render-time only; no `DIG_GENERATOR_VERSION`/doc-version bump, no re-dig, no asset mutation. Applies to every existing dig-deeper doc on next page load (same delivery model as the image-sizing and auto-crop work).
+**Version impact:** none — render-time only; no `DIG_GENERATOR_VERSION`/doc-version bump, no re-dig, no asset mutation. **The dig-deeper route is live-rendered per request** — `app/api/html/[id]/route.ts` does `serveHtml(renderDigDeeperDoc(...))`, re-reading the companion `.md` on every GET (unlike the deep-dive branch, which serves a *stored* `.html`). So there is no already-rendered artifact to go stale: the new CSS/markup/script reach every existing dig-deeper doc on the next page load with no stored-HTML rewrite. (Same delivery model as PR #38 image-sizing and #41 auto-crop.)
 **Depends on:** PR #41 (slide auto-crop) merged to master — this edits the same `.dg img.dig-slide` / `.dg figure.dig-slide-crop` rules and the `.dg-topbar`. Implementation begins after #41 merges.
 
 A reader-facing control in the dig-deeper top bar that scales all in-flow slide images uniformly (50–150%), persisted across all docs via `localStorage`. Lets the reader trade image detail for prose density without touching the pipeline.
@@ -44,6 +44,16 @@ A single `--dig-slide-scale` (unitless multiplier, default `1`) set on `document
 - **Aspect-ratio, `object-fit:cover`, and `object-position` are untouched** — scaling only changes the box's outer size; the crop geometry (the per-image inline `aspect-ratio`) is unaffected, so scaling cannot reintroduce the width-inflation bug fixed in #41.
 - Behavior at extremes is intentional and user-initiated: at 150% a cropped slide reaches full column width (bounded by `min(100%,…)`, cannot overflow); at 50% both shrink to half.
 
+**Print (H2).** The reader's scale must not bleed into print, and the control must not print. Add a print override:
+```css
+@media print{
+  .dg-size{display:none!important}
+  .dg img.dig-slide{max-height:300px}
+  .dg figure.dig-slide-crop{width:min(100%,540px)}
+}
+```
+This resets printed slides to the base size regardless of the saved scale and hides the control. (The existing `@media print` block already hides `#theme-toggle`/`.dg-zoom`.)
+
 ## Control — in the existing `.dg-topbar`
 
 Appended to the top bar (which today holds `↑ summary`, `⤢ expand all`, and the Ask-AI link), a compact group:
@@ -54,28 +64,37 @@ Appended to the top bar (which today holds `↑ summary`, `⤢ expand all`, and 
   <input class="dg-size-range" type="range" min="50" max="150" step="10" value="100"
          aria-label="Slide image size percent">
   <button class="dg-size-inc" type="button" aria-label="Larger slides">+</button>
-  <span class="dg-size-val" title="Click to reset to 100%">100%</span>
+  <button class="dg-size-val" type="button" aria-label="Reset slide image size to 100%">100%</button>
 </span>
 ```
 
 - `−` / `+` step the range by one `step` (10%), clamped to [50,150].
 - The range is the continuous control.
-- `.dg-size-val` shows the live percent; **clicking it resets to 100%**.
+- `.dg-size-val` is a **`<button>`** (M1 — keyboard-focusable, real semantics, not a `<span>`+`title`) showing the live percent; **clicking/Enter/Space resets to 100%**.
 - Values are integers 50…150 in the control; the CSS var is `percent/100` (e.g. `120` → `1.2`).
+- **Topbar overflow (M3):** add `.dg-topbar{flex-wrap:wrap}` and keep `.dg-size` compact — fixed-size `−`/`+` buttons, a bounded range width (e.g. `width:7rem`), and a non-shrinking readout — so the added control wraps cleanly on narrow viewports instead of clipping.
 
 ## Persistence — `localStorage`, sticky across docs
 
 - Key: `digSlideScale`, value = integer percent string (e.g. `"120"`).
-- **On load** (IIFE runs immediately): read the key → parse → **clamp to [50,150]** and snap to the nearest 10 → set `--dig-slide-scale` on `documentElement` and sync the control's value + readout. Missing/invalid → 100 (default). This runs before the user interacts, so every dig doc opens at the saved size.
-- **On change** (range `input` event, +/− click, reset click): update the CSS var, the readout, and write the new percent to `localStorage`.
+- **One shared sanitizer (M4)** — every load/change path runs values through this exact function before touching the CSS var, control, readout, or storage:
+  ```js
+  function sanitize(raw){var n=Number(raw);if(!Number.isFinite(n))return 100;n=Math.round(n/10)*10;return Math.min(150,Math.max(50,n));}
+  ```
+  (`Number` — not `parseInt` — so `"120px"`, `""`, `NaN`, `Infinity` all fail to `Number.isFinite` → default 100; valid numbers snap to the nearest 10 then clamp to [50,150].)
+- **Pre-paint (H1 — no FOUC):** a tiny **head script** (placed next to the existing `THEME_HEAD_SCRIPT`, before first paint) reads `localStorage.digSlideScale`, runs `sanitize`, and sets `document.documentElement.style.setProperty('--dig-slide-scale', n/100)`. This guarantees the page paints at the *saved* size, not 100%-then-jump. Wrapped in try/catch (blocked storage → no-op, CSS `var(...,1)` fallback → 100%).
+- **On load (body script):** read+`sanitize` the same key and **sync the control** (range value + readout text) to match the already-applied var.
+- **On change** (range `input`, +/− click, reset click): `sanitize` → set the CSS var, update the readout, and write the percent to `localStorage` (try/catch).
 - All dig docs share one origin, so the choice carries across docs and reloads.
 
 ## Integration
 
-- A new `sizeScript` IIFE alongside the existing `zoomScript` (~line 322) and `askAiScript` (~line 342) blocks; same self-invoking, listener-based pattern. Listeners are attached with a guard so the control works regardless of script order.
-- The control markup is added to the `topBar` template string (~line 220).
-- CSS added to `DIG_DOC_CSS`.
-- No new dependency; no React (these are static self-contained HTML docs).
+- **Two scripts (H1/M2):**
+  - A **head script** (next to `THEME_HEAD_SCRIPT`) sets `--dig-slide-scale` pre-paint from sanitized `localStorage` (see Persistence). It does NOT touch the DOM control (which doesn't exist yet at head time).
+  - A **body-end `sizeScript` IIFE**, placed after `${bodyHtml}` alongside the existing `zoomScript`/`askAiScript` blocks, syncs the control to the saved value and wires `input`/click listeners. It guards on the control's presence (no-op if absent); placement-after-body guarantees the control exists, so the prior vague "works regardless of script order" claim is dropped in favor of this concrete ordering.
+- The control markup is added to the `topBar` template string.
+- CSS added to `DIG_DOC_CSS` (the two scaled rules, `.dg-size*` styles incl. `.dg-topbar{flex-wrap:wrap}`, and the `@media print` override).
+- No new dependency; no React (these are live-rendered self-contained HTML docs).
 
 ## Out of scope
 
@@ -98,17 +117,22 @@ Appended to the top bar (which today holds `↑ summary`, `⤢ expand all`, and 
 | 1 | CSS contains `max-height:calc(300px * var(--dig-slide-scale, 1))` on `.dg img.dig-slide` |
 | 2 | CSS contains `width:min(100%, calc(540px * var(--dig-slide-scale, 1)))` on `.dg figure.dig-slide-crop` |
 | 3 | `.dg img.dig-slide` rule includes `max-width:100%` (up-scale overflow guard) |
-| 4 | Top bar contains the `.dg-size` control with range `min=50 max=150 step=10 value=100` and the three sub-elements |
-| 5 | A `sizeScript` block is present and references `digSlideScale` + `--dig-slide-scale` |
+| 4 | Top bar contains the `.dg-size` control: range `min=50 max=150 step=10 value=100`, `−`/`+` buttons, and a **`<button class="dg-size-val">`** reset (not a span) |
+| 5 | A body `sizeScript` block is present and references `digSlideScale` + `--dig-slide-scale` |
+| 6 | A **head script** (pre-paint) references `digSlideScale` + sets `--dig-slide-scale` before body |
+| 7 | `@media print` block resets `.dg img.dig-slide{max-height:300px}` + `.dg figure.dig-slide-crop{width:min(100%,540px)}` and hides `.dg-size` (H2) |
+| 8 | `.dg-topbar` rule includes `flex-wrap:wrap` (M3) |
 
 ### E2E (Playwright; mirror tests/e2e/dig-deeper.spec.ts route.fulfill harness)
 | # | Scenario | Expected |
 |---|---|---|
-| S1 | Drag/set range to 50 | `documentElement` `--dig-slide-scale` = `0.5`; a slide's rendered width shrinks; readout `50%` |
+| S1 | Set range to 50 | `documentElement` `--dig-slide-scale` = `0.5`; a slide's rendered width shrinks; readout `50%` |
 | S2 | Click `+` from 100 | scale → `1.1`, readout `110%` |
-| S3 | Reload page (same context) after setting 120 | control + var restored to 120% / `1.2` from localStorage |
-| S4 | Click the `%` readout | resets to `100%` / `1` and persists 100 |
-| S5 | Clamp: a stored `999` | snaps to 150 (max) on load |
+| S3 | Reload (same context) after setting 120 | control + var restored to 120% / `1.2`; **no flash at 100% first** (head script applies pre-paint — assert the var is `1.2` immediately after navigation, before interaction) |
+| S4 | Reset button: click AND keyboard (Tab→Enter/Space) | resets to `100%` / `1` and persists 100 (M1 a11y) |
+| S5 | Clamp/sanitize on load: stored `999`→150, `-1`→50, `44`→50, `"120px"`/malformed→100, missing→100 (L2) |
+| S6 | localStorage get/set stubbed to throw (L1) | control initializes at 100, can change to 110 + updates the var, does not throw (just doesn't persist) |
+| S7 | Print emulation (`emulateMedia print`) at saved 150% | slide rendered at base size (max-height 300 / width 540), `.dg-size` hidden (H2) |
 
 ---
 
@@ -116,6 +140,6 @@ Appended to the top bar (which today holds `↑ summary`, `⤢ expand all`, and 
 
 | File | Change |
 |---|---|
-| `lib/html-doc/render-dig-deeper.ts` | CSS (`--dig-slide-scale` in the two slide rules + `max-width:100%`); `.dg-size` markup in `topBar`; new `sizeScript` IIFE; `.dg-size*` styles |
+| `lib/html-doc/render-dig-deeper.ts` | CSS (`--dig-slide-scale` in the two slide rules + `max-width:100%`; `.dg-size*` + `.dg-topbar{flex-wrap:wrap}`; `@media print` override); `.dg-size` markup in `topBar`; **pre-paint head script** (set var before paint); body `sizeScript` IIFE (sync control + listeners) |
 | `tests/lib/html-doc/render-dig-deeper.size.test.ts` | **New** — unit/DOM assertions (table above) |
 | `tests/e2e/dig-slide-size.spec.ts` | **New** — Playwright scenarios S1–S5 |
