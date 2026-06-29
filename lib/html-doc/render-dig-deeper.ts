@@ -37,6 +37,7 @@ html.theme-ready .dg{transition:background-color .2s,color .2s}
 .dg .ts{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--meta);font-size:.85rem;font-weight:400;text-decoration:none;white-space:nowrap}
 .dg .ts:hover{text-decoration:underline}
 .dg h3{font-size:1.15rem;margin:1.6em 0 .3em;color:var(--h3)}
+.dg .dug h3{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:.95rem;font-weight:700;letter-spacing:.02em;margin:1.8em 0 .4em;color:var(--ink)}
 .dg h4{font-size:1.02rem;margin:1.2em 0 .3em;color:var(--h4)}
 .dg p{margin:.75em 0;color:var(--ink)}
 .dg a{color:var(--link)}
@@ -314,7 +315,7 @@ export function renderDigDeeperDoc(args: {
       const rendered = renderer.render(o.bodyMarkdown);
       return [
         `<h3>${esc(o.title)}</h3>`,
-        rendered,
+        `<div class="dug">${rendered}</div>`,
         `<p class="dg-orphan-note">This section was dug but could not be matched to a current summary section. Re-dig to regenerate.</p>`,
         `<!-- orphan: ${o.sectionId} -->`,
       ].join('\n');

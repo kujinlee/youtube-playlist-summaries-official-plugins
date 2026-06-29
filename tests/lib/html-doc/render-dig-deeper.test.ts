@@ -1054,6 +1054,30 @@ describe('renderDigDeeperDoc', () => {
       expect(html).toMatch(/\.dg \.dig-refresh:hover\{text-decoration:underline\}/);
     });
   });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Behavior PR2-1: Distinct .dg .dug h3 sub-heading style
+  // ──────────────────────────────────────────────────────────────────────────
+  describe('dig section sub-headings (PR2 render)', () => {
+    it('emits a distinct .dg .dug h3 sub-heading rule', () => {
+      // render a doc with a dug body containing a ### sub-heading
+      const summary = makeSummaryWithDugSection(312);
+      const dug = [makeDugWithBody(312, '### How it works\n\nBody.')];
+      const html = renderDigDeeperDoc({ summary, envelope: null, dug, mdPath, videoId: 'vid123' });
+      expect(html).toMatch(/\.dg \.dug h3\{[^}]*font-weight:700/);
+      // ONE structural assertion — proves the h3 is INSIDE .dug, not merely both-present:
+      expect(html).toMatch(/<div class="dug">[\s\S]*<h3>How it works<\/h3>/);
+    });
+
+    it('wraps orphan dug bodies in .dug so their ### sub-headings are covered', () => {
+      // orphan: sectionId 99999 does not match any summary section
+      const summary = makeSummaryWithDugSection(312);
+      const orphanDug = makeDugWithBody(99999, '### Orphan sub\n\nBody.');
+      const html = renderDigDeeperDoc({ summary, envelope: null, dug: [orphanDug], mdPath, videoId: 'vid123' });
+      // orphan body rendered inside a .dug wrapper (so .dg .dug h3 applies)
+      expect(html).toMatch(/<div class="dug">[\s\S]*<h3>Orphan sub<\/h3>/);
+    });
+  });
 });
 
 describe('renderDigDeeperDoc — slide image class (dig-slide)', () => {
