@@ -167,7 +167,9 @@ In `DIG_DOC_CSS`, replace the three slide rules (`:149-151`) with:
 .dig-cap{margin:.5em auto 0;text-align:center;font-size:.8rem;color:var(--meta);line-height:1.4}
 ```
 
-And update the `@media print` rule (`:182`) — rename `figure.dig-slide-crop` → `.dig-slide-crop`:
+NOTE (intentional cascade): `.dg img.dig-slide` deliberately does NOT set `border-radius` — it inherits `border-radius:6px` from the existing `STRUCTURAL_CSS .dg img{…border-radius:6px}` rule (unchanged from current behavior; uncropped slides keep rounded corners). The crop child rule `.dg .dig-slide-crop>img.dig-slide` explicitly sets `border-radius:0` (the crop div owns the corner radius).
+
+And update the `@media print` rule (`:182`) — rename `figure.dig-slide-crop` → `.dig-slide-crop` (NOTE: do NOT add `.dg-caps-toggle` here — that is added in Task 2):
 
 ```css
 @media print{.dg-size{display:none!important}.dg img.dig-slide{max-height:300px}.dg .dig-slide-crop{width:min(100%,540px)}}
@@ -178,18 +180,42 @@ And update the `@media print` rule (`:182`) — rename `figure.dig-slide-crop` �
 Run: `npx jest render-dig-deeper.captions`
 Expected: PASS (all 6).
 
-- [ ] **Step 6: Update the existing tests that hardcode the old crop structure**
+- [ ] **Step 6: Update the existing tests that reference the old crop structure**
 
-Apply these exact string replacements (the implementer must open each file and update every occurrence + any explanatory comments):
+Verified occurrences (grepped). Apply EXACTLY these — the breaking ones are explicit; the "unchanged" ones are listed so you do NOT mistakenly alter them.
 
-In `tests/lib/html-doc/render-dig-deeper.crop.test.ts` and `tests/lib/html-doc/render-dig-deeper.size.test.ts`:
-- `figure class="dig-slide-crop"` → the cropped slide is now `<figure class="dig-slide-fig"><div class="dig-slide-crop"…`. Update structural assertions accordingly (a cropped slide is a `div.dig-slide-crop` inside `figure.dig-slide-fig`).
-- `.dg figure.dig-slide-crop` → `.dg .dig-slide-crop` (CSS-string assertions, including the print-CSS string `figure.dig-slide-crop{width:min(100%,540px)}` → `.dig-slide-crop{width:min(100%,540px)}`).
-- Any assertion of the form `toContain('<figure class="dig-slide-crop"')` → `toContain('<figure class="dig-slide-fig"><div class="dig-slide-crop"')`.
+**`tests/lib/html-doc/render-dig-deeper.crop.test.ts`:**
+- `:43` (BREAKS — element-qualified selector): change
+  `expect(html).toMatch(/\.dg figure\.dig-slide-crop\{[^}]*width:min\(100%,540px\)/);`
+  → `expect(html).toMatch(/\.dg \.dig-slide-crop\{[^}]*width:min\(100%,540px\)/);`
+- `:35` and `:36` (vacuous after rename — the crop wrapper is now a `<div>`; widen the guard so it still catches an inline width/capPx on the crop div):
+  `expect(html).not.toMatch(/<figure[^>]*style="[^"]*width:/);` → `expect(html).not.toMatch(/<(figure|div)[^>]*style="[^"]*width:/);`
+  `expect(html).not.toMatch(/<figure[^>]*style="[^"]*capPx/);` → `expect(html).not.toMatch(/<(figure|div)[^>]*style="[^"]*capPx/);`
+- `:27`, `:49`, `:58` (UNCHANGED — `class="dig-slide-crop"` substring survives the figure→div change; `:27` positive still matches the div, `:49`/`:58` negatives still hold for uncropped/external). Leave as-is.
+- `:65-67` (UNCHANGED — `/\.dig-slide-crop\s*>\s*img\.dig-slide\{…/` has no `figure` prefix, matches `.dg .dig-slide-crop>img…`). Leave as-is.
 
-In `tests/e2e/dig-slide-size.spec.ts` (S7) and `tests/e2e/dig-slide-crop.spec.ts`:
-- Playwright locator `figure.dig-slide-crop` → `.dig-slide-crop` (the width cap now lives on the `div.dig-slide-crop`). The S7 `before > 541` / `after <= 541` width measurements stay on `.dig-slide-crop` (the div carries the `width:min(...)`).
-- Any `'figure.dig-slide-crop'` string and explanatory comments → `'.dig-slide-crop'`.
+**`tests/lib/html-doc/render-dig-deeper.size.test.ts`:**
+- `:50` (BREAKS, and is brittle across Task 2) — REPLACE the single whole-print-block `toContain` with order-independent per-declaration substrings (these survive Task 2 adding `.dg-caps-toggle`):
+  Remove: `expect(html).toContain('@media print{.dg-size{display:none!important}.dg img.dig-slide{max-height:300px}.dg figure.dig-slide-crop{width:min(100%,540px)}}');`
+  Add:
+  ```ts
+  expect(html).toContain('@media print{');
+  expect(html).toContain('.dg-size{display:none!important}');
+  expect(html).toContain('.dg img.dig-slide{max-height:300px}');
+  expect(html).toContain('.dg .dig-slide-crop{width:min(100%,540px)}');
+  ```
+
+**`tests/e2e/dig-slide-size.spec.ts`:**
+- `:133` (BREAKS — locator): `page.locator('figure.dig-slide-crop')` → `page.locator('.dig-slide-crop')`. The S7 `before>541` / `after<=541` width reads stay on this element (the `div.dig-slide-crop` carries the `width:min(...)` cap).
+- `:23` comment and `:139` comment: change `figure.dig-slide-crop` → `.dig-slide-crop` (text only; keeps output honest).
+
+**`tests/e2e/dig-slide-crop.spec.ts`:**
+- `:110` (BREAKS — locator): `page.locator('figure.dig-slide-crop')` → `page.locator('.dig-slide-crop')`.
+- `:122` (BREAKS — locator): `page.locator('figure.dig-slide-crop img.dig-slide')` → `page.locator('.dig-slide-crop img.dig-slide')`.
+- `:109` test title: `'Z1 (crop wrapper in flow): figure.dig-slide-crop visible; overflow hidden; img object-fit cover'` → replace `figure.dig-slide-crop` with `.dig-slide-crop` (user-visible in test output).
+- `:105`, `:118`, `:139` comments: `figure.dig-slide-crop` → `.dig-slide-crop` (text only).
+- `:141` (UNCHANGED — `el.closest('.dig-slide-crop')` still works; the `.dig-slide-crop` class persists on the div). Leave as-is.
+- The Z1 `overflow:hidden` assertion relies on the `.dg .dig-slide-crop` rule keeping `overflow:hidden` — confirmed present in Step 4.
 
 - [ ] **Step 7: Run the full render-dig-deeper jest suite + crop/size E2E**
 
@@ -247,7 +273,9 @@ describe('dig captions toggle', () => {
 
   it('hides captions via .dg-hide-caps and hides the toggle in print', () => {
     expect(html).toContain('.dg-hide-caps .dig-cap{display:none}');
-    expect(html).toMatch(/@media print\{[^}]*\.dg-caps-toggle\{display:none!important\}/);
+    // Plain substring (NOT a cross-brace regex): the print block is `@media print{.dg-size{…}.dg-caps-toggle{…}…}`,
+    // so a /@media print\{[^}]*\.dg-caps-toggle/ pattern cannot match (a `}` precedes .dg-caps-toggle).
+    expect(html).toContain('.dg-caps-toggle{display:none!important}');
   });
 });
 
@@ -331,7 +359,10 @@ Define just below `sizeScript` (~:402):
     btn.textContent=(on?'▣':'▢')+' captions';
     if(persist){try{localStorage.setItem('digCaptions',on?'on':'off');}catch(e){}}
   }
+  // REQUIRED, not redundant: the pre-paint head script set ONLY the dg-hide-caps class.
+  // This initial apply() syncs aria-pressed + button text to the persisted state. Do not remove.
   apply(read(),false);
+  // Toggle off the CURRENT visible state (the class), not a re-read, to avoid any read race.
   btn.addEventListener('click',function(){apply(root.classList.contains('dg-hide-caps')?'on':'off',true);});
 })();</script>`;
 ```
@@ -416,6 +447,7 @@ test('C3 pre-paint hides captions BEFORE the toggle exists (no FOUC, PH1)', asyn
   await page.goto(URL);
   const first = await page.evaluate(() => (window as any).__capState);
   expect(first).not.toBeNull();
+  if (!first) return;                            // guard: avoid TypeError on null (clean fail via the assertion above)
   expect(first.hasToggle).toBe(false);          // HEAD script ran before the control parsed
   expect(first.ready).toBe('loading');
   await expect(page.locator('.dig-cap')).toBeHidden();
@@ -509,7 +541,10 @@ In `zoomScript` (~:342-355), update the open branch and `close()`:
   var ov=document.getElementById('_dg-zoom');
   if(!ov)return;
   var cap=document.getElementById('_dg-zoom-cap');
+  // img is inserted BEFORE the caption node so the overlay stacks img-over-caption (flex column).
   var im=document.createElement('img');im.id='_dg-zoom-img';im.alt='';ov.insertBefore(im,cap);
+  // close() fully resets the caption; because any click while open closes first, opening a
+  // different slide is always a fresh open (consecutive-slide zoom = two clicks: close, then open).
   function close(){ov.removeAttribute('data-open');im.removeAttribute('src');if(cap){cap.textContent='';cap.style.display='none';}}
   document.addEventListener('click',function(e){
     var t=e.target;
@@ -568,3 +603,5 @@ git commit -m "feat(dig): show slide caption in zoom lightbox (textContent, resp
 **Type consistency:** `DIG_CAPTIONS_SANITIZE_JS` exported (Task 2) and consumed by the captions unit test + both scripts; classes `dig-slide-fig`/`dig-slide-crop`/`dig-cap`/`dg-hide-caps`/`dg-caps-toggle`, id `_dg-zoom-cap`, key `digCaptions` identical across renderer, scripts, and tests.
 
 **Version policy:** render-only — NO `DIG_GENERATOR_VERSION` bump (confirmed; generate.ts untouched). Part B (sub-headings) is a separate PR.
+
+**Deferred minor (from plan review #12):** caption *visibility-in-print* is covered by the CSS-string unit assertion + the toggle E2E, but there is no E2E that emulates print media and asserts `.dig-cap` is visible when captions are on. Acceptable to defer; add a print-emulation E2E later if desired.
