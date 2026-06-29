@@ -337,8 +337,8 @@ export function renderDigDeeperDoc(args: {
       // features when it is set, and we want a usable handle. The opener back-ref
       // is then severed best-effort (Gemini is trusted; this doc has no sensitive
       // state). If the popup is blocked, the prompt is already on the clipboard.
-      var w=Math.max(420,Math.round(screen.availWidth*0.42)),h=screen.availHeight||800;
-      var win=window.open(u,'_blank','popup=1,width='+w+',height='+h+',left='+(screen.availWidth-w)+',top=0');
+      var sw=screen.availWidth||1280,w=Math.max(420,Math.round(sw*0.42)),h=screen.availHeight||800;
+      var win=window.open(u,'_blank','popup=1,width='+w+',height='+h+',left='+(sw-w)+',top=0');
       try{if(win)win.opener=null;}catch(_e){}
     }
     if(navigator.clipboard&&navigator.clipboard.writeText){
