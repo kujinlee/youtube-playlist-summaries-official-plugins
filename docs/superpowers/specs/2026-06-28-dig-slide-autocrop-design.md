@@ -45,10 +45,10 @@ Three units, split so the logic is testable without spawning a subprocess.
 The only unit that touches ffmpeg. Runs:
 ```
 ffmpeg -v error -i <asset> \
-  -vf "format=gray,geq=lum='if(gte(lum(X,Y),<thr>),255,0)',scale=1:ih" \
+  -vf "format=gray,geq=lum='if(gte(lum(X,Y),<thr>),255,0)',scale=1:ih:flags=area" \
   -f rawvideo -pix_fmt gray -
 ```
-Binarize-then-average yields, per image row, the **fraction of pixels brighter than `thr`** (one byte per row, value = 255 × fraction). Binarizing first is essential: a plain row-average misses a thin bright heading (a white title spanning ~10% of row width averages down to background). Mocked at this boundary in unit tests (project lib-boundary mocking policy).
+Binarize-then-average yields, per image row, the **fraction of pixels brighter than `thr`** (one byte per row, value = 255 × fraction). Binarizing first is essential: a plain row-average misses a thin bright heading (a white title spanning ~10% of row width averages down to background). `flags=area` pins the downscale to a true area average rather than the default scaler (addresses **M1**). The wrapper **validates `stdout.length === imageHeight`** (height from ffprobe) and **fails closed to `null`** on any mismatch, non-zero exit, or empty output. Mocked at this boundary in unit tests (project lib-boundary mocking policy).
 
 ### 2. `computeTrim(topProfile, botProfile, opts) → {trimTop, trimBot} | null` — pure logic
 
@@ -61,23 +61,34 @@ Returns trim fractions of image height (`trimTop`, `trimBot` ∈ [0,1)), or `nul
 
 This unit is pure (arrays in, box out) → exhaustively unit-tested with synthetic profiles.
 
-### 3. Render integration — `render-dig-deeper.ts`
-markdown-it's image rule is **synchronous**, so detection runs in an **async pre-pass**:
-1. Walk the section markdown for slide asset refs.
-2. For each, `lookupOrCompute` the trim box (cache → else `profileRows`×2 + `computeTrim`).
-3. Build `Map<filename, box>`.
-4. Run the existing synchronous render; the image rule reads the map.
+### 3. Render integration — async boundary in the route, renderer stays sync (addresses **B2**)
+`renderDigDeeperDoc` is a **synchronous** `export function` called directly by `app/api/html/[id]/route.ts:195` (`serveHtml(renderDigDeeperDoc(...))`). markdown-it's image rule is also synchronous. Rather than make the whole renderer async (large blast radius), the async work runs **before** render, in the route:
 
-The image rule emits a crop wrapper around the existing base64 `<img>`:
+1. New async `prepareSlideCropMap(dug, assetsRoot, videoId) → Promise<Map<absPath, Box|null>>`.
+   - Collect slide asset refs by **parsing the section markdown with markdown-it tokens** (same parser + the existing path-containment rule), not regex (addresses **M2**); dedupe by canonical resolved absolute path.
+   - For each unique asset: `lookupOrCompute` the box (cache → else `profileRows`×2 + `computeTrim`).
+2. The route `await`s the map and passes it as a new `cropMap` arg into the still-synchronous `renderDigDeeperDoc(...)`.
+3. The synchronous image rule reads `cropMap` by resolved path. Map miss or `null` → plain `<img class="dig-slide">` (today's output, unchanged). A **missing asset file** is represented distinctly from a `null` no-op and is never cached as a result (addresses **M3**).
+
+The image rule emits a `<figure>` crop wrapper (preserves `alt` on the img as the accessible object; addresses **L3**):
 ```html
-<span class="dig-slide-crop" style="aspect-ratio:<W>/<keepH>">
-  <img class="dig-slide" style="object-fit:cover;object-position:0 <P>%"
-       src="data:image/jpeg;base64,…" alt="…">
-</span>
+<figure class="dig-slide-crop">
+  <img class="dig-slide" alt="…" src="data:image/jpeg;base64,…">
+</figure>
 ```
-where `P% = trimTop / (trimTop + trimBot) × 100`. `object-fit:cover` + a wrapper whose aspect-ratio is shorter than the image crops top/bottom responsively without re-encoding; `object-position` selects the kept band. `null` box → emit today's plain `<img class="dig-slide">` unchanged.
+with per-instance inline values for `aspect-ratio` (W/keepH) and `object-position` (`0 P%`, `P% = trimTop/(trimTop+trimBot)×100`).
 
-**Lightbox unchanged.** It builds its own `<img>` from the same data-URI *without* the crop wrapper, so zoom always shows the full original.
+**Full CSS contract (addresses B1).** The existing `.dig-slide{margin:2em auto;max-height:360px;border:…;cursor:zoom-in}` rule conflicts with cover-cropping, so the wrapped img must override it:
+```css
+.dig-slide-crop{display:block;overflow:hidden;margin:2em auto;max-width:100%;
+  /* width capped where the bare img's max-height:360px used to cap; aspect-ratio set inline per-image */
+  border:1px solid var(--rule);border-radius:6px;cursor:zoom-in}
+.dig-slide-crop > img.dig-slide{display:block;width:100%;height:100%;
+  max-height:none;margin:0;border:0;border-radius:0;object-fit:cover;cursor:zoom-in}
+```
+`object-fit:cover` only crops when the img has a concrete box matching the wrapper — the rules above give it `width:100%;height:100%` inside an `overflow:hidden`, `aspect-ratio`-sized figure. The size cap moves from the img to the wrapper.
+
+**Lightbox unchanged.** It builds its own `<img>` from the same data-URI with **no** `.dig-slide-crop` ancestor, so zoom always shows the full uncropped original.
 
 ---
 
@@ -100,12 +111,23 @@ where `P% = trimTop / (trimTop + trimBot) × 100`. `object-fit:cover` + a wrappe
 
 ## Caching
 
-Sidecar `assets/{videoId}/.crop-cache.json`: `filename → {algoVersion, box}` where `box` is `{trimTop, trimBot}` or `null` (no-op result is cached too, so a no-op slide isn't recomputed every render).
-- Asset filenames encode `{sectionId}-{startSec}-{endSec}` and are immutable (re-dig deletes + rewrites under a new name), so `filename + algoVersion` is a sound key — no mtime needed.
-- First render of a slide computes (2 ffmpeg calls) and writes through; later renders read. Recompute when the entry is missing or its `algoVersion` differs.
+Sidecar `assets/{videoId}/.crop-cache.json`: `filename → {algoVersion, size, mtimeMs, box}` where `box` is `{trimTop, trimBot}` or `null` (a no-op result is cached too, so a no-op slide isn't recomputed every render).
+
+- **Key soundness (addresses H1):** filenames are **not** immutable. `slides.ts:158` builds `${sectionId}-${token.sec}-${endComponent}.jpg` and `:102` `copyFileSync`s over it; a re-dig that yields the same Gemini timestamps overwrites the file **in place** with a possibly different frame. So the cache entry is only valid when `size` and `mtimeMs` (from `fs.statSync`) match the current file in addition to `algoVersion`. Any mismatch → recompute.
+- **Concurrency (addresses H2):** writes are serialized per cache-file path with an in-process mutex (promise chain keyed by path) and committed via **temp-file + atomic `rename`**. A read that hits malformed JSON logs and treats the cache as empty (rebuild). This tolerates two simultaneous HTML requests without lost-update corruption within a process; cross-process races degrade to a recompute, never corruption (atomic rename).
+- First render of a slide computes (2 ffmpeg calls) and writes through; later renders read.
 - Cache write is best-effort: a write failure is logged and ignored (detection simply recomputes next time).
+- **Location (corrects M4):** assets live in the **separate data tree** (`…-data/<deck>/raw/assets/`), which is **not** a git repository — so the cache file is neither committed nor needs a `.gitignore` rule. (The earlier "gitignored" claim was wrong.)
 
 ---
+
+## Eligibility & cross-deck robustness (addresses H3)
+
+Thresholds were tuned on one dark deck (`2kKkb01GxYQ`), so the spike was extended to the **light-themed cs146s deck** (`854×476` infographics). Result: the detector **no-op'd (keep 100%)** — on a light background `THR_TOP=120`/`THR_BOT=40` see the whole frame as bright, so `t=0`/`b=last` → `MIN_TRIM` guard fires. **The failure direction is under-crop (safe), not over-crop.** The algorithm self-limits to dark-letterboxed slides.
+
+**Known residual limitation (documented, not eliminated):** a **dark photo or dark low-contrast graphic at the top/bottom edge** can be read as dead band and trimmed. None of the spike decks contain full-bleed dark photos; non-destructive display + zoom recovers any such case. Mitigations: the no-op guards, the adversarial fixtures above, and `DIG_CROP=off` as a one-line global kill switch.
+
+**Open decision (default on vs off):** see "Revised scope" decision below — `DIG_CROP` default is set by the user given this evidence.
 
 ## Error handling
 
@@ -139,8 +161,12 @@ Synthetic top/bottom profiles for:
 
 ### Wrapper/render
 - Given a box, assert wrapper `aspect-ratio` and `object-position` math.
-- Given `null`, assert plain `dig-slide` img (no wrapper).
-- Assert the lightbox `<img>` has **no** crop wrapper (full original on zoom).
+- Given `null` **or a map miss**, assert plain `dig-slide` img (no wrapper).
+- Assert a **missing asset** still renders the existing placeholder and is **not** cached (M3).
+- **L1 regression:** assert the lightbox `<img>` carries the original (uncropped) data URI and has **no** `.dig-slide-crop` ancestor.
+
+### Adversarial fixtures (addresses L2 / H3)
+Detection fixtures (committed tiny images or recorded profiles) covering: light background full-bleed, dark photographic top band, dark low-contrast diagram, tiny image, non-16:9 aspect, and **two files with the same name but different content** (H1 cache-key guard). Each asserts either a clean box or a safe `null` — never an over-crop.
 
 ### ffmpeg boundary
 - `profileRows` integration test against one committed tiny fixture image (real ffmpeg), asserting the profile separates a bright band from a dark band. Mocked elsewhere.
@@ -157,4 +183,5 @@ Synthetic top/bottom profiles for:
 | `lib/dig/slide-crop.ts` | **New** — `profileRows`, `computeTrim`, cache read/write, `ALGO_VERSION`. |
 | `lib/html-doc/render-dig-deeper.ts` | Async pre-pass to build the box map; image rule emits crop wrapper; CSS for `.dig-slide-crop`. |
 | `lib/dig/slide-crop.test.ts` | **New** — unit tests for `computeTrim` (table above). |
-| `assets/{videoId}/.crop-cache.json` | **New runtime artifact** (gitignored alongside other assets). |
+| `assets/{videoId}/.crop-cache.json` | **New runtime artifact** in the non-versioned data tree (not committed; no gitignore needed). |
+| `app/api/html/[id]/route.ts` | `await prepareSlideCropMap(...)` before render; pass `cropMap` into `renderDigDeeperDoc`. |
