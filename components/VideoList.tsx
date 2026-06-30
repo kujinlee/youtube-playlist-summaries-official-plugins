@@ -2,6 +2,7 @@
 
 import type { SortColumn, SortOrder, Video } from '@/types';
 import VideoRow from './VideoRow';
+import { summaryNeedsWork, summarySelectable } from '../lib/html-doc/eligibility';
 
 interface VideoListProps {
   videos: Video[];
@@ -17,6 +18,10 @@ interface VideoListProps {
   sortColumn?: SortColumn | null;
   sortOrder?: SortOrder;
   onSort?: (col: SortColumn, order: SortOrder) => void;
+  selected?: Set<string>;
+  onToggleSelect?: (videoId: string) => void;
+  onSelectAllNeeding?: (visible: Video[]) => void;
+  activeBatchVideoIds?: Set<string>;
 }
 
 const COLUMNS: { key: SortColumn | null; label: string; fullName: string; align: 'left' | 'right' }[] = [
@@ -56,8 +61,14 @@ export default function VideoList({
   sortColumn,
   sortOrder = 'asc',
   onSort,
+  selected = new Set(),
+  onToggleSelect = noop,
+  onSelectAllNeeding = noop,
+  activeBatchVideoIds = new Set(),
 }: VideoListProps) {
   const visible = showArchive ? videos : videos.filter((v) => !v.archived);
+  const needing = visible.filter(summaryNeedsWork);
+  const allNeedingSelected = needing.length > 0 && needing.every((x) => selected.has(x.id));
 
   if (visible.length === 0) {
     return (
@@ -84,6 +95,16 @@ export default function VideoList({
     <table className="w-full border-collapse" aria-label="Video list">
       <thead>
         <tr className="border-b border-zinc-800">
+          {/* Checkbox select-all column */}
+          <th className="w-8 px-2 py-2">
+            <input
+              type="checkbox"
+              aria-label="Select all needing generation"
+              checked={allNeedingSelected}
+              ref={(el) => { if (el) el.indeterminate = !allNeedingSelected && needing.some((x) => selected.has(x.id)); }}
+              onChange={() => onSelectAllNeeding(needing)}
+            />
+          </th>
           {/* Chevron column — no label, not sortable */}
           <th className="w-6 px-1 py-2" aria-label="Expand" />
           {COLUMNS.map(({ key, label, fullName, align }) => {
@@ -137,7 +158,10 @@ export default function VideoList({
             outputFolder={outputFolder}
             baseOutputFolder={baseOutputFolder}
             dimUnscored={minPersonalScore > 0 && video.personalScore === undefined}
-            busy={busyVideoId === video.id}
+            busy={busyVideoId === video.id || activeBatchVideoIds.has(video.id)}
+            selected={selected.has(video.id)}
+            selectable={summarySelectable(video)}
+            onToggleSelect={onToggleSelect}
             onDeepDive={onDeepDive}
             onArchive={onArchive}
             onGenerateHtml={onGenerateHtml}

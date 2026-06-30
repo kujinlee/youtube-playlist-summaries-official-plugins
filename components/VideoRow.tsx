@@ -21,6 +21,9 @@ interface VideoRowProps {
   onArchive: (videoId: string, action: 'archive' | 'unarchive') => void;
   onGenerateHtml: (videoId: string) => void;
   onAnnotationChange: (videoId: string, patch: Partial<Pick<Video, 'personalScore' | 'personalNote' | 'corrections' | 'tldr' | 'takeaways' | 'summaryHtml'>>) => void;
+  selected?: boolean;
+  selectable?: boolean;
+  onToggleSelect?: (videoId: string) => void;
 }
 
 const LANG_COLOR: Record<string, string> = {
@@ -43,10 +46,10 @@ const AUDIENCE_COLOR: Record<Audience, string> = {
   Advanced: 'bg-red-700 text-white',
 };
 
-// Total column count in VideoList: 1 chevron + 15 data columns = 16
-const TOTAL_COLUMNS = 16;
+// Total column count in VideoList: 1 checkbox + 1 chevron + 15 data columns = 17
+const TOTAL_COLUMNS = 17;
 
-export default function VideoRow({ video, rank, outputFolder, baseOutputFolder, dimUnscored, busy = false, onDeepDive, onArchive, onGenerateHtml, onAnnotationChange }: VideoRowProps) {
+export default function VideoRow({ video, rank, outputFolder, baseOutputFolder, dimUnscored, busy = false, onDeepDive, onArchive, onGenerateHtml, onAnnotationChange, selected = false, selectable = true, onToggleSelect = () => {} }: VideoRowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [showCorrections, setShowCorrections] = useState(false);
@@ -71,6 +74,17 @@ export default function VideoRow({ video, rank, outputFolder, baseOutputFolder, 
   return (
     <>
       <tr className="border-b border-zinc-800 hover:bg-zinc-900/50">
+        {/* Checkbox */}
+        <td className="px-2 py-2 w-8">
+          <input
+            type="checkbox"
+            aria-label={`Select ${video.title}`}
+            checked={selected}
+            disabled={!selectable || busy}
+            onChange={() => onToggleSelect(video.id)}
+            title={selectable ? undefined : 'No summary to generate from'}
+          />
+        </td>
         {/* Expand chevron */}
         <td className="px-1 py-2 w-6">
           <button

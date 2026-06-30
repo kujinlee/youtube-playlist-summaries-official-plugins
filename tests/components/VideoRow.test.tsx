@@ -141,16 +141,16 @@ describe('VideoRow', () => {
       // context that would make the absolutely-positioned VideoMenu unclickable.
       expect(screen.getByRole('row')).not.toHaveClass('opacity-40');
       const cells = screen.getAllByRole('cell');
-      // cells[0] is the chevron cell (no dim), cells[1] is the rank cell (has opacity-40)
-      expect(cells[1]).toHaveClass('opacity-40');
+      // cells[0] is the checkbox cell (no dim), cells[1] is the chevron cell (no dim), cells[2] is the rank cell (has opacity-40)
+      expect(cells[2]).toHaveClass('opacity-40');
     });
 
     it('does not apply opacity-40 when video is not archived', () => {
       renderRow({ archived: false });
       expect(screen.getByRole('row')).not.toHaveClass('opacity-40');
       const cells = screen.getAllByRole('cell');
-      // cells[1] is the rank cell
-      expect(cells[1]).not.toHaveClass('opacity-40');
+      // cells[2] is the rank cell
+      expect(cells[2]).not.toHaveClass('opacity-40');
     });
 
     it('renders videoType badge when videoType is set', () => {
@@ -493,16 +493,16 @@ describe('VideoRow', () => {
     it('applies opacity-50 to data cells when dimUnscored is true', () => {
       renderRow({ personalScore: undefined }, { dimUnscored: true });
       const cells = screen.getAllByRole('cell');
-      // cells[0] is the chevron cell (no dim), cells[1] is the rank cell (has opacity-50)
-      expect(cells[1]).toHaveClass('opacity-50');
+      // cells[0] is the checkbox cell (no dim), cells[1] is the chevron cell (no dim), cells[2] is the rank cell (has opacity-50)
+      expect(cells[2]).toHaveClass('opacity-50');
     });
 
     it('applies opacity-40 when archived, taking precedence over dimUnscored', () => {
       renderRow({ archived: true, personalScore: undefined }, { dimUnscored: true });
       const cells = screen.getAllByRole('cell');
-      // cells[1] is the rank cell
-      expect(cells[1]).toHaveClass('opacity-40');
-      expect(cells[1]).not.toHaveClass('opacity-50');
+      // cells[2] is the rank cell
+      expect(cells[2]).toHaveClass('opacity-40');
+      expect(cells[2]).not.toHaveClass('opacity-50');
     });
   });
 
