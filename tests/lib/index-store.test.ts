@@ -19,9 +19,7 @@ function makeVideo(overrides: Partial<Video> = {}): Video {
     ratings: { usefulness: 4, depth: 3, originality: 5, recency: 4, completeness: 3 },
     overallScore: 3.8,
     summaryMd: null,
-    summaryPdf: null,
     deepDiveMd: null,
-    deepDivePdf: null,
     processedAt: '2024-01-01T00:00:00.000Z',
     ...overrides,
   };
@@ -125,11 +123,11 @@ describe('updateVideoFields', () => {
     const video = makeVideo({ id: 'vid333333333', summaryMd: null });
     upsertVideo(dir, video);
 
-    updateVideoFields(dir, 'vid333333333', { summaryMd: 'vid333333333.md', summaryPdf: 'vid333333333.pdf' });
+    updateVideoFields(dir, 'vid333333333', { summaryMd: 'vid333333333.md', deepDiveMd: 'vid333333333-deep-dive.md' });
 
     const result = readIndex(dir);
     expect(result.videos[0].summaryMd).toBe('vid333333333.md');
-    expect(result.videos[0].summaryPdf).toBe('vid333333333.pdf');
+    expect(result.videos[0].deepDiveMd).toBe('vid333333333-deep-dive.md');
     expect(result.videos[0].title).toBe(video.title);
     expect(result.videos[0].ratings).toEqual(video.ratings);
   });

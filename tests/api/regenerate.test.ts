@@ -47,7 +47,6 @@ const baseVideo = {
   id: VIDEO_ID,
   title: 'Test Video',
   summaryMd: SUMMARY_MD,
-  summaryPdf: 'pdfs/test-video.pdf',
   tags: ['ai', 'rag'],
   tldr: 'Old TL;DR.',
   takeaways: ['Old point'],

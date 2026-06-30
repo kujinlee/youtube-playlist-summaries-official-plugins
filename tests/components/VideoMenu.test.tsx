@@ -5,7 +5,7 @@ import VideoMenu from '../../components/VideoMenu';
 const base = {
   id: 'vid11111111', title: 'T', youtubeUrl: 'https://youtu.be/x', language: 'en',
   durationSeconds: 5, archived: false, ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
-  overallScore: 3, summaryMd: 'base.md', summaryPdf: null, deepDiveMd: null, deepDivePdf: null, processedAt: '2026-01-01T00:00:00.000Z',
+  overallScore: 3, summaryMd: 'base.md', deepDiveMd: null, processedAt: '2026-01-01T00:00:00.000Z',
 };
 const props = { outputFolder: '/o', baseOutputFolder: '/o', onDeepDive() {}, onArchive() {}, onEditCorrections() {}, onGenerateHtml() {}, onClose() {}, busy: false };
 
@@ -74,7 +74,7 @@ it('old "Deep Dive" and "View Deep Dive HTML" items no longer exist', () => {
 });
 
 it('does not render PDF menu items (PDF generation removed)', () => {
-  render(<VideoMenu {...props} video={{ ...base, summaryPdf: 'summary.pdf', deepDivePdf: 'deepdive.pdf' } as any} />);
+  render(<VideoMenu {...props} video={base as any} />);
   expect(screen.queryByText('View Summary PDF')).not.toBeInTheDocument();
   expect(screen.queryByText('View Deep Dive PDF')).not.toBeInTheDocument();
 });

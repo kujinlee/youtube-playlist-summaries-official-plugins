@@ -19,7 +19,7 @@ export function runPhaseA(outputFolder: string): { assigned: number } {
 
 /**
  * Find a file by scanning its directory and matching on NFC-normalized name.
- * `relPath` may include a subdir prefix (e.g. `pdfs/foo.pdf`). Returns the absolute
+ * `relPath` may include a subdir prefix (e.g. `htmls/foo.html`). Returns the absolute
  * path of the first entry whose NFC form equals the target's, or null.
  *
  * Why: filenames can be stored on disk in a different Unicode normalization than the

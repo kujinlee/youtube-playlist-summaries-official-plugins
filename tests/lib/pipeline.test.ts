@@ -68,9 +68,7 @@ function makeIndexedVideo(id: string, overrides: Partial<Video> = {}): Video {
     ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
     overallScore: 3,
     summaryMd: `001_video-${id}.md`,
-    summaryPdf: `001_video-${id}.pdf`,
     deepDiveMd: null,
-    deepDivePdf: null,
     processedAt: new Date().toISOString(),
     ...overrides,
   };
@@ -245,7 +243,6 @@ describe('runIngestion', () => {
       outputFolder,
       expect.objectContaining({
         summaryMd: '001_hello-world.md',
-        summaryPdf: null,
       }),
     );
   });
@@ -300,7 +297,6 @@ describe('runIngestion', () => {
       outputFolder,
       expect.objectContaining({
         summaryMd: '001_hello-world-2.md',
-        summaryPdf: null,
       }),
     );
   });
@@ -1018,20 +1014,6 @@ describe('reconstructVideo', () => {
   it('sets summaryMd to the filename', () => {
     const video = reconstructVideo(SAMPLE_MD, '001_test-video-title.md', mdPath);
     expect(video!.summaryMd).toBe('001_test-video-title.md');
-  });
-
-  it('sets summaryPdf to pdfs/-prefixed path when PDF exists in pdfs/ subfolder', () => {
-    const pdfsDir = path.join(tempDir, 'pdfs');
-    fs.mkdirSync(pdfsDir, { recursive: true });
-    fs.writeFileSync(path.join(pdfsDir, '001_test-video-title.pdf'), '%PDF');
-    const video = reconstructVideo(SAMPLE_MD, '001_test-video-title.md', mdPath);
-    expect(video!.summaryPdf).toBe('pdfs/001_test-video-title.pdf');
-  });
-
-  it('sets summaryPdf to null when PDF is absent from pdfs/ subfolder', () => {
-    // No PDF file created — neither at root nor in pdfs/
-    const video = reconstructVideo(SAMPLE_MD, '001_test-video-title.md', mdPath);
-    expect(video!.summaryPdf).toBeNull();
   });
 
   it('returns null when video_id is missing from frontmatter', () => {

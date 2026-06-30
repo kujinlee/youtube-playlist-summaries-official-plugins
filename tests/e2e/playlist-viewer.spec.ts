@@ -26,9 +26,7 @@ function makeVideo(overrides: Partial<Video> = {}): Video {
     ratings: BASE_RATINGS,
     overallScore: 3.8,
     summaryMd: 'summary',
-    summaryPdf: 'summary.pdf',
     deepDiveMd: null,
-    deepDivePdf: null,
     processedAt: '2026-01-01T00:00:00.000Z',
     ...overrides,
   };
@@ -451,27 +449,6 @@ test.describe('playlist viewer', () => {
 
     // Verify archive POST body contained correct action and outputFolder
     expect(archiveRequestBody).toMatchObject({ action: 'archive', outputFolder: OUTPUT_FOLDER });
-  });
-
-  // Behavior 8: View Summary PDF link points to correct PDF URL
-  test('View Summary PDF: link href points to PDF API route', async ({ page }) => {
-    const video = makeVideo({ id: 'vid-1', summaryPdf: 'summary.pdf' });
-
-    await stubSettings(page);
-    await stubVideos(page, [video]);
-
-    await page.goto('/');
-    await expect(page.getByText('Test Video')).toBeVisible();
-
-    // Open menu and inspect link href
-    await page.getByRole('button', { name: 'Menu' }).click();
-
-    const pdfLink = page.getByRole('link', { name: /view summary pdf/i });
-    const href = await pdfLink.getAttribute('href');
-    const url = new URL(href!, 'http://localhost');
-    expect(url.pathname).toBe('/api/pdf/vid-1');
-    expect(url.searchParams.get('outputFolder')).toBe(OUTPUT_FOLDER);
-    expect(url.searchParams.get('type')).toBe('summary');
   });
 
   // Behavior 9: Obsidian link has correct scheme, vault, and file params

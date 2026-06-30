@@ -45,9 +45,7 @@ function makeVideo(overrides: Partial<Video> = {}): Video {
     ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
     overallScore: 3,
     summaryMd: `${SUMMARY_BASE}.md`,
-    summaryPdf: `${SUMMARY_BASE}.pdf`,
     deepDiveMd: null,
-    deepDivePdf: null,
     processedAt: new Date().toISOString(),
     ...overrides,
   };
@@ -70,7 +68,7 @@ describe('writeDeepDiveDoc', () => {
     jest.clearAllMocks();
   });
 
-  it('combined path: writes the .md with the resolved ▶ body, returns deepDiveMd, no pdf', async () => {
+  it('combined path: writes the .md with the resolved ▶ body, returns deepDiveMd', async () => {
     const result = await writeDeepDiveDoc(makeVideo(), outputFolder, () => {});
 
     expect(mockFetchTranscriptSegments).toHaveBeenCalledWith(VIDEO_ID);
@@ -80,7 +78,6 @@ describe('writeDeepDiveDoc', () => {
     expect(mockTranscribeViaGemini).not.toHaveBeenCalled();
 
     expect(result).toEqual({ deepDiveMd: `${SUMMARY_BASE}-deep-dive.md` });
-    expect('deepDivePdf' in result).toBe(false);
 
     const content = fs.readFileSync(path.join(outputFolder, `${SUMMARY_BASE}-deep-dive.md`), 'utf-8');
     expect(content).toContain('▶ [0:00]');

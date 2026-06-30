@@ -26,9 +26,7 @@ function makeVideo(id: string, processedAt: string, summaryMd: string | null, se
     ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
     overallScore: 3,
     summaryMd,
-    summaryPdf: null,
     deepDiveMd: null,
-    deepDivePdf: null,
     processedAt,
     ...(serialNumber !== undefined ? { serialNumber } : {}),
   };

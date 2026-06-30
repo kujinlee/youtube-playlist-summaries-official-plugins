@@ -17,7 +17,6 @@ const VIDEO_ID = 'test-video-01';
 const SLUG = 'the-test-video-title';
 
 // Files use title slugs (not videoId) matching what the pipeline writes.
-// PDFs live in a pdfs/ subdirectory.
 function makeVideo(id: string, archived = false, withDeepDive = false): Video {
   return {
     id,
@@ -29,9 +28,7 @@ function makeVideo(id: string, archived = false, withDeepDive = false): Video {
     ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
     overallScore: 3,
     summaryMd: `${SLUG}.md`,
-    summaryPdf: `pdfs/${SLUG}.pdf`,
     deepDiveMd: withDeepDive ? `${SLUG}-deep-dive.md` : null,
-    deepDivePdf: withDeepDive ? `pdfs/${SLUG}-deep-dive.pdf` : null,
     processedAt: new Date().toISOString(),
   };
 }
@@ -54,35 +51,28 @@ describe('archiveVideo', () => {
     fs.rmSync(outputFolder, { recursive: true, force: true });
   });
 
-  it('moves summaryMd and summaryPdf to archived/ preserving subdirectory structure', async () => {
+  it('moves summaryMd to archived/', async () => {
     upsertVideo(outputFolder, makeVideo(VIDEO_ID));
     writeFile(outputFolder, `${SLUG}.md`, 'summary');
-    writeFile(outputFolder, `pdfs/${SLUG}.pdf`, 'pdf');
 
     await archiveVideo(outputFolder, VIDEO_ID);
 
     const archivedDir = path.join(outputFolder, 'archived');
     expect(fs.existsSync(path.join(archivedDir, `${SLUG}.md`))).toBe(true);
-    expect(fs.existsSync(path.join(archivedDir, `pdfs/${SLUG}.pdf`))).toBe(true);
-    // originals removed
+    // original removed
     expect(fs.existsSync(path.join(outputFolder, `${SLUG}.md`))).toBe(false);
-    expect(fs.existsSync(path.join(outputFolder, `pdfs/${SLUG}.pdf`))).toBe(false);
   });
 
-  it('moves all four file types including deep-dive files', async () => {
+  it('moves summary and deep-dive md files', async () => {
     upsertVideo(outputFolder, makeVideo(VIDEO_ID, false, true));
     writeFile(outputFolder, `${SLUG}.md`, 'summary');
-    writeFile(outputFolder, `pdfs/${SLUG}.pdf`, 'pdf');
     writeFile(outputFolder, `${SLUG}-deep-dive.md`, 'deep');
-    writeFile(outputFolder, `pdfs/${SLUG}-deep-dive.pdf`, 'deep-pdf');
 
     await archiveVideo(outputFolder, VIDEO_ID);
 
     const archivedDir = path.join(outputFolder, 'archived');
     expect(fs.existsSync(path.join(archivedDir, `${SLUG}.md`))).toBe(true);
-    expect(fs.existsSync(path.join(archivedDir, `pdfs/${SLUG}.pdf`))).toBe(true);
     expect(fs.existsSync(path.join(archivedDir, `${SLUG}-deep-dive.md`))).toBe(true);
-    expect(fs.existsSync(path.join(archivedDir, `pdfs/${SLUG}-deep-dive.pdf`))).toBe(true);
   });
 
   it('does not throw when only some files are present', async () => {
@@ -138,15 +128,12 @@ describe('unarchiveVideo', () => {
   it('moves files from archived/ back to original locations', async () => {
     upsertVideo(outputFolder, makeVideo(VIDEO_ID));
     writeFile(outputFolder, `${SLUG}.md`, 'summary');
-    writeFile(outputFolder, `pdfs/${SLUG}.pdf`, 'pdf');
     await archiveVideo(outputFolder, VIDEO_ID);
 
     await unarchiveVideo(outputFolder, VIDEO_ID);
 
     expect(fs.existsSync(path.join(outputFolder, `${SLUG}.md`))).toBe(true);
-    expect(fs.existsSync(path.join(outputFolder, `pdfs/${SLUG}.pdf`))).toBe(true);
     expect(fs.existsSync(path.join(outputFolder, 'archived', `${SLUG}.md`))).toBe(false);
-    expect(fs.existsSync(path.join(outputFolder, 'archived', `pdfs/${SLUG}.pdf`))).toBe(false);
   });
 
   it('sets video.archived to false in the index', async () => {

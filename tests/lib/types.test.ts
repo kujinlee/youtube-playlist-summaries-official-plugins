@@ -5,7 +5,7 @@ describe('Video.serialNumber', () => {
     id: 'vid123', title: 'T', youtubeUrl: 'https://youtube.com/watch?v=vid123',
     language: 'en', durationSeconds: 1, archived: false,
     ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
-    overallScore: 3, summaryMd: 'a.md', summaryPdf: null, deepDiveMd: null, deepDivePdf: null,
+    overallScore: 3, summaryMd: 'a.md', deepDiveMd: null,
     processedAt: '2026-01-01T00:00:00.000Z',
   };
   it('accepts a positive integer serialNumber', () => {

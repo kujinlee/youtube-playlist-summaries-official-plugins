@@ -39,7 +39,6 @@ const eligibleVideo = {
   id: 'vid1111111',
   title: 'Test Video',
   summaryMd: 'test.md',
-  summaryPdf: 'pdfs/test.pdf',
   tldr: undefined,
   tags: ['ai'],
 } as any;

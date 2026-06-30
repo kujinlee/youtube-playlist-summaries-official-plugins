@@ -16,8 +16,8 @@ function video(extra: Record<string, unknown> = {}) {
     id: VIDEO_ID, title: 'T', youtubeUrl: 'https://youtu.be/x', language: 'en',
     durationSeconds: 60, archived: false,
     ratings: { usefulness: 4, depth: 4, originality: 4, recency: 4, completeness: 4 },
-    overallScore: 4, summaryMd: 'a.md', summaryPdf: null,
-    deepDiveMd: 'a-deep-dive.md', deepDivePdf: null, summaryHtml: null,
+    overallScore: 4, summaryMd: 'a.md',
+    deepDiveMd: 'a-deep-dive.md', summaryHtml: null,
     processedAt: '2026-06-09T00:00:00.000Z', ...extra,
   };
 }

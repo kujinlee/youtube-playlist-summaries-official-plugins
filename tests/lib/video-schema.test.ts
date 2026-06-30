@@ -11,9 +11,7 @@ describe('VideoSchema personal review fields', () => {
     ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
     overallScore: 3,
     summaryMd: null,
-    summaryPdf: null,
     deepDiveMd: null,
-    deepDivePdf: null,
     processedAt: '2024-01-01T00:00:00.000Z',
   };
 
@@ -65,9 +63,7 @@ describe('VideoSchema quick-view fields', () => {
     ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
     overallScore: 3,
     summaryMd: null,
-    summaryPdf: null,
     deepDiveMd: null,
-    deepDivePdf: null,
     processedAt: '2024-01-01T00:00:00.000Z',
   };
 

@@ -41,9 +41,7 @@ function makeVideo(overrides: Partial<Video> = {}): Video {
     ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
     overallScore: 3,
     summaryMd: `${SUMMARY_BASE}.md`,
-    summaryPdf: `${SUMMARY_BASE}.pdf`,
     deepDiveMd: null,
-    deepDivePdf: null,
     processedAt: new Date().toISOString(),
     ...overrides,
   };
