@@ -1,7 +1,6 @@
 jest.mock('../../lib/index-store');
 jest.mock('../../lib/gemini');
 jest.mock('../../lib/pipeline');
-jest.mock('../../lib/pdf');
 // Suppress youtube module-init side effects (GoogleApis registration) that
 // would fail in the Jest JSDOM environment without a real network context.
 jest.mock('../../lib/youtube');
@@ -24,7 +23,6 @@ import { GET } from '../../app/api/quick-view/backfill/route';
 import * as indexStore from '../../lib/index-store';
 import * as gemini from '../../lib/gemini';
 import * as pipeline from '../../lib/pipeline';
-import * as pdfLib from '../../lib/pdf';
 import fs from 'fs';
 
 const mockReadIndex = jest.mocked(indexStore.readIndex);
@@ -32,7 +30,6 @@ const mockAssertOutputFolder = jest.mocked(indexStore.assertOutputFolder);
 const mockUpdateVideoFields = jest.mocked(indexStore.updateVideoFields);
 const mockExtractQuickView = jest.mocked(gemini.extractQuickView);
 const mockInsertQuickViewCallout = jest.mocked(pipeline.insertQuickViewCallout);
-const mockGeneratePdf = jest.mocked(pdfLib.generatePdf);
 const mockReadFile = fs.promises.readFile as jest.Mock;
 const mockWriteFile = fs.promises.writeFile as jest.Mock;
 
@@ -65,7 +62,6 @@ describe('GET /api/quick-view/backfill', () => {
     mockUpdateVideoFields.mockImplementation(() => {});
     mockExtractQuickView.mockResolvedValue({ tldr: 'This video explains X.', takeaways: ['Point one'] });
     mockInsertQuickViewCallout.mockReturnValue('updated md content');
-    mockGeneratePdf.mockResolvedValue(undefined);
     mockReadFile.mockResolvedValue('original md content');
     mockWriteFile.mockResolvedValue(undefined);
     mockReadIndex.mockReturnValue({
@@ -134,14 +130,5 @@ describe('GET /api/quick-view/backfill', () => {
     const events = await collectSSEEvents(res);
     expect(events[0]).toMatchObject({ type: 'start', total: 0 });
     expect(mockExtractQuickView).not.toHaveBeenCalled();
-  });
-
-  it('skips PDF regeneration when summaryPdf is null', async () => {
-    mockReadIndex.mockReturnValue({
-      playlistUrl: '', outputFolder: OUTPUT_FOLDER,
-      videos: [{ ...eligibleVideo, summaryPdf: null }],
-    });
-    await getBackfill(OUTPUT_FOLDER);
-    expect(mockGeneratePdf).not.toHaveBeenCalled();
   });
 });
