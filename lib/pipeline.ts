@@ -10,6 +10,7 @@ import { applySerial, padSerial } from './serial-filename';
 import type { ProgressEvent, Video, VideoMeta, RatingValue, VideoType, Audience, GeminiSummaryResponse } from '../types';
 import { CURRENT_DOC_VERSION } from './doc-version';
 import { padDividers } from './markdown-dividers';
+import { runHtmlDoc } from './html-doc/generate';
 
 const VALID_VIDEO_TYPES: VideoType[] = ['Tutorial', 'Analysis', 'Case Study', 'Framework', 'Demo', 'Interview'];
 const VALID_AUDIENCES: Audience[] = ['Beginner', 'Intermediate', 'Advanced'];
@@ -354,6 +355,23 @@ export async function runIngestion(
       upsertVideo(outputFolder, video);
       // Mark as processed so within-run duplicates (same video appearing twice in the playlist) are skipped.
       alreadyIndexed.add(meta.videoId);
+
+      // Pre-generate the summary HTML doc so it opens instantly (no on-demand Gemini wait).
+      // Best-effort: the .md is already written and the video already upserted, so a transform
+      // failure must never fail the video or abort the batch — it just defers HTML to on-demand.
+      // No-op onProgress keeps runHtmlDoc's own events off the ingest stream. Opt out with
+      // PREGEN_SUMMARY_HTML=off (mirrors DIG_CROP=off).
+      if (process.env.PREGEN_SUMMARY_HTML !== 'off') {
+        onProgress({ type: 'step', videoId: meta.videoId, title: meta.title, step: 'Generating HTML doc…', current: newIndex, total: newTotal });
+        try {
+          await runHtmlDoc(meta.videoId, outputFolder, () => {});
+        } catch (err) {
+          // Best-effort: defer to on-demand. Log with videoId so the deferred SSE step is
+          // correlatable to a cause (the underlying Gemini failure also logs upstream).
+          console.warn(`[pregen-html] deferred for ${meta.videoId}: ${err instanceof Error ? err.message : String(err)}`);
+          onProgress({ type: 'step', videoId: meta.videoId, title: meta.title, step: 'HTML doc deferred (will generate on open)', current: newIndex, total: newTotal });
+        }
+      }
 
       onProgress({ type: 'step', videoId: meta.videoId, title: meta.title, step: 'Saved', current: newIndex, total: newTotal });
     } catch (err) {
