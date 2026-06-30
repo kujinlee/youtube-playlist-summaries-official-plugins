@@ -34,7 +34,7 @@
 
 ---
 
-## Task B1: Extract `digSection` to `lib/dig/dig-section.ts`; route calls it
+## Task 1: Extract `digSection` to `lib/dig/dig-section.ts`; route calls it
 
 **Files:**
 - Create: `lib/dig/dig-section.ts`
@@ -164,7 +164,7 @@ git commit -m "refactor(dig): extract runDigPipeline → lib/dig/dig-section.ts 
 
 ---
 
-## Task B2: `runBatchDocs` dig branch + accept `summary-dig`
+## Task 2: `runBatchDocs` dig branch + accept `summary-dig`
 
 **Files:**
 - Modify: `lib/html-doc/batch.ts`, `app/api/videos/batch-docs/route.ts`
@@ -398,7 +398,7 @@ git commit -m "feat(batch-docs): summary-dig mode — dig missing/stale sections
 
 ---
 
-## Task B3: `BulkActionBar` mode toggle + cost-confirm
+## Task 3: `BulkActionBar` mode toggle + cost-confirm
 
 **Files:**
 - Modify: `components/BulkActionBar.tsx`
@@ -511,7 +511,7 @@ git commit -m "feat(batch-docs): BulkActionBar mode toggle + dig cost-confirm"
 
 ---
 
-## Task B4: mode-aware client eligibility + page wiring + `start`-event seed + E2E
+## Task 4: mode-aware client eligibility + page wiring + `start`-event seed + E2E
 
 **Files:**
 - Modify: `lib/html-doc/eligibility.ts` (add `videoNeedsBatchWork`), `components/VideoList.tsx` (mode-aware select-all), `app/page.tsx`, `components/BatchDocStatusBar.tsx`
