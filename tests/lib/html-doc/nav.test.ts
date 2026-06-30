@@ -32,7 +32,7 @@ describe('digControl', () => {
     });
   });
 
-  describe('deep-dive-side (2-arg "summary", cross-doc nav)', () => {
+  describe('dig-deeper-side (2-arg "summary", cross-doc nav)', () => {
     it('builds a "↑ summary" control with data-type and data-t', () => {
       const h = digControl('summary', 0);
       expect(h).toContain('class="dig"');
@@ -48,11 +48,11 @@ describe('digControl', () => {
 
 describe('wireDigLinks', () => {
   it('rebuilds the href from the current URL, swapping type + setting #t, preserving outputFolder + id', () => {
-    document.body.innerHTML = '<a class="dig" data-type="deep-dive" data-t="200">x</a>';
-    wireDigLinks(document, { href: 'http://h/api/html/vid9?outputFolder=%2FU%2Ff&type=summary' });
+    document.body.innerHTML = '<a class="dig" data-type="summary" data-t="200">↑ summary</a>';
+    wireDigLinks(document, { href: 'http://h/api/html/vid9?outputFolder=%2FU%2Ff&type=dig-deeper' });
     const href = document.querySelector('a.dig')!.getAttribute('href')!;
     expect(href).toContain('/api/html/vid9');           // id preserved in path
-    expect(href).toContain('type=deep-dive');
+    expect(href).toContain('type=summary');
     expect(href.endsWith('#t=200')).toBe(true);
     const u = new URL('http://h' + href);
     expect(u.searchParams.get('outputFolder')).toBe('/U/f'); // round-trips, no double-encode
