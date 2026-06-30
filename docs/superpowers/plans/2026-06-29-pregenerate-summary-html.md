@@ -27,6 +27,8 @@
 
 Task 1 delivers the happy-path pre-gen call + progress isolation + Saved-ordering. Task 2 adds the best-effort `try/catch` and the opt-out flag. A reviewer could accept Task 1 (pre-gen fires and is wired correctly) while rejecting Task 2 (robustness), so they are separate tasks.
 
+**Artifact-production scope (spec behavior #2):** these pipeline tasks **mock `runHtmlDoc`**, so they verify only that the pipeline *invokes* pre-gen with the right `(videoId, outputFolder)` — they do NOT re-assert that `models/<base>.json` and `htmls/<base>.html` are written. That artifact production is `runHtmlDoc`'s own contract, already covered by `tests/lib/html-doc/generate.test.ts` (and the model/render suites). Re-testing it here would duplicate that coverage against a mock boundary. So spec behavior #2 is intentionally satisfied by the existing `generate.test.ts` suite, not by a new pipeline test.
+
 ---
 
 ## Task 1: Pre-gen call + coarse SSE step + progress isolation
@@ -100,22 +102,28 @@ describe('summary HTML pre-generation', () => {
     expect(savedIdx).toBeGreaterThan(genIdx);
   });
 
-  it('does not leak runHtmlDoc internal progress onto the ingest stream', async () => {
+  it('passes a no-op progress callback to runHtmlDoc (no internal-progress leak)', async () => {
     mockFetchPlaylistVideos.mockResolvedValue([makeVideoMeta('vid1')]);
     mockFetchTranscriptSegments.mockResolvedValue([{ text: 'transcript', offset: 0, duration: 5 }]);
     mockGenerateSummary.mockResolvedValue(makeSummaryResponse());
-    // The mocked runHtmlDoc fires a sentinel on the onProgress it is GIVEN. If the pipeline passed
-    // the real ingest onProgress (not a no-op), this sentinel would surface on the ingest stream.
+    // The mocked runHtmlDoc captures the onProgress it is GIVEN and fires a sentinel on it. If the
+    // pipeline passed the real ingest callback (not a no-op), the sentinel would surface on the
+    // ingest stream. Asserting call-count + distinct-callback + sentinel-absence together closes the
+    // false-green hole where this test could pass even if runHtmlDoc were never called.
+    let received: ((e: ProgressEvent) => void) | undefined;
     mockRunHtmlDoc.mockImplementation(async (_id, _folder, onProgress) => {
-      onProgress({ type: 'start', total: 3 } as ProgressEvent);
+      received = onProgress;
+      onProgress({ type: 'step', step: '__SENTINEL__', current: 1, total: 3, videoId: 'vid1', title: 'x' } as ProgressEvent);
     });
 
     const events: ProgressEvent[] = [];
-    await runIngestion(PLAYLIST_URL, outputFolder, (e) => events.push(e));
+    const outer = (e: ProgressEvent) => events.push(e);
+    await runIngestion(PLAYLIST_URL, outputFolder, outer);
 
-    // Ingest stream emits exactly one 'start' (its own, total:2-or-1), never runHtmlDoc's total:3.
-    const startEvents = events.filter((e) => e.type === 'start');
-    expect(startEvents.every((e) => !('total' in e) || e.total !== 3)).toBe(true);
+    expect(mockRunHtmlDoc).toHaveBeenCalledTimes(1);               // it actually ran (no false green)
+    expect(received).toBeDefined();
+    expect(received).not.toBe(outer);                              // pipeline passed its own no-op, not the ingest callback
+    expect(events.some((e) => 'step' in e && e.step === '__SENTINEL__')).toBe(false); // sentinel never leaked
   });
 });
 ```
