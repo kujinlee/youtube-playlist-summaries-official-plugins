@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FilterState, ProgressEvent, SortColumn, SortOrder, Video } from '@/types';
+import type { BatchMode } from '@/lib/html-doc/batch';
 import { FILTER_DEFAULTS } from '@/types';
 import BackfillOverlay from '@/components/BackfillOverlay';
 import BatchDocStatusBar from '@/components/BatchDocStatusBar';
@@ -11,7 +12,7 @@ import FilterBar from '@/components/FilterBar';
 import Header from '@/components/Header';
 import HtmlDocStatusBar from '@/components/HtmlDocStatusBar';
 import VideoList from '@/components/VideoList';
-import { summaryNeedsWork } from '@/lib/html-doc/eligibility';
+import { summaryNeedsWork, videoNeedsBatchWork } from '@/lib/html-doc/eligibility';
 
 type IngestStatus = 'idle' | 'running' | 'error';
 
@@ -51,6 +52,7 @@ export default function Page() {
   const [showBackfill, setShowBackfill] = useState(false);
   const [syncNote, setSyncNote] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [batchMode, setBatchMode] = useState<BatchMode>('summary');
   const [batchJob, setBatchJob] = useState<{ jobId: string; videoIds: Set<string> } | null>(null);
 
   const ingestESRef = useRef<EventSource | null>(null);
@@ -388,28 +390,28 @@ export default function Page() {
   }, []);
 
   const selectAllNeeding = useCallback((visible: Video[]) => {
-    const needing = visible.filter(summaryNeedsWork).map((x) => x.id);
+    const needing = visible.filter((x) => videoNeedsBatchWork(x, batchMode)).map((x) => x.id);
     setSelected((prev) => {
       const allSel = needing.length > 0 && needing.every((id) => prev.has(id));
       return allSel ? new Set() : new Set(needing); // toggle: clear if all already selected
     });
-  }, []);
+  }, [batchMode]);
 
   const clearSelection = useCallback(() => setSelected(new Set()), []);
 
   const handleBatchGenerate = useCallback(async () => {
-    const ids = videos.filter((x) => selected.has(x.id) && summaryNeedsWork(x)).map((x) => x.id);
+    const ids = videos.filter((x) => selected.has(x.id) && videoNeedsBatchWork(x, batchMode)).map((x) => x.id);
     if (ids.length === 0) return;
     try {
       const res = await fetch('/api/videos/batch-docs', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ outputFolder, videoIds: ids, mode: 'summary' }),
+        body: JSON.stringify({ outputFolder, videoIds: ids, mode: batchMode }),
       });
       if (!res.ok) return;
       const data = await res.json();
       setBatchJob({ jobId: data.jobId, videoIds: new Set(ids) });
     } catch { /* best-effort */ }
-  }, [videos, selected, outputFolder]);
+  }, [videos, selected, outputFolder, batchMode]);
 
   // H2: refresh rows as each item completes (a 'step' means the prior video finished). The
   // fetchSeqRef race guard in fetchVideos dedupes overlapping refreshes.
@@ -476,7 +478,7 @@ export default function Page() {
   const backfillCount = videos.filter((v) => v.summaryMd && !v.tldr).length;
 
   const selectedVideos = videos.filter((x) => selected.has(x.id));
-  const willGenerateCount = selectedVideos.filter(summaryNeedsWork).length;
+  const willGenerateCount = selectedVideos.filter((x) => videoNeedsBatchWork(x, batchMode)).length;
   const skipCount = selectedVideos.length - willGenerateCount;
 
   return (
@@ -580,6 +582,8 @@ export default function Page() {
           selectedCount={selected.size}
           willGenerateCount={willGenerateCount}
           skipCount={skipCount}
+          mode={batchMode}
+          onModeChange={setBatchMode}
           onGenerate={handleBatchGenerate}
           onClear={clearSelection}
         />
@@ -601,6 +605,7 @@ export default function Page() {
           onToggleSelect={toggleSelect}
           onSelectAllNeeding={selectAllNeeding}
           activeBatchVideoIds={batchJob?.videoIds ?? EMPTY_SET}
+          batchMode={batchMode}
         />
       </div>
 

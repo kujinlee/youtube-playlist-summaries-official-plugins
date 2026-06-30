@@ -47,7 +47,9 @@ export default function BatchDocStatusBar({ jobId, onClose, onError, onProgressE
       let data: ProgressEvent;
       try { data = JSON.parse(event.data) as ProgressEvent; } catch { return; }
       onProgressEventRef.current?.(data); // H2: let the page refresh rows as items complete
-      if (data.type === 'step') {
+      if (data.type === 'start') {
+        setState({ status: 'running', current: 0, total: data.total ?? 0, failed: failedRef.current, step: '' });
+      } else if (data.type === 'step') {
         setState({ status: 'running', current: data.current ?? 0, total: data.total ?? 0, failed: failedRef.current, step: data.step });
       } else if (data.type === 'error' && 'videoId' in data && data.videoId) {
         failedRef.current += 1; // non-fatal per-video error

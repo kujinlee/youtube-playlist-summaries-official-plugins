@@ -1,8 +1,9 @@
 'use client';
 
 import type { SortColumn, SortOrder, Video } from '@/types';
+import type { BatchMode } from '@/lib/html-doc/batch';
 import VideoRow from './VideoRow';
-import { summaryNeedsWork, summarySelectable } from '../lib/html-doc/eligibility';
+import { summaryNeedsWork, summarySelectable, videoNeedsBatchWork } from '../lib/html-doc/eligibility';
 
 interface VideoListProps {
   videos: Video[];
@@ -22,6 +23,7 @@ interface VideoListProps {
   onToggleSelect?: (videoId: string) => void;
   onSelectAllNeeding?: (visible: Video[]) => void;
   activeBatchVideoIds?: Set<string>;
+  batchMode?: BatchMode;
 }
 
 const COLUMNS: { key: SortColumn | null; label: string; fullName: string; align: 'left' | 'right' }[] = [
@@ -65,9 +67,10 @@ export default function VideoList({
   onToggleSelect = noop,
   onSelectAllNeeding = noop,
   activeBatchVideoIds = new Set(),
+  batchMode = 'summary',
 }: VideoListProps) {
   const visible = showArchive ? videos : videos.filter((v) => !v.archived);
-  const needing = visible.filter(summaryNeedsWork);
+  const needing = visible.filter((vid) => videoNeedsBatchWork(vid, batchMode));
   const allNeedingSelected = needing.length > 0 && needing.every((x) => selected.has(x.id));
 
   if (visible.length === 0) {
