@@ -122,8 +122,8 @@ describe('DeepDiveStatusBar — step events', () => {
 
   it('shows the step label text from the SSE event', () => {
     renderBar();
-    sendEvent({ type: 'step', step: 'Writing PDF…', current: 1, total: 2 });
-    expect(screen.getByText('Writing PDF…')).toBeInTheDocument();
+    sendEvent({ type: 'step', step: 'Writing HTML…', current: 1, total: 2 });
+    expect(screen.getByText('Writing HTML…')).toBeInTheDocument();
   });
 
   it('updates progress bar when multiple step events arrive', () => {
