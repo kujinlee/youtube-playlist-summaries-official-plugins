@@ -20,7 +20,6 @@ const baseVideo: Video = {
   },
   overallScore: 3.4,
   summaryMd: 'summary.md',
-  deepDiveMd: null,
   processedAt: '2024-01-01T00:00:00.000Z',
 };
 

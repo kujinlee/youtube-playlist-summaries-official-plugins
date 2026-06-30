@@ -17,7 +17,6 @@ function makeVideo(id: string, processedAt: string, summaryMd: string | null): V
     ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
     overallScore: 3,
     summaryMd,
-    deepDiveMd: null,
     processedAt,
   };
 }
@@ -94,7 +93,6 @@ describe('runPhaseB', () => {
       ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
       overallScore: 3,
       summaryMd: null,
-      deepDiveMd: null,
       processedAt: new Date('2025-01-01').toISOString(),
       ...overrides,
     };

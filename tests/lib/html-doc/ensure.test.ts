@@ -15,7 +15,7 @@ jest.mock('../../../lib/index-store');
 const videoBase = {
   id: 'vid11111111', title: 'T', youtubeUrl: 'https://youtu.be/x', language: 'en' as const,
   durationSeconds: 5, archived: false, ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
-  overallScore: 3, summaryMd: 'base.md', deepDiveMd: null,
+  overallScore: 3, summaryMd: 'base.md',
   processedAt: '2026-01-01T00:00:00.000Z', personalScore: 5,
 };
 

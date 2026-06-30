@@ -7,7 +7,7 @@ function v(id: string, over: Partial<Video> = {}): Video {
   return {
     id, title: `T${id}`, youtubeUrl: `https://youtu.be/${id}`, language: 'en', durationSeconds: 1,
     archived: false, ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
-    overallScore: 3, summaryMd: `${id}.md`, deepDiveMd: null,
+    overallScore: 3, summaryMd: `${id}.md`,
     summaryHtml: null, processedAt: '2026-06-29T00:00:00.000Z', docVersion: { major: 3, minor: 3 },
     ...over,
   } as Video;

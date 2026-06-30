@@ -35,7 +35,6 @@ function makeVideo(overrides: Partial<Video> = {}): Video {
     ratings: BASE_RATINGS,
     overallScore: 3.8,
     summaryMd: 'deep-dive-into-llms.md',
-    deepDiveMd: null,
     summaryHtml: null,
     processedAt: '2026-01-01T00:00:00.000Z',
     ...overrides,

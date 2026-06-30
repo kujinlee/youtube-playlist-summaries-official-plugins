@@ -122,7 +122,7 @@ export function runPhaseB(outputFolder: string): { renamed: number; conflicts: s
       if (op.field !== 'model') fieldUpdates[op.field] = op.to;   // ROOT-relative — B1
       if (op.field === 'summaryMd') mdNewName = path.basename(op.to);
       if (op.field === 'model') modelTargetAbs = targetAbs;
-      if (op.field === 'summaryHtml' || op.field === 'deepDiveHtml' || op.field === 'digDeeperHtml') {
+      if (op.field === 'summaryHtml' || op.field === 'digDeeperHtml') {
         htmlTargetsAbs.push(targetAbs);
       }
     }

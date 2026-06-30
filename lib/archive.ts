@@ -17,7 +17,7 @@ function getFilePairs(outputFolder: string, videoId: string): FilePair[] {
   const base = path.resolve(outputFolder);
   const pairs: FilePair[] = [];
 
-  for (const relPath of [video.summaryMd, video.deepDiveMd]) {
+  for (const relPath of [video.summaryMd]) {
     if (!relPath) continue;
     const root = path.resolve(path.join(base, relPath));
     // Guard: resolved root must stay within outputFolder
@@ -65,7 +65,7 @@ function getCachedHtmlPaths(outputFolder: string, videoId: string): string[] {
   if (!video) return [];
   const base = path.resolve(outputFolder);
   const out: string[] = [];
-  for (const md of [video.summaryMd, video.deepDiveMd]) {
+  for (const md of [video.summaryMd]) {
     if (!md) continue;
     const rel = path.join('htmls', `${md.replace(/\.md$/, '')}.html`);
     const abs = path.resolve(base, rel);

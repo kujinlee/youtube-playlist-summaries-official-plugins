@@ -55,7 +55,6 @@ function makeVideo(id: string, overrides: Partial<Video> = {}): Video {
     ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
     overallScore: 3,
     summaryMd: 'summary.md',
-    deepDiveMd: null,
     tldr: 'Quick reference content',
     processedAt: '2024-01-01T00:00:00.000Z',
     ...overrides,

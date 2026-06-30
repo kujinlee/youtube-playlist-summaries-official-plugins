@@ -17,7 +17,6 @@ function makeVideo(id: string, processedAt: string, summaryMd: string | null) {
     ratings: { usefulness: 3 as const, depth: 3 as const, originality: 3 as const, recency: 3 as const, completeness: 3 as const },
     overallScore: 3,
     summaryMd,
-    deepDiveMd: null,
     processedAt,
   };
 }

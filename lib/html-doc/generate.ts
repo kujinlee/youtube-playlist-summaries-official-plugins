@@ -54,7 +54,7 @@ export async function runHtmlDoc(
   });
 
   onProgress({ type: 'step', videoId, step: 'Rendering HTML…', current: 3, total: 3 });
-  const html = renderMagazineHtml(parsed, model, !!video.deepDiveMd);
+  const html = renderMagazineHtml(parsed, model);
 
   const htmlFilename = `htmls/${base}.html`;
   const htmlDir = path.join(outputFolder, 'htmls');
