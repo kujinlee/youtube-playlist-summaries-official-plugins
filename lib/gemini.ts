@@ -9,7 +9,6 @@ import { buildIndexedTranscript, resolveTranscriptTokens } from './transcript-ti
 import type { TranscriptSegment } from './transcript-timestamps';
 
 const SUMMARY_MODEL = process.env.GEMINI_SUMMARY_MODEL ?? 'gemini-2.5-flash';
-const DEEPDIVE_MODEL = process.env.GEMINI_DEEPDIVE_MODEL ?? 'gemini-2.5-pro';
 const TRANSCRIBE_MODEL = process.env.GEMINI_TRANSCRIBE_MODEL ?? 'gemini-2.5-flash';
 const REQUEST_TIMEOUT_MS = 60_000;
 
