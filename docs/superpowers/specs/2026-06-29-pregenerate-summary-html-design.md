@@ -74,15 +74,21 @@ covers the bulk-re-ingest edge case.
 
 In `runIngestion`'s per-video loop (`lib/pipeline.ts`), immediately **after** `upsertVideo(...)`
 (line 354) and the `'Saved'` step — at which point the video is in the index with `summaryMd` set,
-which `ensureHtmlDoc` requires.
+which `runHtmlDoc` requires.
 
 ### What
 
-Call the canonical, version-aware entry point **`ensureHtmlDoc(videoId, outputFolder, onProgress)`**
-(`lib/html-doc/ensure.ts:18`), not `runHtmlDoc` directly — keeping version semantics centralized.
-A freshly-ingested video (`summaryMd` set, no `summaryHtml`, `docVersion === CURRENT_DOC_VERSION`)
-lands deterministically on `ensureHtmlDoc`'s cheap fresh-build branch (Path B → `runHtmlDoc`), which
-performs the stage-2 transform, writes the model envelope + HTML, and sets `summaryHtml`.
+Call **`runHtmlDoc(videoId, outputFolder, onProgress)`** (`lib/html-doc/generate.ts:11`) directly.
+
+Rationale — **not** `ensureHtmlDoc`: `lib/html-doc/ensure.ts:4` imports `writeSummaryDoc` from
+`../pipeline`, so `pipeline.ts → ensure.ts → pipeline.ts` would be a **circular import**.
+`generate.ts` (which exports `runHtmlDoc`) does not import `pipeline.ts` — no cycle. And the version
+logic in `ensureHtmlDoc` is a **no-op at ingest** anyway: a freshly-ingested video (`summaryMd` set,
+no `summaryHtml`, `docVersion === CURRENT_DOC_VERSION`) deterministically takes `ensureHtmlDoc`'s
+Path B → `runHtmlDoc`. So calling `runHtmlDoc` directly does the identical work — performs the
+stage-2 transform, writes the model envelope + HTML, sets `summaryHtml` — with no cycle and no
+dynamic-import workaround. (`docVersion` is already current, so the docVersion update `ensureHtmlDoc`
+would do is itself a no-op.)
 
 ### How (control flow)
 
@@ -96,8 +102,8 @@ if (process.env.PREGEN_SUMMARY_HTML !== 'off') {
   onProgress({ type: 'step', videoId, title, step: 'Generating HTML doc…',
                current: newIndex, total: newTotal });
   try {
-    await ensureHtmlDoc(meta.videoId, outputFolder, () => {});  // no-op adapter — swallow its
-                                                                // own start/step/done events
+    await runHtmlDoc(meta.videoId, outputFolder, () => {});  // no-op adapter — swallow its
+                                                             // own start/step/done events
   } catch (err) {
     // best-effort: .md already saved + video already upserted; leave summaryHtml unset so the
     // menu falls back to on-demand generation. Surface a non-fatal note, never fail the video.
@@ -110,7 +116,7 @@ onProgress({ type: 'step', videoId, title, step: 'Saved', current: newIndex, tot
 ```
 
 Notes:
-- The **no-op adapter** (`() => {}`) is required: `ensureHtmlDoc`/`runHtmlDoc` emit their own
+- The **no-op adapter** (`() => {}`) is required: `runHtmlDoc` emits its own
   progress shape (`{type:'start'}`, `current:1,total:3`) which would corrupt the ingest stream's
   "video N of M" counter. The ingest stream surfaces a single coarse `'Generating HTML doc…'` step.
 
@@ -158,13 +164,13 @@ per project mocking policy. Enumerated behaviors (contract for the plan's test l
 
 | # | Behavior | Trigger | Expected |
 |---|---|---|---|
-| 1 | Pre-gen runs for a new video | ingest a new video, flag unset/on | `ensureHtmlDoc` invoked once for that videoId; `htmls/<base>.html` written; index `summaryHtml` set |
+| 1 | Pre-gen runs for a new video | ingest a new video, flag unset/on | `runHtmlDoc` invoked once with that videoId + outputFolder (its own tests cover artifact production + `summaryHtml`) |
 | 2 | Model + HTML artifacts produced | new video ingested | `models/<base>.json` and `htmls/<base>.html` exist on disk |
 | 3 | Coarse SSE step emitted | new video ingested | a `{type:'step', step:'Generating HTML doc…', current, total}` event on the ingest stream with the video counter intact |
-| 4 | `ensureHtmlDoc` internal progress does not leak | new video ingested | no `{type:'start'}` / `current:1,total:3` events on the ingest stream (no-op adapter) |
+| 4 | `runHtmlDoc` internal progress does not leak | new video ingested | a sentinel event emitted by the mocked `runHtmlDoc`'s `onProgress` arg never appears on the ingest stream (proves the no-op adapter, not the real `onProgress`, was passed) |
 | 5 | Best-effort on Gemini failure | stage-2 transform throws | video still ingested (`.md` present, video in index), batch continues, `summaryHtml` unset, non-fatal `'HTML doc deferred…'` step emitted |
 | 6 | Failure does not abort batch | first new video's pre-gen throws, second succeeds | second video fully ingested + pre-genned |
-| 7 | Opt-out disables pre-gen | `PREGEN_SUMMARY_HTML='off'`, ingest new video | `ensureHtmlDoc` NOT invoked; `.md` written; `summaryHtml` unset; no `'Generating HTML doc…'` step |
+| 7 | Opt-out disables pre-gen | `PREGEN_SUMMARY_HTML='off'`, ingest new video | `runHtmlDoc` NOT invoked; `.md` written; no `'Generating HTML doc…'` step |
 | 8 | Already-indexed videos skipped | re-ingest a playlist with existing videos | no pre-gen for already-indexed videos (loop `continue` at :303 still short-circuits) |
 | 9 | Order: Saved is terminal | new video ingested | `'Generating HTML doc…'` precedes `'Saved'` for that video |
 | 10 | Cancellation respected | abort signal mid-batch | no pre-gen after cancellation (existing `signal.aborted` check at :294 still governs the loop) |
