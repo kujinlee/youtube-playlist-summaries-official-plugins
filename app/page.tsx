@@ -7,7 +7,6 @@ import { FILTER_DEFAULTS } from '@/types';
 import BackfillOverlay from '@/components/BackfillOverlay';
 import BatchDocStatusBar from '@/components/BatchDocStatusBar';
 import BulkActionBar from '@/components/BulkActionBar';
-import DeepDiveStatusBar from '@/components/DeepDiveStatusBar';
 import FilterBar from '@/components/FilterBar';
 import Header from '@/components/Header';
 import HtmlDocStatusBar from '@/components/HtmlDocStatusBar';
@@ -41,7 +40,6 @@ export default function Page() {
   const [filters, setFilters] = useState<FilterState>(FILTER_DEFAULTS);
   const [currentPlaylistUrl, setCurrentPlaylistUrl] = useState('');
   const [ingest, setIngest] = useState<IngestState>(IDLE_INGEST);
-  const [deepDive, setDeepDive] = useState<{ videoId: string; jobId: string; title: string; viewUrl: string } | null>(null);
   const [htmlJob, setHtmlJob] = useState<{ videoId: string; jobId: string; title: string; viewUrl: string } | null>(null);
   // The row whose doc job is actively running, driving its ⏳. Set on job start; cleared on
   // close OR when a status bar reports a terminal error (so a failed job stops showing ⏳ while
@@ -325,34 +323,6 @@ export default function Page() {
     [],
   );
 
-  const handleDeepDive = useCallback(
-    async (videoId: string) => {
-      const title = videos.find((v) => v.id === videoId)?.title ?? '';
-      const viewUrl = `/api/html/${encodeURIComponent(videoId)}?outputFolder=${encodeURIComponent(outputFolder)}&type=deep-dive`;
-      try {
-        const res = await fetch(`/api/videos/${encodeURIComponent(videoId)}/deep-dive`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ outputFolder }),
-        });
-        if (!res.ok || !mountedRef.current) return;
-        const data = await res.json();
-        setDeepDive({ videoId, jobId: data.jobId, title, viewUrl });
-        setBusyVideoId(videoId);
-      } catch {
-        // ignore — no status bar opened
-      }
-    },
-    [outputFolder, videos],
-  );
-
-  const handleDeepDiveClose = useCallback(() => {
-    setDeepDive(null);
-    setBusyVideoId(null);
-    const { col, order } = sortRef.current;
-    fetchVideos(outputFolder, col, order);
-  }, [fetchVideos, outputFolder]);
-
   const handleGenerateHtml = useCallback(
     async (videoId: string) => {
       const title = videos.find((v) => v.id === videoId)?.title ?? '';
@@ -593,7 +563,6 @@ export default function Page() {
           baseOutputFolder={baseOutputFolder}
           showArchive={true}
           busyVideoId={busyVideoId}
-          onDeepDive={handleDeepDive}
           onArchive={handleArchive}
           onGenerateHtml={handleGenerateHtml}
           sortColumn={sortColumn}
@@ -609,16 +578,6 @@ export default function Page() {
         />
       </div>
 
-      {deepDive && (
-        <DeepDiveStatusBar
-          videoId={deepDive.videoId}
-          jobId={deepDive.jobId}
-          title={deepDive.title}
-          viewUrl={deepDive.viewUrl}
-          onClose={handleDeepDiveClose}
-          onError={() => setBusyVideoId(null)}
-        />
-      )}
       {htmlJob && (
         <HtmlDocStatusBar
           videoId={htmlJob.videoId}

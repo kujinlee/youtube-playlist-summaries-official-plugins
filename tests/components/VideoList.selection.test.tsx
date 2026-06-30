@@ -15,7 +15,7 @@ function v(id: string, over: Partial<Video> = {}): Video {
 
 const baseProps = {
   outputFolder: '/p', baseOutputFolder: '/p', showArchive: true,
-  onDeepDive: () => {}, onArchive: () => {}, onGenerateHtml: () => {},
+  onArchive: () => {}, onGenerateHtml: () => {},
   selected: new Set<string>(), onToggleSelect: () => {}, onSelectAllNeeding: () => {},
 };
 

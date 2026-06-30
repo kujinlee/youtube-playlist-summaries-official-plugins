@@ -3,13 +3,11 @@
 import type { Video } from '@/types';
 import AskGeminiMenuItem from './AskGeminiMenuItem';
 import { CURRENT_DOC_VERSION, isOlder } from '@/lib/doc-version';
-import { CURRENT_DEEP_DIVE_VERSION } from '@/lib/deep-dive/version';
 
 interface VideoMenuProps {
   video: Video;
   outputFolder: string;
   baseOutputFolder: string;
-  onDeepDive: (videoId: string) => void;
   onArchive: (videoId: string, action: 'archive' | 'unarchive') => void;
   onEditCorrections: () => void;
   onGenerateHtml: (videoId: string) => void;
@@ -39,13 +37,10 @@ function obsidianHref(baseOutputFolder: string, outputFolder: string, file: stri
 const itemClass = 'block w-full px-4 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-700';
 const disabledClass = 'block w-full px-4 py-2 text-left text-sm text-zinc-500 cursor-not-allowed';
 
-export default function VideoMenu({ video, outputFolder, baseOutputFolder, onDeepDive, onArchive, onEditCorrections, onGenerateHtml, onClose, busy = false }: VideoMenuProps) {
-  const hasDeepDive = !!video.deepDiveMd;
+export default function VideoMenu({ video, outputFolder, baseOutputFolder, onArchive, onEditCorrections, onGenerateHtml, onClose, busy = false }: VideoMenuProps) {
   const summaryFile = video.summaryMd?.replace(/\.md$/, '') ?? video.id;
-  const deepDiveFile = video.deepDiveMd?.replace(/\.md$/, '') ?? `${video.id}-deep-dive`;
   const hasSummary = !!video.summaryMd;
   const htmlViewHref = `/api/html/${encodeURIComponent(video.id)}?outputFolder=${encodeURIComponent(outputFolder)}&type=summary`;
-  const deepDiveHtmlHref = `/api/html/${encodeURIComponent(video.id)}?outputFolder=${encodeURIComponent(outputFolder)}&type=deep-dive`;
 
   return (
     <ul
@@ -74,32 +69,6 @@ export default function VideoMenu({ video, outputFolder, baseOutputFolder, onDee
             ? <a href={htmlViewHref} onClick={onClose} target="_blank" rel="noopener noreferrer" className={itemClass}>HTML doc</a>
             : <button type="button" onClick={() => { onGenerateHtml(video.id); onClose(); }} className={itemClass}>HTML doc</button>;
         })()}
-      </li>
-      <li role="none">
-        {(() => {
-          const current = !!video.deepDiveHtml && !isOlder(video.deepDiveVersion ?? { major: 1, minor: 0 }, CURRENT_DEEP_DIVE_VERSION);
-          if (busy) return <span aria-disabled="true" className={disabledClass}>Deep Dive doc <span aria-hidden="true">⏳</span></span>;
-          return current
-            ? <a href={deepDiveHtmlHref} onClick={onClose} target="_blank" rel="noopener noreferrer" className={itemClass}>Deep Dive doc</a>
-            : <button type="button" onClick={() => { onDeepDive(video.id); onClose(); }} className={itemClass}>Deep Dive doc</button>;
-        })()}
-      </li>
-      <li role="none">
-        {hasDeepDive ? (
-          <a href={obsidianHref(baseOutputFolder, outputFolder, deepDiveFile)} onClick={onClose} target="_blank" rel="noopener noreferrer" className={itemClass}>
-            Open Deep Dive in Obsidian
-          </a>
-        ) : (
-          <a
-            href="#"
-            aria-disabled="true"
-            tabIndex={-1}
-            onClick={(e) => e.preventDefault()}
-            className={disabledClass}
-          >
-            Open Deep Dive in Obsidian
-          </a>
-        )}
       </li>
       {video.summaryMd && (
         <li role="none">

@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import { assertOutputFolder, assertVideoId, readIndex } from '../../../../lib/index-store';
-import { runDeepDiveHtml } from '../../../../lib/html-doc/generate-deep-dive';
 import { renderDigDeeperDoc } from '../../../../lib/html-doc/render-dig-deeper';
 import { GENERATOR_VERSION } from '../../../../lib/html-doc/render';
 import { reRenderSummaryHtml } from '../../../../lib/html-doc/rerender';
@@ -43,7 +42,7 @@ export async function GET(request: Request, { params }: Params) {
   }
 
   const type = searchParams.get('type');
-  if (type !== 'summary' && type !== 'deep-dive' && type !== 'dig-deeper') {
+  if (type !== 'summary' && type !== 'dig-deeper') {
     return new Response(JSON.stringify({ error: 'unsupported or missing type' }), { status: 400 });
   }
 
@@ -197,24 +196,6 @@ export async function GET(request: Request, { params }: Params) {
     return serveHtml(renderDigDeeperDoc({ summary: parsed, envelope, dug, mdPath: summaryMdPath, videoId, language: video.language, cropMap }));
   }
 
-  // type === 'deep-dive'
-  const stored = video.deepDiveHtml;
-  if (stored) {
-    const bad = guard(stored);
-    if (bad) return bad;
-    try {
-      return serveHtml(fs.readFileSync(path.resolve(outputFolder, stored), 'utf-8'));
-    } catch {
-      /* fall through to lazy render */
-    }
-  }
-  if (!video.deepDiveMd) {
-    return new Response(JSON.stringify({ error: 'deep dive not available' }), { status: 404 });
-  }
-  try {
-    const { html } = await runDeepDiveHtml(videoId, outputFolder);
-    return serveHtml(html);
-  } catch {
-    return new Response(JSON.stringify({ error: 'failed to render deep dive html' }), { status: 500 });
-  }
+  // Unreachable: the type guard above only admits 'summary' | 'dig-deeper'.
+  return new Response(JSON.stringify({ error: 'unsupported or missing type' }), { status: 400 });
 }

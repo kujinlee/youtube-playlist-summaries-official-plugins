@@ -9,7 +9,6 @@ jest.mock('@/components/VideoRow', () => {
     video,
     rank,
     outputFolder,
-    onDeepDive,
     onArchive,
     dimUnscored,
     onAnnotationChange,
@@ -19,14 +18,12 @@ jest.mock('@/components/VideoRow', () => {
     outputFolder: string;
     baseOutputFolder: string;
     dimUnscored: boolean;
-    onDeepDive: (videoId: string) => void;
     onArchive: (videoId: string, action: 'archive' | 'unarchive') => void;
     onAnnotationChange: (videoId: string, patch: unknown) => void;
   }) => (
     <tr data-testid={`row-${video.id}`} data-dim={String(dimUnscored)}>
       <td>{rank}</td>
       <td>{outputFolder}</td>
-      <td><button onClick={() => onDeepDive(video.id)}>deep-dive</button></td>
       <td><button onClick={() => onArchive(video.id, 'archive')}>archive</button></td>
       <td><button onClick={() => onAnnotationChange(video.id, { personalScore: 4 })}>annotate</button></td>
     </tr>
@@ -56,7 +53,6 @@ const baseVideo = makeVideo('base-v1');
 function renderList({
   videos = [] as Video[],
   showArchive = false,
-  onDeepDive = jest.fn(),
   onArchive = jest.fn(),
   onGenerateHtml = jest.fn(),
 } = {}) {
@@ -66,7 +62,6 @@ function renderList({
       outputFolder={OUTPUT_FOLDER}
       baseOutputFolder={OUTPUT_FOLDER}
       showArchive={showArchive}
-      onDeepDive={onDeepDive}
       onArchive={onArchive}
       onGenerateHtml={onGenerateHtml}
     />,
@@ -104,13 +99,6 @@ describe('VideoList — core rendering', () => {
     expect(screen.getByTestId('row-v1')).toHaveTextContent('10');
     expect(screen.getByTestId('row-v2')).toHaveTextContent('20');
     expect(screen.getByTestId('row-v3')).toHaveTextContent('30');
-  });
-
-  it('threads onDeepDive callback to VideoRow (prop-forwarding)', () => {
-    const onDeepDive = jest.fn();
-    renderList({ videos: [makeVideo('v1')], onDeepDive });
-    fireEvent.click(screen.getByRole('button', { name: /deep-dive/i }));
-    expect(onDeepDive).toHaveBeenCalledWith('v1');
   });
 
   it('threads onArchive callback to VideoRow (prop-forwarding)', () => {
@@ -186,7 +174,6 @@ describe('VideoList — sort column headers', () => {
         outputFolder={OUTPUT_FOLDER}
         baseOutputFolder={OUTPUT_FOLDER}
         showArchive={true}
-        onDeepDive={jest.fn()}
         onArchive={jest.fn()}
         onGenerateHtml={jest.fn()}
         sortColumn={sortColumn}
@@ -305,7 +292,6 @@ describe('VideoList — sort column headers', () => {
         outputFolder={OUTPUT_FOLDER}
         baseOutputFolder={OUTPUT_FOLDER}
         showArchive={true}
-        onDeepDive={jest.fn()}
         onArchive={jest.fn()}
         onGenerateHtml={jest.fn()}
       />,
@@ -330,7 +316,6 @@ describe('VideoList — archive visibility (showArchive=true)', () => {
         outputFolder={OUTPUT_FOLDER}
         baseOutputFolder={OUTPUT_FOLDER}
         showArchive={false}
-        onDeepDive={jest.fn()}
         onArchive={jest.fn()}
         onGenerateHtml={jest.fn()}
       />,
@@ -343,7 +328,6 @@ describe('VideoList — archive visibility (showArchive=true)', () => {
         outputFolder={OUTPUT_FOLDER}
         baseOutputFolder={OUTPUT_FOLDER}
         showArchive={true}
-        onDeepDive={jest.fn()}
         onArchive={jest.fn()}
         onGenerateHtml={jest.fn()}
       />,
@@ -356,7 +340,6 @@ describe('VideoList — archive visibility (showArchive=true)', () => {
         outputFolder={OUTPUT_FOLDER}
         baseOutputFolder={OUTPUT_FOLDER}
         showArchive={false}
-        onDeepDive={jest.fn()}
         onArchive={jest.fn()}
         onGenerateHtml={jest.fn()}
       />,
@@ -368,19 +351,19 @@ describe('VideoList — archive visibility (showArchive=true)', () => {
 describe('My Score and Note column headers', () => {
   it('renders a My Score column header', () => {
     render(<VideoList videos={[makeVideo('v1')]} outputFolder="/tmp" baseOutputFolder="/tmp"
-      showArchive={true} onDeepDive={jest.fn()} onArchive={jest.fn()} onGenerateHtml={jest.fn()} />);
+      showArchive={true} onArchive={jest.fn()} onGenerateHtml={jest.fn()} />);
     expect(screen.getByText('My Score')).toBeInTheDocument();
   });
 
   it('renders a Note column header', () => {
     render(<VideoList videos={[makeVideo('v1')]} outputFolder="/tmp" baseOutputFolder="/tmp"
-      showArchive={true} onDeepDive={jest.fn()} onArchive={jest.fn()} onGenerateHtml={jest.fn()} />);
+      showArchive={true} onArchive={jest.fn()} onGenerateHtml={jest.fn()} />);
     expect(screen.getByText('Note')).toBeInTheDocument();
   });
 
   it('Note column has no sort button', () => {
     render(<VideoList videos={[makeVideo('v1')]} outputFolder="/tmp" baseOutputFolder="/tmp"
-      showArchive={true} onDeepDive={jest.fn()} onArchive={jest.fn()} onGenerateHtml={jest.fn()}
+      showArchive={true} onArchive={jest.fn()} onGenerateHtml={jest.fn()}
       onSort={jest.fn()} />);
     // My Score has a sort button; Note does not
     expect(screen.queryByRole('button', { name: /Note/i })).not.toBeInTheDocument();
@@ -389,7 +372,7 @@ describe('My Score and Note column headers', () => {
   it('first click on My Score header calls onSort with desc order', () => {
     const onSort = jest.fn();
     render(<VideoList videos={[makeVideo('v1')]} outputFolder="/tmp" baseOutputFolder="/tmp"
-      showArchive={true} onDeepDive={jest.fn()} onArchive={jest.fn()} onGenerateHtml={jest.fn()} onSort={onSort} />);
+      showArchive={true} onArchive={jest.fn()} onGenerateHtml={jest.fn()} onSort={onSort} />);
     fireEvent.click(screen.getByRole('button', { name: /my score/i }));
     expect(onSort).toHaveBeenCalledWith('personalScore', 'desc');
   });
@@ -400,7 +383,7 @@ describe('dimUnscored prop forwarding', () => {
     const video = { ...baseVideo, personalScore: undefined };
     render(<VideoList videos={[video]} outputFolder="/tmp" baseOutputFolder="/tmp"
       showArchive={true} minPersonalScore={3}
-      onDeepDive={jest.fn()} onArchive={jest.fn()} onGenerateHtml={jest.fn()} />);
+      onArchive={jest.fn()} onGenerateHtml={jest.fn()} />);
     expect(screen.getByTestId(`row-${video.id}`)).toHaveAttribute('data-dim', 'true');
   });
 
@@ -408,7 +391,7 @@ describe('dimUnscored prop forwarding', () => {
     const video = { ...baseVideo, personalScore: undefined };
     render(<VideoList videos={[video]} outputFolder="/tmp" baseOutputFolder="/tmp"
       showArchive={true} minPersonalScore={0}
-      onDeepDive={jest.fn()} onArchive={jest.fn()} onGenerateHtml={jest.fn()} />);
+      onArchive={jest.fn()} onGenerateHtml={jest.fn()} />);
     expect(screen.getByTestId(`row-${video.id}`)).toHaveAttribute('data-dim', 'false');
   });
 });
@@ -417,7 +400,7 @@ describe('onAnnotationChange forwarding', () => {
   it('threads onAnnotationChange to VideoRow', () => {
     const onAnnotationChange = jest.fn();
     render(<VideoList videos={[baseVideo]} outputFolder="/tmp" baseOutputFolder="/tmp"
-      showArchive={true} onDeepDive={jest.fn()} onArchive={jest.fn()} onGenerateHtml={jest.fn()}
+      showArchive={true} onArchive={jest.fn()} onGenerateHtml={jest.fn()}
       onAnnotationChange={onAnnotationChange} />);
     fireEvent.click(screen.getByRole('button', { name: /annotate/i }));
     expect(onAnnotationChange).toHaveBeenCalledWith(baseVideo.id, { personalScore: 4 });
