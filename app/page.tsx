@@ -12,7 +12,7 @@ import FilterBar from '@/components/FilterBar';
 import Header from '@/components/Header';
 import HtmlDocStatusBar from '@/components/HtmlDocStatusBar';
 import VideoList from '@/components/VideoList';
-import { summaryNeedsWork } from '@/lib/html-doc/eligibility';
+import { summaryNeedsWork, videoNeedsBatchWork } from '@/lib/html-doc/eligibility';
 
 type IngestStatus = 'idle' | 'running' | 'error';
 
@@ -390,17 +390,17 @@ export default function Page() {
   }, []);
 
   const selectAllNeeding = useCallback((visible: Video[]) => {
-    const needing = visible.filter(summaryNeedsWork).map((x) => x.id);
+    const needing = visible.filter((x) => videoNeedsBatchWork(x, batchMode)).map((x) => x.id);
     setSelected((prev) => {
       const allSel = needing.length > 0 && needing.every((id) => prev.has(id));
       return allSel ? new Set() : new Set(needing); // toggle: clear if all already selected
     });
-  }, []);
+  }, [batchMode]);
 
   const clearSelection = useCallback(() => setSelected(new Set()), []);
 
   const handleBatchGenerate = useCallback(async () => {
-    const ids = videos.filter((x) => selected.has(x.id) && summaryNeedsWork(x)).map((x) => x.id);
+    const ids = videos.filter((x) => selected.has(x.id) && videoNeedsBatchWork(x, batchMode)).map((x) => x.id);
     if (ids.length === 0) return;
     try {
       const res = await fetch('/api/videos/batch-docs', {
@@ -478,7 +478,7 @@ export default function Page() {
   const backfillCount = videos.filter((v) => v.summaryMd && !v.tldr).length;
 
   const selectedVideos = videos.filter((x) => selected.has(x.id));
-  const willGenerateCount = selectedVideos.filter(summaryNeedsWork).length;
+  const willGenerateCount = selectedVideos.filter((x) => videoNeedsBatchWork(x, batchMode)).length;
   const skipCount = selectedVideos.length - willGenerateCount;
 
   return (
@@ -605,6 +605,7 @@ export default function Page() {
           onToggleSelect={toggleSelect}
           onSelectAllNeeding={selectAllNeeding}
           activeBatchVideoIds={batchJob?.videoIds ?? EMPTY_SET}
+          batchMode={batchMode}
         />
       </div>
 
