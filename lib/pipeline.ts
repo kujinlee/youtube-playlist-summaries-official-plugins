@@ -10,6 +10,7 @@ import { applySerial, padSerial } from './serial-filename';
 import type { ProgressEvent, Video, VideoMeta, RatingValue, VideoType, Audience, GeminiSummaryResponse } from '../types';
 import { CURRENT_DOC_VERSION } from './doc-version';
 import { padDividers } from './markdown-dividers';
+import { runHtmlDoc } from './html-doc/generate';
 
 const VALID_VIDEO_TYPES: VideoType[] = ['Tutorial', 'Analysis', 'Case Study', 'Framework', 'Demo', 'Interview'];
 const VALID_AUDIENCES: Audience[] = ['Beginner', 'Intermediate', 'Advanced'];
@@ -354,6 +355,12 @@ export async function runIngestion(
       upsertVideo(outputFolder, video);
       // Mark as processed so within-run duplicates (same video appearing twice in the playlist) are skipped.
       alreadyIndexed.add(meta.videoId);
+
+      // Pre-generate the summary HTML doc so it opens instantly (no on-demand Gemini wait).
+      // runHtmlDoc (NOT ensureHtmlDoc — circular import) is called with a no-op onProgress so its
+      // own start/step/done events never corrupt the ingest stream's "video N of M" counter.
+      onProgress({ type: 'step', videoId: meta.videoId, title: meta.title, step: 'Generating HTML doc…', current: newIndex, total: newTotal });
+      await runHtmlDoc(meta.videoId, outputFolder, () => {});
 
       onProgress({ type: 'step', videoId: meta.videoId, title: meta.title, step: 'Saved', current: newIndex, total: newTotal });
     } catch (err) {

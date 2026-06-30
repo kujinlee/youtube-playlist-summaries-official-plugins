@@ -8,6 +8,7 @@ jest.mock('../../lib/youtube');
 jest.mock('../../lib/gemini');
 jest.mock('../../lib/pdf');
 jest.mock('../../lib/index-store');
+jest.mock('../../lib/html-doc/generate');
 
 import { runIngestion, slugify, formatDuration, parseFrontmatterField, reconstructVideo, recoverOrphanedVideos, insertQuickViewCallout, stripQuickViewCallout, writeSummaryDoc } from '../../lib/pipeline';
 import * as fsReal from 'fs';
@@ -15,6 +16,7 @@ import * as youtube from '../../lib/youtube';
 import * as gemini from '../../lib/gemini';
 import * as pdf from '../../lib/pdf';
 import * as indexStore from '../../lib/index-store';
+import * as htmlDocGenerate from '../../lib/html-doc/generate';
 
 const mockFetchPlaylistVideos = jest.mocked(youtube.fetchPlaylistVideos);
 const mockFetchTranscriptSegments = jest.mocked(youtube.fetchTranscriptSegments);
@@ -27,6 +29,7 @@ const mockUpsertVideo = jest.mocked(indexStore.upsertVideo);
 const mockAssertOutputFolder = jest.mocked(indexStore.assertOutputFolder);
 const mockReadIndex = jest.mocked(indexStore.readIndex);
 const mockWriteIndex = jest.mocked(indexStore.writeIndex);
+const mockRunHtmlDoc = jest.mocked(htmlDocGenerate.runHtmlDoc);
 
 const PLAYLIST_URL = 'https://youtube.com/playlist?list=PLtest';
 
@@ -90,6 +93,7 @@ describe('runIngestion', () => {
     mockReadIndex.mockReturnValue({ playlistUrl: '', outputFolder, videos: [] });
     mockWriteIndex.mockImplementation(() => {});
     mockExtractQuickView.mockResolvedValue({ tldr: 'QV tldr', takeaways: ['qa', 'qb'] });
+    mockRunHtmlDoc.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -806,6 +810,61 @@ describe('runIngestion', () => {
       await expect(runIngestion(PLAYLIST_URL, outputFolder, () => {})).resolves.toBeUndefined();
       expect(lastWrittenVideos().find((v) => v.id === 'vidA')?.playlistIndex).toBe(7);
     });
+
+  describe('summary HTML pre-generation', () => {
+    it('calls runHtmlDoc once per new video with (videoId, outputFolder, noop)', async () => {
+      mockFetchPlaylistVideos.mockResolvedValue([makeVideoMeta('vid1'), makeVideoMeta('vid2')]);
+      mockFetchTranscriptSegments.mockResolvedValue([{ text: 'transcript', offset: 0, duration: 5 }]);
+      mockGenerateSummary.mockResolvedValue(makeSummaryResponse());
+
+      await runIngestion(PLAYLIST_URL, outputFolder, () => {});
+
+      expect(mockRunHtmlDoc).toHaveBeenCalledTimes(2);
+      expect(mockRunHtmlDoc).toHaveBeenCalledWith('vid1', outputFolder, expect.any(Function));
+      expect(mockRunHtmlDoc).toHaveBeenCalledWith('vid2', outputFolder, expect.any(Function));
+    });
+
+    it('emits a "Generating HTML doc…" step before "Saved" for each new video', async () => {
+      mockFetchPlaylistVideos.mockResolvedValue([makeVideoMeta('vid1')]);
+      mockFetchTranscriptSegments.mockResolvedValue([{ text: 'transcript', offset: 0, duration: 5 }]);
+      mockGenerateSummary.mockResolvedValue(makeSummaryResponse());
+
+      const events: ProgressEvent[] = [];
+      await runIngestion(PLAYLIST_URL, outputFolder, (e) => events.push(e));
+
+      const steps = events
+        .filter((e): e is Extract<ProgressEvent, { type: 'step' }> => e.type === 'step' && 'videoId' in e && e.videoId === 'vid1')
+        .map((e) => ('step' in e ? e.step : ''));
+      const genIdx = steps.indexOf('Generating HTML doc…');
+      const savedIdx = steps.indexOf('Saved');
+      expect(genIdx).toBeGreaterThanOrEqual(0);
+      expect(savedIdx).toBeGreaterThan(genIdx);
+    });
+
+    it('passes a no-op progress callback to runHtmlDoc (no internal-progress leak)', async () => {
+      mockFetchPlaylistVideos.mockResolvedValue([makeVideoMeta('vid1')]);
+      mockFetchTranscriptSegments.mockResolvedValue([{ text: 'transcript', offset: 0, duration: 5 }]);
+      mockGenerateSummary.mockResolvedValue(makeSummaryResponse());
+      // The mocked runHtmlDoc captures the onProgress it is GIVEN and fires a sentinel on it. If the
+      // pipeline passed the real ingest callback (not a no-op), the sentinel would surface on the
+      // ingest stream. Asserting call-count + distinct-callback + sentinel-absence together closes the
+      // false-green hole where this test could pass even if runHtmlDoc were never called.
+      let received: ((e: ProgressEvent) => void) | undefined;
+      mockRunHtmlDoc.mockImplementation(async (_id, _folder, onProgress) => {
+        received = onProgress;
+        onProgress({ type: 'step', step: '__SENTINEL__', current: 1, total: 3, videoId: 'vid1', title: 'x' } as ProgressEvent);
+      });
+
+      const events: ProgressEvent[] = [];
+      const outer = (e: ProgressEvent) => events.push(e);
+      await runIngestion(PLAYLIST_URL, outputFolder, outer);
+
+      expect(mockRunHtmlDoc).toHaveBeenCalledTimes(1);               // it actually ran (no false green)
+      expect(received).toBeDefined();
+      expect(received).not.toBe(outer);                              // pipeline passed its own no-op, not the ingest callback
+      expect(events.some((e) => 'step' in e && e.step === '__SENTINEL__')).toBe(false); // sentinel never leaked
+    });
+  });
   });
 });
 
