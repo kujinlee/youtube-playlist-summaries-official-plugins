@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FilterState, ProgressEvent, SortColumn, SortOrder, Video } from '@/types';
+import type { BatchMode } from '@/lib/html-doc/batch';
 import { FILTER_DEFAULTS } from '@/types';
 import BackfillOverlay from '@/components/BackfillOverlay';
 import BatchDocStatusBar from '@/components/BatchDocStatusBar';
@@ -51,6 +52,7 @@ export default function Page() {
   const [showBackfill, setShowBackfill] = useState(false);
   const [syncNote, setSyncNote] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [batchMode, setBatchMode] = useState<BatchMode>('summary');
   const [batchJob, setBatchJob] = useState<{ jobId: string; videoIds: Set<string> } | null>(null);
 
   const ingestESRef = useRef<EventSource | null>(null);
@@ -403,13 +405,13 @@ export default function Page() {
     try {
       const res = await fetch('/api/videos/batch-docs', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ outputFolder, videoIds: ids, mode: 'summary' }),
+        body: JSON.stringify({ outputFolder, videoIds: ids, mode: batchMode }),
       });
       if (!res.ok) return;
       const data = await res.json();
       setBatchJob({ jobId: data.jobId, videoIds: new Set(ids) });
     } catch { /* best-effort */ }
-  }, [videos, selected, outputFolder]);
+  }, [videos, selected, outputFolder, batchMode]);
 
   // H2: refresh rows as each item completes (a 'step' means the prior video finished). The
   // fetchSeqRef race guard in fetchVideos dedupes overlapping refreshes.
@@ -580,6 +582,8 @@ export default function Page() {
           selectedCount={selected.size}
           willGenerateCount={willGenerateCount}
           skipCount={skipCount}
+          mode={batchMode}
+          onModeChange={setBatchMode}
           onGenerate={handleBatchGenerate}
           onClear={clearSelection}
         />
