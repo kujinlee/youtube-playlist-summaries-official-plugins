@@ -120,14 +120,33 @@ describe('VideoRow', () => {
       expect(screen.getByText('KO')).toBeInTheDocument();
     });
 
-    it('renders all 6 rating values in their respective cells', () => {
+    it('renders the overall score in its cell', () => {
       renderRow();
-      expect(screen.getByRole('cell', { name: 'Usefulness' })).toHaveTextContent('4');
-      expect(screen.getByRole('cell', { name: 'Depth' })).toHaveTextContent('3');
-      expect(screen.getByRole('cell', { name: 'Originality' })).toHaveTextContent('5');
-      expect(screen.getByRole('cell', { name: 'Recency' })).toHaveTextContent('2');
-      expect(screen.getByRole('cell', { name: 'Completeness' })).toHaveTextContent('3');
       expect(screen.getByRole('cell', { name: 'Overall' })).toHaveTextContent('3.4');
+    });
+
+    describe('Channel cell', () => {
+      it('renders the channel name when set', () => {
+        renderRow({ channel: 'DeepLearningAI' });
+        expect(screen.getByRole('cell', { name: 'Channel' })).toHaveTextContent('DeepLearningAI');
+      });
+
+      it('renders an em dash when channel is absent', () => {
+        renderRow({ channel: undefined });
+        expect(screen.getByRole('cell', { name: 'Channel' })).toHaveTextContent('—');
+      });
+    });
+
+    describe('Duration cell', () => {
+      it('renders the duration as a clock string (m:ss)', () => {
+        renderRow({ durationSeconds: 300 });
+        expect(screen.getByRole('cell', { name: 'Duration' })).toHaveTextContent('5:00');
+      });
+
+      it('renders hours for long videos (h:mm:ss)', () => {
+        renderRow({ durationSeconds: 8927 });
+        expect(screen.getByRole('cell', { name: 'Duration' })).toHaveTextContent('2:28:47');
+      });
     });
 
     it('renders a menu toggle button', () => {
@@ -151,26 +170,6 @@ describe('VideoRow', () => {
       const cells = screen.getAllByRole('cell');
       // cells[2] is the rank cell
       expect(cells[2]).not.toHaveClass('opacity-40');
-    });
-
-    it('renders videoType badge when videoType is set', () => {
-      renderRow({ videoType: 'Tutorial' });
-      expect(screen.getByText('Tutorial')).toBeInTheDocument();
-    });
-
-    it('renders no videoType badge when videoType is undefined', () => {
-      renderRow({ videoType: undefined });
-      expect(screen.queryByText('Tutorial')).not.toBeInTheDocument();
-    });
-
-    it('renders audience badge when audience is set', () => {
-      renderRow({ audience: 'Advanced' });
-      expect(screen.getByText('Advanced')).toBeInTheDocument();
-    });
-
-    it('renders no audience badge when audience is undefined', () => {
-      renderRow({ audience: undefined });
-      expect(screen.queryByText('Advanced')).not.toBeInTheDocument();
     });
 
     describe('date cells', () => {

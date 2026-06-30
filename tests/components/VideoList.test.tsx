@@ -198,11 +198,13 @@ describe('VideoList — sort column headers', () => {
     );
   }
 
-  it('renders 14 sort buttons in the column header row when onSort is provided', () => {
+  it('renders 7 sort buttons in the column header row when onSort is provided', () => {
+    // Sortable: #, Title, Published, Added, Lang, OVR, My Score.
+    // Channel and Duration are display-only (non-sortable); Note has no sort button.
     renderWithSort();
     const headers = screen.getAllByRole('columnheader');
     const sortableHeaders = headers.filter((th) => th.querySelector('button') !== null);
-    expect(sortableHeaders).toHaveLength(14);
+    expect(sortableHeaders).toHaveLength(7);
   });
 
   it('clicking # column calls onSort("serialNumber", "asc") when unsorted', () => {
@@ -226,21 +228,12 @@ describe('VideoList — sort column headers', () => {
     expect(onSort).toHaveBeenCalledWith('overall', 'asc');
   });
 
-  it('clicking USE, DPT, ORI, RCN, CMP each call onSort with correct rating key', () => {
-    const cases: [string, SortColumn][] = [
-      ['Usefulness', 'usefulness'],
-      ['Depth', 'depth'],
-      ['Originality', 'originality'],
-      ['Recency', 'recency'],
-      ['Completeness', 'completeness'],
-    ];
-    for (const [label, key] of cases) {
-      const onSort = jest.fn();
-      const { unmount } = renderWithSort({ onSort });
-      fireEvent.click(screen.getByRole('button', { name: label }));
-      expect(onSort).toHaveBeenCalledWith(key, 'asc');
-      unmount();
-    }
+  it('Channel and Duration columns are display-only (header text, no sort button)', () => {
+    renderWithSort();
+    expect(screen.getByText('Channel')).toBeInTheDocument();
+    expect(screen.getByText('Duration')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /channel/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /duration/i })).toBeNull();
   });
 
   it('clicking active column (asc) calls onSort with desc', () => {

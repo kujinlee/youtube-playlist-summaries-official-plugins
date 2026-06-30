@@ -11,6 +11,7 @@ import type { ProgressEvent, Video, VideoMeta, RatingValue, VideoType, Audience,
 import { CURRENT_DOC_VERSION } from './doc-version';
 import { padDividers } from './markdown-dividers';
 import { runHtmlDoc } from './html-doc/generate';
+import { formatDuration } from './format-duration';
 
 const VALID_VIDEO_TYPES: VideoType[] = ['Tutorial', 'Analysis', 'Case Study', 'Framework', 'Demo', 'Interview'];
 const VALID_AUDIENCES: Audience[] = ['Beginner', 'Intermediate', 'Advanced'];
@@ -202,14 +203,9 @@ export function recoverOrphanedVideos(outputFolder: string): void {
 
 export { slugify };
 
-export function formatDuration(secs: number): string {
-  const h = Math.floor(secs / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  const s = secs % 60;
-  return h > 0
-    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-    : `${m}:${String(s).padStart(2, '0')}`;
-}
+// formatDuration lives in its own pure module so client components can import it
+// without pulling pipeline's server-only deps; re-exported here for existing importers.
+export { formatDuration };
 
 
 /**

@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import type { Video, VideoType, Audience } from '@/types';
+import type { Video } from '@/types';
+import { formatDuration } from '@/lib/format-duration';
 import Badge from './Badge';
 import CorrectionsPanel from './CorrectionsPanel';
 import VideoMenu from './VideoMenu';
@@ -31,29 +32,14 @@ const LANG_COLOR: Record<string, string> = {
   ko: 'bg-violet-700 text-white',
 };
 
-const TYPE_COLOR: Record<VideoType, string> = {
-  Tutorial: 'bg-green-700 text-white',
-  Analysis: 'bg-sky-700 text-white',
-  'Case Study': 'bg-amber-700 text-white',
-  Framework: 'bg-purple-700 text-white',
-  Demo: 'bg-teal-700 text-white',
-  Interview: 'bg-orange-700 text-white',
-};
-
-const AUDIENCE_COLOR: Record<Audience, string> = {
-  Beginner: 'bg-green-700 text-white',
-  Intermediate: 'bg-yellow-700 text-white',
-  Advanced: 'bg-red-700 text-white',
-};
-
-// Total column count in VideoList: 1 checkbox + 1 chevron + 15 data columns = 17
-const TOTAL_COLUMNS = 17;
+// Total column count in VideoList: 1 checkbox + 1 chevron + 10 data columns = 12
+const TOTAL_COLUMNS = 12;
 
 export default function VideoRow({ video, rank, outputFolder, baseOutputFolder, dimUnscored, busy = false, onDeepDive, onArchive, onGenerateHtml, onAnnotationChange, selected = false, selectable = true, onToggleSelect = () => {} }: VideoRowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [showCorrections, setShowCorrections] = useState(false);
-  const { ratings, overallScore } = video;
+  const { overallScore } = video;
 
   // opacity-40 must NOT be on the <tr> — it creates a CSS stacking context that
   // propagates to the absolutely-positioned VideoMenu, making it unclickable.
@@ -135,21 +121,13 @@ export default function VideoRow({ video, rank, outputFolder, baseOutputFolder, 
             )}
           </div>
         </td>
-        <td className={`px-3 py-2 ${cellDim}`}>
-          <Badge
-            label={video.language === 'en' ? 'EN' : 'KO'}
-            colorClass={LANG_COLOR[video.language] ?? ''}
-          />
+        <td className={`px-3 py-2 text-sm text-zinc-300 ${cellDim}`} aria-label="Channel">
+          <span className="block max-w-[12rem] truncate" title={video.channel || undefined}>
+            {video.channel || '—'}
+          </span>
         </td>
-        <td className={`px-3 py-2 ${cellDim}`}>
-          {video.videoType && (
-            <Badge label={video.videoType} colorClass={TYPE_COLOR[video.videoType] ?? ''} />
-          )}
-        </td>
-        <td className={`px-3 py-2 ${cellDim}`}>
-          {video.audience && (
-            <Badge label={video.audience} colorClass={AUDIENCE_COLOR[video.audience] ?? ''} />
-          )}
+        <td className={`px-3 py-2 text-sm tabular-nums text-right text-zinc-400 ${cellDim}`} aria-label="Duration">
+          {formatDuration(video.durationSeconds)}
         </td>
         <td className={`px-3 py-2 text-sm tabular-nums text-zinc-400 ${cellDim}`} aria-label="Published on YouTube">
           {video.videoPublishedAt ? video.videoPublishedAt.slice(0, 10) : '—'}
@@ -157,11 +135,12 @@ export default function VideoRow({ video, rank, outputFolder, baseOutputFolder, 
         <td className={`px-3 py-2 text-sm tabular-nums text-zinc-400 ${cellDim}`} aria-label="Added to playlist">
           {video.addedToPlaylistAt ? video.addedToPlaylistAt.slice(0, 10) : '—'}
         </td>
-        <td className={`px-3 py-2 text-sm tabular-nums font-mono text-right text-zinc-200 ${cellDim}`} aria-label="Usefulness">{ratings.usefulness}</td>
-        <td className={`px-3 py-2 text-sm tabular-nums font-mono text-right text-zinc-200 ${cellDim}`} aria-label="Depth">{ratings.depth}</td>
-        <td className={`px-3 py-2 text-sm tabular-nums font-mono text-right text-zinc-200 ${cellDim}`} aria-label="Originality">{ratings.originality}</td>
-        <td className={`px-3 py-2 text-sm tabular-nums font-mono text-right text-zinc-200 ${cellDim}`} aria-label="Recency">{ratings.recency}</td>
-        <td className={`px-3 py-2 text-sm tabular-nums font-mono text-right text-zinc-200 ${cellDim}`} aria-label="Completeness">{ratings.completeness}</td>
+        <td className={`px-3 py-2 ${cellDim}`}>
+          <Badge
+            label={video.language === 'en' ? 'EN' : 'KO'}
+            colorClass={LANG_COLOR[video.language] ?? ''}
+          />
+        </td>
         <td className={`px-3 py-2 text-sm tabular-nums font-mono text-right text-zinc-200 ${cellDim}`} aria-label="Overall">{overallScore}</td>
 
         {/* My Score */}
