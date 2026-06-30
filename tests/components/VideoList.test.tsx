@@ -47,9 +47,7 @@ const makeVideo = (id: string, archived = false): Video => ({
   ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
   overallScore: 3,
   summaryMd: 'summary.md',
-  summaryPdf: 'summary.pdf',
   deepDiveMd: null,
-  deepDivePdf: null,
   processedAt: '2024-01-01T00:00:00.000Z',
 });
 

@@ -6,8 +6,7 @@
  *
  * For each video in the index whose summaryMd ends with -2.md:
  *   1. Rename <slug>-2.md  → <slug>.md  (and delete the orphaned base .md if present)
- *   2. Rename <slug>-2.pdf → <slug>.pdf (and delete the orphaned base .pdf if present)
- *   3. Update index entry: summaryMd / summaryPdf → canonical names
+ *   2. Update index entry: summaryMd → canonical name
  *
  * Usage:  npx ts-node scripts/fix-duplicate-summaries.ts <outputFolder> [<outputFolder2> ...]
  *         (pass one or more playlist output folders)
@@ -19,7 +18,6 @@ import * as path from 'path';
 interface VideoEntry {
   id: string;
   summaryMd?: string | null;
-  summaryPdf?: string | null;
   [key: string]: unknown;
 }
 
@@ -52,7 +50,7 @@ function fixFolder(folder: string): void {
   index.videos = index.videos.map((video) => {
     const updates: Partial<VideoEntry> = {};
 
-    for (const [field, ext] of [['summaryMd', 'md'], ['summaryPdf', 'pdf']] as const) {
+    for (const [field, ext] of [['summaryMd', 'md']] as const) {
       const current = video[field];
       if (!current || !current.endsWith(`-2.${ext}`)) continue;
 

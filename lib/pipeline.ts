@@ -40,8 +40,7 @@ export interface SummaryDocResult {
 
 /**
  * Fetch transcript → generateSummary (emits ▶ timestamps) → build the summary .md → write it at
- * <baseName>.md. Shared by ingestion (new slug) and re-summarize (existing baseName). Does NOT write
- * the PDF — PDFs are no longer generated server-side.
+ * <baseName>.md. Shared by ingestion (new slug) and re-summarize (existing baseName).
  */
 export async function writeSummaryDoc(input: SummaryDocInput): Promise<SummaryDocResult> {
   const { videoId, title, youtubeUrl, channel, durationSeconds, outputFolder, baseName } = input;
@@ -143,10 +142,6 @@ export function reconstructVideo(content: string, file: string, mdPath: string):
   const serialMatch = file.match(/^(\d+)_/);
   const serialNumber = serialMatch ? parseInt(serialMatch[1], 10) : undefined;
 
-  const pdfFilename = file.replace(/\.md$/, '.pdf');
-  const pdfPath = path.join(path.dirname(mdPath), 'pdfs', pdfFilename);
-  const summaryPdf = fs.existsSync(pdfPath) ? `pdfs/${pdfFilename}` : null;
-
   const processedAt = fs.statSync(mdPath).mtime.toISOString();
 
   return {
@@ -159,9 +154,7 @@ export function reconstructVideo(content: string, file: string, mdPath: string):
     ratings,
     overallScore,
     summaryMd,
-    summaryPdf,
     deepDiveMd: null,
-    deepDivePdf: null,
     processedAt,
     ...(videoType !== undefined && { videoType }),
     ...(audience !== undefined && { audience }),
@@ -332,9 +325,7 @@ export async function runIngestion(
         overallScore,
         serialNumber: serial,
         summaryMd: `${baseName}.md`,
-        summaryPdf: null,
         deepDiveMd: null,
-        deepDivePdf: null,
         processedAt: new Date().toISOString(),
         docVersion: CURRENT_DOC_VERSION,
         playlistIndex: playlistPos,

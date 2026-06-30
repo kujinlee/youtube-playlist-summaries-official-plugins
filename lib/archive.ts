@@ -7,7 +7,7 @@ const ARCHIVE_DIR = 'archived';
 type FilePair = { root: string; archived: string };
 
 // Resolve actual on-disk paths from the video's index entry.
-// Files are named with title slugs (not videoId) and PDFs live under pdfs/.
+// Files are named with title slugs (not videoId).
 // Returns only paths that are safely within outputFolder (path traversal guard).
 function getFilePairs(outputFolder: string, videoId: string): FilePair[] {
   const index = readIndex(outputFolder);
@@ -17,7 +17,7 @@ function getFilePairs(outputFolder: string, videoId: string): FilePair[] {
   const base = path.resolve(outputFolder);
   const pairs: FilePair[] = [];
 
-  for (const relPath of [video.summaryMd, video.summaryPdf, video.deepDiveMd, video.deepDivePdf]) {
+  for (const relPath of [video.summaryMd, video.deepDiveMd]) {
     if (!relPath) continue;
     const root = path.resolve(path.join(base, relPath));
     // Guard: resolved root must stay within outputFolder
@@ -42,7 +42,7 @@ async function ensureArchiveDir(outputFolder: string): Promise<void> {
 }
 
 // Moves src to dest only if src exists and dest does not (no-clobber).
-// Creates the dest parent directory as needed (handles pdfs/ and other subdirs).
+// Creates the dest parent directory as needed (handles subdir-nested paths).
 // Returns true if the move was performed.
 async function moveIfExists(src: string, dest: string): Promise<boolean> {
   try {

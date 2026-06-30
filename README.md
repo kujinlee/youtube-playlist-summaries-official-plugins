@@ -1,6 +1,6 @@
 # YouTube Playlist Summaries
 
-A Next.js web app that ingests a YouTube playlist, generates AI summaries and multi-dimensional ratings for each video using Gemini, and presents them in a sortable, filterable list. Summaries are saved as Markdown and PDF files in a local output folder — ready to open directly in Obsidian.
+A Next.js web app that ingests a YouTube playlist, generates AI summaries and multi-dimensional ratings for each video using Gemini, and presents them in a sortable, filterable list. Summaries are saved as Markdown in a local output folder — ready to open directly in Obsidian — and can be opened as styled HTML docs that print or save to PDF from the browser.
 
 ## Features
 
@@ -8,7 +8,7 @@ A Next.js web app that ingests a YouTube playlist, generates AI summaries and mu
 - **AI summaries** — Gemini generates structured summaries with five quality ratings (usefulness, depth, originality, recency, completeness)
 - **On-demand deep dive** — richer Gemini analysis using native YouTube video understanding (no upload required)
 - **Sortable list** — sort by any rating dimension or overall score, ascending or descending
-- **PDF export** — every summary and deep dive is saved as a PDF viewable in the browser
+- **HTML docs** — open any summary or deep dive as a styled, themeable HTML doc; print or save to PDF straight from the browser
 - **Obsidian integration** — one-click `obsidian://open` URI to open notes in your vault
 - **Archive** — move videos to an `archived/` subfolder; greyed-out rows stay visible when "Show Archive" is checked
 - **Bilingual** — summaries are generated in the video's language (English or Korean)
@@ -22,7 +22,7 @@ A Next.js web app that ingests a YouTube playlist, generates AI summaries and mu
 | AI | Gemini 2.5 Flash / Pro via `@google/generative-ai` |
 | YouTube metadata | YouTube Data API v3 |
 | Transcripts | `youtube-transcript` |
-| PDF generation | `md-to-pdf` |
+| HTML docs | `markdown-it` (print / save-to-PDF in browser) |
 | Progress streaming | Server-Sent Events (SSE) |
 | Testing | Jest + Testing Library + Playwright |
 
@@ -68,9 +68,9 @@ The output folder is created automatically on first ingest. If you use it as an 
 4. When done, the video list appears sorted by name
 5. Click **☰** on any row to open the per-video menu:
    - **Open in Obsidian** — opens the summary note in Obsidian
-   - **View Summary PDF** — renders the PDF in a new browser tab
+   - **Summary doc** — opens the summary as a styled HTML doc (print / save-to-PDF in the browser)
    - **Deep Dive** — triggers a richer Gemini analysis (streams progress)
-   - **Open Deep Dive in Obsidian** / **View Deep Dive PDF** — available after deep dive completes
+   - **Open Deep Dive in Obsidian** / **Deep Dive doc** — available after deep dive completes
    - **Archive / Unarchive** — moves files to/from `archived/` subfolder
 
 ## Output folder layout
@@ -79,9 +79,8 @@ The output folder is created automatically on first ingest. If you use it as an 
 output-folder/
 ├── playlist-index.json       ← metadata index
 ├── {videoId}.md              ← summary (Markdown)
-├── {videoId}.pdf             ← summary (PDF)
 ├── {videoId}-deep-dive.md    ← deep dive (generated on demand)
-├── {videoId}-deep-dive.pdf
+├── htmls/                    ← cached HTML docs (print / save-to-PDF in browser)
 └── archived/
     └── ...                   ← archived video files
 ```
@@ -106,7 +105,6 @@ app/
     ingest/stream/route.ts        ← GET SSE progress stream
     videos/[id]/deep-dive/        ← POST + GET stream
     videos/[id]/archive/route.ts  ← POST archive/unarchive
-    pdf/[id]/route.ts             ← GET PDF file
     settings/route.ts             ← GET/POST output folder setting
 components/
   Header.tsx                      ← URL/folder inputs + submit
@@ -119,7 +117,6 @@ lib/
   youtube.ts                      ← YouTube Data API + transcripts
   pipeline.ts                     ← ingestion orchestration
   index-store.ts                  ← read/write playlist-index.json
-  pdf.ts                          ← md-to-pdf wrapper
   archive.ts                      ← file move logic
 types/index.ts                    ← shared TypeScript types + Zod schemas
 docs/

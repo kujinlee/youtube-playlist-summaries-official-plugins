@@ -6,7 +6,6 @@ import type { ProgressEvent, Video, VideoMeta, GeminiSummaryResponse } from '../
 
 jest.mock('../../lib/youtube');
 jest.mock('../../lib/gemini');
-jest.mock('../../lib/pdf');
 jest.mock('../../lib/index-store');
 jest.mock('../../lib/html-doc/generate');
 
@@ -14,7 +13,6 @@ import { runIngestion, slugify, formatDuration, parseFrontmatterField, reconstru
 import * as fsReal from 'fs';
 import * as youtube from '../../lib/youtube';
 import * as gemini from '../../lib/gemini';
-import * as pdf from '../../lib/pdf';
 import * as indexStore from '../../lib/index-store';
 import * as htmlDocGenerate from '../../lib/html-doc/generate';
 
@@ -24,7 +22,6 @@ const mockDetectLanguage = jest.mocked(youtube.detectLanguage);
 const mockGenerateSummary = jest.mocked(gemini.generateSummary);
 const mockTranscribeViaGemini = jest.mocked(gemini.transcribeViaGemini);
 const mockExtractQuickView = jest.mocked(gemini.extractQuickView);
-const mockGeneratePdf = jest.mocked(pdf.generatePdf);
 const mockUpsertVideo = jest.mocked(indexStore.upsertVideo);
 const mockAssertOutputFolder = jest.mocked(indexStore.assertOutputFolder);
 const mockReadIndex = jest.mocked(indexStore.readIndex);
@@ -71,9 +68,7 @@ function makeIndexedVideo(id: string, overrides: Partial<Video> = {}): Video {
     ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
     overallScore: 3,
     summaryMd: `001_video-${id}.md`,
-    summaryPdf: `001_video-${id}.pdf`,
     deepDiveMd: null,
-    deepDivePdf: null,
     processedAt: new Date().toISOString(),
     ...overrides,
   };
@@ -88,7 +83,6 @@ describe('runIngestion', () => {
 
     mockAssertOutputFolder.mockImplementation(() => {});
     mockDetectLanguage.mockReturnValue('en');
-    mockGeneratePdf.mockResolvedValue(undefined);
     mockUpsertVideo.mockImplementation(() => {});
     mockReadIndex.mockReturnValue({ playlistUrl: '', outputFolder, videos: [] });
     mockWriteIndex.mockImplementation(() => {});
@@ -116,8 +110,6 @@ describe('runIngestion', () => {
     expect(events.some((e) => e.type === 'step' && 'videoId' in e && e.videoId === 'vid2')).toBe(true);
     // Per-video completion event
     expect(events.some((e) => e.type === 'step' && 'step' in e && e.step === 'Saved' && 'videoId' in e && e.videoId === 'vid1')).toBe(true);
-    // PDF generation should not be called
-    expect(mockGeneratePdf).not.toHaveBeenCalled();
   });
 
   it('continues to next video when one video fails', async () => {
@@ -251,7 +243,6 @@ describe('runIngestion', () => {
       outputFolder,
       expect.objectContaining({
         summaryMd: '001_hello-world.md',
-        summaryPdf: null,
       }),
     );
   });
@@ -306,7 +297,6 @@ describe('runIngestion', () => {
       outputFolder,
       expect.objectContaining({
         summaryMd: '001_hello-world-2.md',
-        summaryPdf: null,
       }),
     );
   });
@@ -1026,20 +1016,6 @@ describe('reconstructVideo', () => {
     expect(video!.summaryMd).toBe('001_test-video-title.md');
   });
 
-  it('sets summaryPdf to pdfs/-prefixed path when PDF exists in pdfs/ subfolder', () => {
-    const pdfsDir = path.join(tempDir, 'pdfs');
-    fs.mkdirSync(pdfsDir, { recursive: true });
-    fs.writeFileSync(path.join(pdfsDir, '001_test-video-title.pdf'), '%PDF');
-    const video = reconstructVideo(SAMPLE_MD, '001_test-video-title.md', mdPath);
-    expect(video!.summaryPdf).toBe('pdfs/001_test-video-title.pdf');
-  });
-
-  it('sets summaryPdf to null when PDF is absent from pdfs/ subfolder', () => {
-    // No PDF file created — neither at root nor in pdfs/
-    const video = reconstructVideo(SAMPLE_MD, '001_test-video-title.md', mdPath);
-    expect(video!.summaryPdf).toBeNull();
-  });
-
   it('returns null when video_id is missing from frontmatter', () => {
     const noId = SAMPLE_MD.replace(/video_id:.*\n/, '');
     const video = reconstructVideo(noId, '001_test-video-title.md', mdPath);
@@ -1233,7 +1209,6 @@ describe('writeSummaryDoc', () => {
     outputFolder = path.join(os.tmpdir(), `pipeline-wsd-test-${crypto.randomUUID()}`);
     fs.mkdirSync(outputFolder, { recursive: true });
     mockDetectLanguage.mockReturnValue('en');
-    mockGeneratePdf.mockResolvedValue(undefined);
     mockExtractQuickView.mockResolvedValue({ tldr: 'QV tldr', takeaways: ['qa', 'qb'] });
     mockFetchTranscriptSegments.mockResolvedValue([{ text: 't', offset: 0, duration: 5 }]);
   });
@@ -1260,7 +1235,6 @@ describe('writeSummaryDoc', () => {
     expect(md).toContain('# T');
     expect(md).toContain('## 1. A');
     expect(md).toContain('▶ [0:00–0:05]');
-    expect(mockGeneratePdf).not.toHaveBeenCalled();
     expect(mockGenerateSummary).toHaveBeenCalledWith(
       [{ text: 'hello world', offset: 0, duration: 5 }], 'en', 'vid11111111',
     );

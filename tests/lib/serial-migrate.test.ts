@@ -4,18 +4,17 @@ import type { Video } from '@/types';
 const v = (over: Partial<Video>): Video => ({
   id: 'x', title: 'T', youtubeUrl: 'u', language: 'en', durationSeconds: 1, archived: false,
   ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
-  overallScore: 3, summaryMd: 's.md', summaryPdf: null, deepDiveMd: null, deepDivePdf: null,
+  overallScore: 3, summaryMd: 's.md', deepDiveMd: null,
   processedAt: '2026-01-01T00:00:00.000Z', ...over,
 });
 
-it('assigns serials in backfill order and plans md+pdf+model renames', () => {
+it('assigns serials in backfill order and plans md+model renames', () => {
   const { assignments, perVideo } = planMigration([
-    v({ id: 'a', processedAt: '2026-01-01T00:00:00.000Z', summaryMd: 'alpha.md', summaryPdf: 'pdfs/alpha.pdf' }),
+    v({ id: 'a', processedAt: '2026-01-01T00:00:00.000Z', summaryMd: 'alpha.md' }),
   ]);
   expect(assignments).toEqual([{ id: 'a', serial: 1 }]);
   const ops = perVideo[0].renames;
   expect(ops).toContainEqual({ field: 'summaryMd', from: 'alpha.md', to: '001_alpha.md' });
-  expect(ops).toContainEqual({ field: 'summaryPdf', from: 'pdfs/alpha.pdf', to: 'pdfs/001_alpha.pdf' });
   expect(ops).toContainEqual({ field: 'model', from: 'models/alpha.json', to: 'models/001_alpha.json' });
 });
 
@@ -38,18 +37,12 @@ it('plans renames for existing-serial unprefixed video', () => {
       id: 'b',
       serialNumber: 5,
       summaryMd: 'foo.md',
-      summaryPdf: 'pdfs/foo.pdf',
       summaryHtml: 'htmls/foo.html',
     }),
   ]);
   expect(assignments).toEqual([]);
   const renames = perVideo[0].renames;
   expect(renames).toContainEqual({ field: 'summaryMd', from: 'foo.md', to: '005_foo.md' });
-  expect(renames).toContainEqual({
-    field: 'summaryPdf',
-    from: 'pdfs/foo.pdf',
-    to: 'pdfs/005_foo.pdf',
-  });
   expect(renames).toContainEqual({
     field: 'summaryHtml',
     from: 'htmls/foo.html',

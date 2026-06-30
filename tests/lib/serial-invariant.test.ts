@@ -14,9 +14,7 @@ function makeVideo(overrides: Partial<Video>): Video {
     ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
     overallScore: 3,
     summaryMd: null,
-    summaryPdf: null,
     deepDiveMd: null,
-    deepDivePdf: null,
     processedAt: '2026-01-01T00:00:00.000Z',
     ...overrides,
   };
@@ -63,10 +61,10 @@ describe('checkSerialInvariant', () => {
   });
 
   it('preserves a subdirectory, prefixing only the basename', () => {
-    const v = makeVideo({ serialNumber: 7, summaryPdf: 'pdfs/x.pdf' });
+    const v = makeVideo({ serialNumber: 7, summaryHtml: 'htmls/x.html' });
     const out = checkSerialInvariant([v], ALL_EXIST);
     expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({ field: 'summaryPdf', reason: 'prefix', expected: 'pdfs/007_x.pdf' });
+    expect(out[0]).toMatchObject({ field: 'summaryHtml', reason: 'prefix', expected: 'htmls/007_x.html' });
   });
 
   it('reports only the offending field when a video mixes clean and dirty fields', () => {
@@ -104,20 +102,18 @@ describe('checkSerialInvariant', () => {
   // Structural coverage: if PATH_FIELDS grows, this asserts the loop reaches the
   // new field (a dirty value on every field must surface a violation). Pairs with
   // the compile-time PathField⊆keyof Video assertion in serial-invariant.ts.
-  it('reaches all eight PATH_FIELDS when every one is dirty', () => {
+  it('reaches all six PATH_FIELDS when every one is dirty', () => {
     const v = makeVideo({
       serialNumber: 7,
       summaryMd: 'a.md',
-      summaryPdf: 'b.pdf',
       deepDiveMd: 'c.md',
-      deepDivePdf: 'd.pdf',
       summaryHtml: 'e.html',
       deepDiveHtml: 'f.html',
       digDeeperMd: 'g.md',
       digDeeperHtml: 'h.html',
     });
     const out = checkSerialInvariant([v], ALL_EXIST);
-    expect(out).toHaveLength(8);
+    expect(out).toHaveLength(6);
     expect(out.every((x) => x.reason === 'prefix')).toBe(true);
   });
 

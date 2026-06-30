@@ -19,7 +19,7 @@ function formatDuration(secs: number): string {
  *
  * Mirrors the summary's writeSummaryDoc: it produces the source artifact (the markdown)
  * and nothing else — it does NOT call updateVideoFields (the orchestrator persists
- * atomically after the HTML render succeeds) and it does NOT generate a PDF.
+ * atomically after the HTML render succeeds).
  *
  * Emits ONLY `step` progress events — never `start`/`done` (those are the orchestrator's).
  * Throws if every generation path fails (the .md is not written in that case).

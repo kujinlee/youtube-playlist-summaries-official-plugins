@@ -20,9 +20,7 @@ const baseVideo: Video = {
   },
   overallScore: 3.4,
   summaryMd: 'summary.md',
-  summaryPdf: 'summary.pdf',
   deepDiveMd: null,
-  deepDivePdf: null,
   processedAt: '2024-01-01T00:00:00.000Z',
 };
 
@@ -460,7 +458,7 @@ describe('VideoRow', () => {
 
     describe('menu items present', () => {
       it('renders all active menu actions without PDF items', () => {
-        openMenu({ deepDiveMd: 'abc123-deep-dive.md', deepDivePdf: 'abc123-deep-dive.pdf' });
+        openMenu({ deepDiveMd: 'abc123-deep-dive.md' });
         expect(screen.getByRole('link', { name: /watch on youtube/i })).toBeInTheDocument();
         expect(screen.getByRole('link', { name: /open in obsidian/i })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /deep dive doc/i })).toBeInTheDocument();

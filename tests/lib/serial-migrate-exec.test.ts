@@ -17,9 +17,7 @@ function makeVideo(id: string, processedAt: string, summaryMd: string | null): V
     ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
     overallScore: 3,
     summaryMd,
-    summaryPdf: summaryMd ? `pdfs/${summaryMd.replace('.md', '.pdf')}` : null,
     deepDiveMd: null,
-    deepDivePdf: null,
     processedAt,
   };
 }
@@ -67,7 +65,6 @@ describe('runPhaseB', () => {
   beforeEach(() => {
     outputFolder = path.join(os.homedir(), `.tmp-serial-migrate-exec-b-${crypto.randomUUID()}`);
     fs.mkdirSync(outputFolder, { recursive: true });
-    fs.mkdirSync(path.join(outputFolder, 'pdfs'), { recursive: true });
     fs.mkdirSync(path.join(outputFolder, 'models'), { recursive: true });
     fs.mkdirSync(path.join(outputFolder, 'htmls'), { recursive: true });
     fs.mkdirSync(path.join(outputFolder, 'archived'), { recursive: true });
@@ -97,27 +94,23 @@ describe('runPhaseB', () => {
       ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
       overallScore: 3,
       summaryMd: null,
-      summaryPdf: null,
       deepDiveMd: null,
-      deepDivePdf: null,
       processedAt: new Date('2025-01-01').toISOString(),
       ...overrides,
     };
   }
 
-  it('Phase B renames md+pdf+model and updates the index fields per video', () => {
+  it('Phase B renames md+model and updates the index fields per video', () => {
     // Seed: video with serialNumber:1, summaryMd:'alpha.md'
     seedIndex([
       makeVideoB({
         id: 'a',
         serialNumber: 1,
         summaryMd: 'alpha.md',
-        summaryPdf: 'pdfs/alpha.pdf',
       }),
     ]);
     // Create actual files on disk
     fs.writeFileSync(path.join(outputFolder, 'alpha.md'), 'md content');
-    fs.writeFileSync(path.join(outputFolder, 'pdfs/alpha.pdf'), 'pdf content');
     fs.writeFileSync(
       path.join(outputFolder, 'models/alpha.json'),
       JSON.stringify({ sourceMd: 'alpha.md', data: 'model data' }),
@@ -126,7 +119,6 @@ describe('runPhaseB', () => {
     const r = runPhaseB(outputFolder);
 
     expect(fs.existsSync(path.join(outputFolder, '001_alpha.md'))).toBe(true);
-    expect(fs.existsSync(path.join(outputFolder, 'pdfs/001_alpha.pdf'))).toBe(true);
     expect(fs.existsSync(path.join(outputFolder, 'models/001_alpha.json'))).toBe(true);
     expect(readIndex(outputFolder).videos[0].summaryMd).toBe('001_alpha.md');
     expect(r.conflicts).toEqual([]);
@@ -138,7 +130,6 @@ describe('runPhaseB', () => {
         id: 'a',
         serialNumber: 1,
         summaryMd: 'alpha.md',
-        summaryPdf: null,
       }),
     ]);
     // Create source file AND conflicting target with DIFFERENT content
@@ -159,7 +150,6 @@ describe('runPhaseB', () => {
         id: 'a',
         serialNumber: 1,
         summaryMd: 'alpha.md',
-        summaryPdf: null,
         summaryHtml: 'htmls/alpha.html',
       }),
     ]);
@@ -178,11 +168,9 @@ describe('runPhaseB', () => {
         id: 'a',
         serialNumber: 1,
         summaryMd: 'alpha.md',
-        summaryPdf: 'pdfs/alpha.pdf',
       }),
     ]);
     fs.writeFileSync(path.join(outputFolder, 'alpha.md'), 'md content');
-    fs.writeFileSync(path.join(outputFolder, 'pdfs/alpha.pdf'), 'pdf content');
 
     runPhaseB(outputFolder);
     const r2 = runPhaseB(outputFolder);
@@ -198,9 +186,7 @@ describe('runPhaseB', () => {
       makeVideoB({
         id: 'a',
         serialNumber: 1,
-        summaryMd: 'alpha.md',
-        summaryPdf: null,
-      }),
+        summaryMd: 'alpha.md',      }),
     ]);
     fs.writeFileSync(path.join(outputFolder, 'alpha.md'), 'md content');
     fs.writeFileSync(
@@ -225,9 +211,7 @@ describe('runPhaseB', () => {
       makeVideoB({
         id: 'a',
         serialNumber: 1,
-        summaryMd: 'alpha.md',
-        summaryPdf: null,
-        archived: true,
+        summaryMd: 'alpha.md',        archived: true,
       }),
     ]);
     // File physically lives under archived/
@@ -251,9 +235,7 @@ describe('runPhaseB', () => {
       makeVideoB({
         id: 'a',
         serialNumber: 1,
-        summaryMd: 'alpha.md',
-        summaryPdf: null,
-      }),
+        summaryMd: 'alpha.md',      }),
     ]);
     // Simulate crashed prior run: file already renamed, but index not updated
     fs.writeFileSync(path.join(outputFolder, '001_alpha.md'), 'already renamed');

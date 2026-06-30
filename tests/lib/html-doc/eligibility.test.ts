@@ -6,7 +6,7 @@ function v(over: Partial<Video> = {}): Video {
     id: 'x', title: 'T', youtubeUrl: 'https://youtu.be/x', language: 'en',
     durationSeconds: 1, archived: false,
     ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
-    overallScore: 3, summaryMd: '1_t.md', summaryPdf: null, deepDiveMd: null, deepDivePdf: null,
+    overallScore: 3, summaryMd: '1_t.md', deepDiveMd: null,
     summaryHtml: null, processedAt: '2026-06-29T00:00:00.000Z', docVersion: { major: 3, minor: 3 },
     ...over,
   } as Video;

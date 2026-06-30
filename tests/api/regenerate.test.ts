@@ -5,7 +5,6 @@ jest.mock('../../lib/pipeline', () => ({
   stripQuickViewCallout: jest.fn((s: string) => s),
   insertQuickViewCallout: jest.fn((_md: string, tldr: string, takeaways: string[]) => `CALLOUT:${tldr}:${takeaways.join(',')}`),
 }));
-jest.mock('../../lib/pdf');
 jest.mock('fs', () => ({
   ...jest.requireActual('fs'),
   promises: {
@@ -17,7 +16,6 @@ jest.mock('fs', () => ({
 import { POST } from '../../app/api/videos/[id]/regenerate/route';
 import * as indexStore from '../../lib/index-store';
 import * as gemini from '../../lib/gemini';
-import * as pdf from '../../lib/pdf';
 import * as fs from 'fs';
 
 const mockReadIndex = jest.mocked(indexStore.readIndex);
@@ -26,7 +24,6 @@ const mockAssertVideoId = jest.mocked(indexStore.assertVideoId);
 const mockUpdateVideoFields = jest.mocked(indexStore.updateVideoFields);
 const mockFixSummary = jest.mocked(gemini.fixSummary);
 const mockExtractQuickView = jest.mocked(gemini.extractQuickView);
-const mockGeneratePdf = jest.mocked(pdf.generatePdf);
 const mockReadFile = jest.mocked(fs.promises.readFile);
 const mockWriteFile = jest.mocked(fs.promises.writeFile);
 
@@ -50,7 +47,6 @@ const baseVideo = {
   id: VIDEO_ID,
   title: 'Test Video',
   summaryMd: SUMMARY_MD,
-  summaryPdf: 'pdfs/test-video.pdf',
   tags: ['ai', 'rag'],
   tldr: 'Old TL;DR.',
   takeaways: ['Old point'],
@@ -74,7 +70,6 @@ beforeEach(() => {
     tldr: 'This video teaches X.',
     takeaways: ['Point one', 'Point two'],
   });
-  mockGeneratePdf.mockResolvedValue(undefined);
 });
 
 describe('POST /api/videos/[id]/regenerate', () => {
@@ -151,11 +146,6 @@ describe('POST /api/videos/[id]/regenerate', () => {
       VIDEO_ID,
       expect.objectContaining({ tldr: 'This video teaches X.', takeaways: ['Point one', 'Point two'] }),
     );
-  });
-
-  it('does not fire PDF generation', async () => {
-    await post(VIDEO_ID, { outputFolder: OUTPUT_FOLDER });
-    expect(mockGeneratePdf).not.toHaveBeenCalled();
   });
 
   it('returns 500 when Gemini throws', async () => {

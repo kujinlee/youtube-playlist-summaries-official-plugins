@@ -60,7 +60,7 @@ export async function runHtmlDoc(
   const htmlDir = path.join(outputFolder, 'htmls');
   fs.mkdirSync(htmlDir, { recursive: true });
 
-  // Atomic write: temp file → rename (mirrors index-store.writeIndex / pdf caller).
+  // Atomic write: temp file → rename (mirrors index-store.writeIndex).
   const finalPath = path.join(outputFolder, htmlFilename);
   const tmpPath = `${finalPath}.${crypto.randomUUID()}.tmp`;
   try {

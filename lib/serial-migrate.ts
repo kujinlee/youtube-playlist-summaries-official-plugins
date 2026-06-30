@@ -4,7 +4,7 @@ import { applySerial } from './serial-filename';
 
 /** The nullable filename fields on a Video that carry an NNN_ serial prefix. */
 export const PATH_FIELDS = [
-  'summaryMd', 'summaryPdf', 'deepDiveMd', 'deepDivePdf',
+  'summaryMd', 'deepDiveMd',
   'summaryHtml', 'deepDiveHtml', 'digDeeperMd', 'digDeeperHtml',
 ] as const;
 
