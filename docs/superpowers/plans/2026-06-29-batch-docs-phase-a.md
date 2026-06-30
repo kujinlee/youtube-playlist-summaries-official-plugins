@@ -318,12 +318,12 @@ git commit -m "feat(batch-docs): runBatchDocs (mode summary) + summary eligibili
 ## Task 2: `POST /api/videos/batch-docs` + SSE stream
 
 **Files:**
-- Create: `app/api/videos/batch-docs/route.ts`, `app/api/videos/batch-docs/stream/route.ts`
+- Create: `app/api/videos/batch-docs/route.ts`, `app/api/videos/batch-docs/stream/route.ts`, `app/api/videos/batch-docs/cancel/route.ts`
 - Test: `tests/api/batch-docs.test.ts`
 
 **Interfaces:**
-- Consumes: `runBatchDocs(videoIds, mode, outputFolder, onProgress, signal)` (Task 1); job-registry `createJob, deleteJob, emitJobEvent, getActiveJob, releaseJobLock, getJobSignal, subscribeJob`; `assertOutputFolder` (`lib/index-store`); `logError, errorSummary` (`lib/dev-logger`).
-- Produces: `POST /api/videos/batch-docs` body `{ outputFolder: string, videoIds: string[], mode: 'summary' | 'summary-dig' }` → `{ jobId }` (409 on duplicate batch for folder); `GET /api/videos/batch-docs/stream?jobId=…` → SSE.
+- Consumes: `runBatchDocs(videoIds, mode, outputFolder, onProgress, signal)` (Task 1); job-registry `createJob, deleteJob, emitJobEvent, getActiveJob, releaseJobLock, getJobSignal, subscribeJob, cancelJob`; `assertOutputFolder` (`lib/index-store`); `logError, errorSummary` (`lib/dev-logger`).
+- Produces: `POST /api/videos/batch-docs` body `{ outputFolder: string, videoIds: string[], mode: 'summary' }` (Phase A; `'summary-dig'` → 400) → `{ jobId }` (409 on duplicate batch for folder); `GET /api/videos/batch-docs/stream?jobId=…` → SSE; `POST /api/videos/batch-docs/cancel` body `{ jobId: string }` → `{ cancelled: boolean }` (aborts the job's signal; the loop emits `cancelled` at its next iteration).
 
 - [ ] **Step 1: Write the route tests**
 
@@ -335,7 +335,7 @@ jest.mock('../../lib/html-doc/batch');
 import { POST } from '../../app/api/videos/batch-docs/route';
 import { GET } from '../../app/api/videos/batch-docs/stream/route';
 import * as batch from '../../lib/html-doc/batch';
-import { _resetJobRegistry, createJob, emitJobEvent, getActiveJob } from '../../lib/job-registry';
+import { _resetJobRegistry, createJob, emitJobEvent, getActiveJob, getJobSignal } from '../../lib/job-registry';
 
 const mockRun = jest.mocked(batch.runBatchDocs);
 const OF = '/home/u/p'; // assertOutputFolder allows tmp/home; this path is validated by the real fn — mock if needed
@@ -386,6 +386,17 @@ it('AA2 stream: 400 without jobId, 404 unknown, replays + non-fatal per-video er
   expect(text).toContain('"type":"error"');
   expect(text).toContain('"type":"done"');
 });
+
+it('AA-cancel: cancel aborts the job signal', async () => {
+  const { POST: CANCEL } = await import('../../app/api/videos/batch-docs/cancel/route');
+  createJob('jC', '/of::batch-docs');
+  const signal = getJobSignal('jC');
+  const res = await CANCEL(new Request('http://localhost/cancel', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobId: 'jC' }),
+  }));
+  expect(res.status).toBe(200);
+  expect(signal?.aborted).toBe(true);
+});
 ```
 
 > Note: if `assertOutputFolder` rejects `/home/u/p` in the test env, add `jest.mock('../../lib/index-store')` with `assertOutputFolder` as a no-op (mirror the pattern in `tests/lib/pipeline.test.ts`).
@@ -414,13 +425,18 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   const outputFolder: unknown = body?.outputFolder;
   const videoIds: unknown = body?.videoIds;
-  const mode: BatchMode = body?.mode === 'summary-dig' ? 'summary-dig' : 'summary';
+  const mode: BatchMode = body?.mode ?? 'summary';
 
   if (typeof outputFolder !== 'string' || !outputFolder) {
     return NextResponse.json({ error: 'outputFolder is required' }, { status: 400 });
   }
   if (!Array.isArray(videoIds) || videoIds.length === 0 || !videoIds.every((x) => typeof x === 'string')) {
     return NextResponse.json({ error: 'videoIds[] is required' }, { status: 400 });
+  }
+  // Phase A supports only 'summary'. Phase B will accept 'summary-dig'. Reject explicitly so a
+  // caller does not silently get summary-only behavior for a dig request.
+  if (mode !== 'summary') {
+    return NextResponse.json({ error: "mode 'summary-dig' is not supported yet" }, { status: 400 });
   }
   try {
     assertOutputFolder(outputFolder);
@@ -509,6 +525,27 @@ export async function GET(request: Request) {
 }
 ```
 
+- [ ] **Step 4b: Implement the cancel route**
+
+Create `app/api/videos/batch-docs/cancel/route.ts`:
+
+```typescript
+import { NextResponse } from 'next/server';
+import { cancelJob } from '../../../../../lib/job-registry';
+
+export async function POST(request: Request) {
+  const body = await request.json().catch(() => null);
+  const jobId: unknown = body?.jobId;
+  if (typeof jobId !== 'string' || !jobId) {
+    return NextResponse.json({ error: 'jobId is required' }, { status: 400 });
+  }
+  const cancelled = cancelJob(jobId); // aborts the job's AbortSignal; runBatchDocs emits 'cancelled' next iter
+  return NextResponse.json({ cancelled });
+}
+```
+
+(`cancel/route.ts` is 5 dirs deep — `app/api/videos/batch-docs/cancel/` — so `../../../../../lib` = 5 ups, same as the stream route.)
+
 - [ ] **Step 5: Run — verify pass**
 
 Run: `npx jest batch-docs.test` → PASS.
@@ -518,7 +555,7 @@ Run: `npx jest batch-docs.test` → PASS.
 Run: `npx tsc --noEmit` → exit 0.
 ```bash
 git add app/api/videos/batch-docs tests/api/batch-docs.test.ts
-git commit -m "feat(batch-docs): POST /api/videos/batch-docs + SSE stream (non-fatal per-video errors)"
+git commit -m "feat(batch-docs): POST /api/videos/batch-docs + SSE stream + cancel (non-fatal per-video errors)"
 ```
 
 ---
@@ -531,7 +568,7 @@ git commit -m "feat(batch-docs): POST /api/videos/batch-docs + SSE stream (non-f
 
 **Interfaces:**
 - Consumes: `summaryNeedsWork`, `summarySelectable` (Task 1).
-- Produces (new `VideoList` props): `selected: Set<string>`, `onToggleSelect: (videoId: string) => void`, `onSelectAllNeeding: (visible: Video[]) => void`. (new `VideoRow` props): `selected: boolean`, `selectable: boolean`, `onToggleSelect: (videoId: string) => void`.
+- Produces (new `VideoList` props, all OPTIONAL with defaults so `tsc` stays green before Task 6): `selected?: Set<string>`, `onToggleSelect?: (videoId: string) => void`, `onSelectAllNeeding?: (visible: Video[]) => void`, `activeBatchVideoIds?: Set<string>`. (new `VideoRow` props, also OPTIONAL with defaults — guards any existing standalone `VideoRow` render): `selected?: boolean`, `selectable?: boolean`, `onToggleSelect?: (videoId: string) => void`. (`VideoRow` already has a `busy` prop used for ⏳; the batch reuses it.)
 
 - [ ] **Step 1: Write the component test**
 
@@ -589,6 +626,11 @@ it('CA1: header checkbox is checked when all needing rows are selected', () => {
   render(<VideoList {...baseProps} videos={videos} selected={new Set(['a'])} />);
   expect(screen.getByLabelText('Select all needing generation')).toBeChecked();
 });
+
+it('H3: a row in the active batch has a disabled checkbox', () => {
+  render(<VideoList {...baseProps} videos={[v('a')]} activeBatchVideoIds={new Set(['a'])} />);
+  expect(screen.getByLabelText('Select Ta')).toBeDisabled();
+});
 ```
 
 - [ ] **Step 2: Run — verify failure**
@@ -607,12 +649,15 @@ import { summaryNeedsWork, summarySelectable } from '../lib/html-doc/eligibility
 
 (b) Extend `VideoListProps` (after `onSort?`):
 ```typescript
-  selected: Set<string>;
-  onToggleSelect: (videoId: string) => void;
-  onSelectAllNeeding: (visible: Video[]) => void;
+  selected?: Set<string>;
+  onToggleSelect?: (videoId: string) => void;
+  onSelectAllNeeding?: (visible: Video[]) => void;
+  activeBatchVideoIds?: Set<string>;
 ```
 
-(c) Destructure them in the function params (add to the existing destructure list): `selected, onToggleSelect, onSelectAllNeeding,`.
+(c) Destructure them in the function params with defaults (add to the existing destructure list):
+`selected = new Set(), onToggleSelect = noop, onSelectAllNeeding = noop, activeBatchVideoIds = new Set(),`
+(the file already defines `const noop = () => {}`).
 
 (d) Compute, right after `const visible = …`:
 ```typescript
@@ -633,34 +678,39 @@ import { summaryNeedsWork, summarySelectable } from '../lib/html-doc/eligibility
           </th>
 ```
 
-(f) Pass new props to each `<VideoRow>` (add to the existing prop list):
+(f) Pass new props to each `<VideoRow>` (add to the existing prop list), and CHANGE the existing
+`busy={busyVideoId === video.id}` to also reflect active-batch rows:
 ```tsx
+            busy={busyVideoId === video.id || activeBatchVideoIds.has(video.id)}
             selected={selected.has(video.id)}
             selectable={summarySelectable(video)}
             onToggleSelect={onToggleSelect}
 ```
+(Replace the existing `busy={busyVideoId === video.id}` line — do not add a duplicate `busy` prop.)
 
 - [ ] **Step 4: Add the checkbox cell to `VideoRow`**
 
 In `components/VideoRow.tsx`:
 
-(a) Extend `VideoRowProps` (after `onAnnotationChange`):
+(a) Extend `VideoRowProps` (after `onAnnotationChange`) — OPTIONAL with defaults:
 ```typescript
-  selected: boolean;
-  selectable: boolean;
-  onToggleSelect: (videoId: string) => void;
+  selected?: boolean;
+  selectable?: boolean;
+  onToggleSelect?: (videoId: string) => void;
 ```
 
-(b) Add to the destructure: `selected, selectable, onToggleSelect,`.
+(b) Add to the destructure with defaults: `selected = false, selectable = true, onToggleSelect = () => {},`.
 
-(c) As the FIRST `<td>` inside `<tr>` (before the expand-chevron `<td>`):
+(c) As the FIRST `<td>` inside `<tr>` (before the expand-chevron `<td>`). The checkbox is disabled
+when the row is not selectable OR while it is busy (in the active batch — `busy` already drives the
+⏳ glyph elsewhere in the row):
 ```tsx
         <td className="px-2 py-2 w-8">
           <input
             type="checkbox"
             aria-label={`Select ${video.title}`}
             checked={selected}
-            disabled={!selectable}
+            disabled={!selectable || busy}
             onChange={() => onToggleSelect(video.id)}
             title={selectable ? undefined : 'No summary to generate from'}
           />
@@ -791,7 +841,7 @@ git commit -m "feat(batch-docs): BulkActionBar (counts + Generate/Clear)"
 - Test: `tests/components/BatchDocStatusBar.test.tsx`
 
 **Interfaces:**
-- Produces: `BatchDocStatusBar` props `{ jobId: string, onClose: () => void, onError?: () => void }`. Subscribes to `/api/videos/batch-docs/stream?jobId=…`, renders `step X of N` + failed count + step text; auto-closes 4s after `done`; ✕ button calls `onClose`.
+- Produces: `BatchDocStatusBar` props `{ jobId: string, onClose: () => void, onError?: () => void, onProgressEvent?: (e: ProgressEvent) => void }`. Subscribes to `/api/videos/batch-docs/stream?jobId=…`, renders `step X of N` + failed count + step text; auto-closes 4s after `done`; fires `onProgressEvent` for every parsed event (H2 — lets the page refresh rows as videos complete); the ✕ button, while running, POSTs `/api/videos/batch-docs/cancel` to abort the job (H1) before calling `onClose`.
 
 - [ ] **Step 1: Write the test** (mirrors `tests/components/HtmlDocStatusBar.test.tsx`)
 
@@ -799,7 +849,7 @@ Create `tests/components/BatchDocStatusBar.test.tsx`:
 
 ```typescript
 /** @jest-environment jsdom */
-import { render, screen, act } from '@testing-library/react';
+import { render, screen, act, fireEvent } from '@testing-library/react';
 import BatchDocStatusBar from '../../components/BatchDocStatusBar';
 
 class FakeES {
@@ -836,6 +886,24 @@ it('auto-closes ~4s after done', () => {
   act(() => { jest.advanceTimersByTime(4000); });
   expect(onClose).toHaveBeenCalled();
 });
+
+it('H1: ✕ while running POSTs cancel, then closes', () => {
+  const onClose = jest.fn();
+  const fetchMock = jest.fn().mockResolvedValue({ ok: true });
+  (global as any).fetch = fetchMock;
+  render(<BatchDocStatusBar jobId="j1" onClose={onClose} />);
+  act(() => { FakeES.last!.emit({ type: 'step', step: 'Generating HTML doc…', current: 1, total: 3 }); });
+  fireEvent.click(screen.getByLabelText('Close'));
+  expect(fetchMock).toHaveBeenCalledWith('/api/videos/batch-docs/cancel', expect.objectContaining({ method: 'POST' }));
+  expect(onClose).toHaveBeenCalled();
+});
+
+it('H2: fires onProgressEvent for each parsed event', () => {
+  const onProgressEvent = jest.fn();
+  render(<BatchDocStatusBar jobId="j1" onClose={() => {}} onProgressEvent={onProgressEvent} />);
+  act(() => { FakeES.last!.emit({ type: 'step', step: 'Generating HTML doc…', videoId: 'a', current: 1, total: 2 }); });
+  expect(onProgressEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'step', videoId: 'a' }));
+});
 ```
 
 - [ ] **Step 2: Run — verify failure** → `npx jest BatchDocStatusBar` FAIL.
@@ -854,6 +922,7 @@ interface BatchDocStatusBarProps {
   jobId: string;
   onClose: () => void;
   onError?: () => void;
+  onProgressEvent?: (e: ProgressEvent) => void; // H2: page refreshes rows on each event
 }
 
 type BarState =
@@ -861,11 +930,24 @@ type BarState =
   | { status: 'done'; succeeded: number; failed: number }
   | { status: 'error'; message: string };
 
-export default function BatchDocStatusBar({ jobId, onClose, onError }: BatchDocStatusBarProps) {
+export default function BatchDocStatusBar({ jobId, onClose, onError, onProgressEvent }: BatchDocStatusBarProps) {
   const [state, setState] = useState<BarState>({ status: 'running', current: 0, total: 0, failed: 0, step: '' });
   const onCloseRef = useRef(onClose); onCloseRef.current = onClose;
   const onErrorRef = useRef(onError); onErrorRef.current = onError;
+  const onProgressEventRef = useRef(onProgressEvent); onProgressEventRef.current = onProgressEvent;
   const failedRef = useRef(0);
+  const statusRef = useRef<BarState['status']>('running');
+  statusRef.current = state.status;
+
+  // H1: ✕ while running cancels the backend job (fire-and-forget), then closes the bar.
+  const handleClose = () => {
+    if (statusRef.current === 'running') {
+      fetch('/api/videos/batch-docs/cancel', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobId }),
+      }).catch(() => {});
+    }
+    onClose();
+  };
 
   useEffect(() => {
     failedRef.current = 0;
@@ -879,6 +961,7 @@ export default function BatchDocStatusBar({ jobId, onClose, onError }: BatchDocS
       if (terminal) return;
       let data: ProgressEvent;
       try { data = JSON.parse(event.data) as ProgressEvent; } catch { return; }
+      onProgressEventRef.current?.(data); // H2: let the page refresh rows as items complete
       if (data.type === 'step') {
         setState({ status: 'running', current: data.current ?? 0, total: data.total ?? 0, failed: failedRef.current, step: data.step });
       } else if (data.type === 'error' && 'videoId' in data && data.videoId) {
@@ -910,7 +993,7 @@ export default function BatchDocStatusBar({ jobId, onClose, onError }: BatchDocS
           {state.status === 'done' && <>✓ {state.succeeded} generated{state.failed > 0 ? `, ${state.failed} failed` : ''}</>}
           {state.status === 'error' && <>✕ {state.message}</>}
         </span>
-        <button type="button" aria-label="Close" onClick={onClose} className="text-zinc-400 hover:text-white">✕</button>
+        <button type="button" aria-label="Close" onClick={handleClose} className="text-zinc-400 hover:text-white">✕</button>
       </div>
       {state.status === 'running' && state.total > 0 && (
         <div className="mt-1 h-1 bg-zinc-800 rounded">
@@ -989,17 +1072,21 @@ test('batch-generates selected videos and shows N-of-M progress', async ({ page 
 
 - [ ] **Step 3: Add selection + batch state and handlers to `app/page.tsx`**
 
-(a) Imports (with the other component imports):
+(a) Imports (with the other component imports). Also ensure `ProgressEvent` is imported from
+`@/types` (add it to the existing `@/types` import if not already present — used by `handleBatchProgress`):
 ```typescript
 import BulkActionBar from '@/components/BulkActionBar';
 import BatchDocStatusBar from '@/components/BatchDocStatusBar';
-import { summaryNeedsWork, summarySelectable } from '@/lib/html-doc/eligibility';
+import { summaryNeedsWork } from '@/lib/html-doc/eligibility';
+import type { ProgressEvent } from '@/types';
 ```
+(`summarySelectable` is not needed in the page — `VideoList` computes selectability internally.)
 
-(b) State (near the other `useState` declarations, ~line 44):
+(b) State (near the other `useState` declarations, ~line 44). Batch state carries the videoIds set so
+rows can show ⏳ + disabled checkboxes (H3):
 ```typescript
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [batchJobId, setBatchJobId] = useState<string | null>(null);
+  const [batchJob, setBatchJob] = useState<{ jobId: string; videoIds: Set<string> } | null>(null);
 ```
 
 (c) Handlers (near `handleGenerateHtml`):
@@ -1032,12 +1119,21 @@ import { summaryNeedsWork, summarySelectable } from '@/lib/html-doc/eligibility'
       });
       if (!res.ok) return;
       const data = await res.json();
-      setBatchJobId(data.jobId);
+      setBatchJob({ jobId: data.jobId, videoIds: new Set(ids) });
     } catch { /* best-effort */ }
   }, [videos, selected, outputFolder]);
 
+  // H2: refresh rows as each item completes (a 'step' means the prior video finished). The
+  // fetchSeqRef race guard in fetchVideos dedupes overlapping refreshes.
+  const handleBatchProgress = useCallback((e: ProgressEvent) => {
+    if (e.type === 'step' || (e.type === 'error' && 'videoId' in e && e.videoId)) {
+      const { col, order } = sortRef.current;
+      fetchVideos(outputFolder, col, order);
+    }
+  }, [fetchVideos, outputFolder]);
+
   const handleBatchClose = useCallback(() => {
-    setBatchJobId(null);
+    setBatchJob(null);
     setSelected(new Set());
     const { col, order } = sortRef.current;
     fetchVideos(outputFolder, col, order);
@@ -1062,17 +1158,26 @@ import { summaryNeedsWork, summarySelectable } from '@/lib/html-doc/eligibility'
       />
 ```
 
-(f) Pass the new selection props to `<VideoList …>`:
+(f) Pass the new selection props to `<VideoList …>` (incl. `activeBatchVideoIds` so active rows get
+⏳ + disabled checkboxes — H3):
 ```tsx
         selected={selected}
         onToggleSelect={toggleSelect}
         onSelectAllNeeding={selectAllNeeding}
+        activeBatchVideoIds={batchJob?.videoIds ?? EMPTY_SET}
 ```
+where `EMPTY_SET` is a module-level `const EMPTY_SET = new Set<string>();` (stable identity avoids
+re-renders) declared above the component.
 
-(g) Render `BatchDocStatusBar` near where `htmlJob` renders `HtmlDocStatusBar` (~line 546):
+(g) Render `BatchDocStatusBar` near where `htmlJob` renders `HtmlDocStatusBar` (~line 546), wiring the
+incremental-refresh callback (H2):
 ```tsx
-      {batchJobId && (
-        <BatchDocStatusBar jobId={batchJobId} onClose={handleBatchClose} />
+      {batchJob && (
+        <BatchDocStatusBar
+          jobId={batchJob.jobId}
+          onClose={handleBatchClose}
+          onProgressEvent={handleBatchProgress}
+        />
       )}
 ```
 
@@ -1095,9 +1200,17 @@ git commit -m "feat(batch-docs): wire selection + batch generate into the page (
 
 ---
 
+## Codex plan-review fixes folded in (2026-06-29)
+
+- **H1 (cancel):** added `POST /api/videos/batch-docs/cancel` (Task 2 Step 4b) + ✕-while-running POSTs cancel in `BatchDocStatusBar` (Task 5) + tests (AA-cancel, H1).
+- **H2 (incremental refresh):** `onProgressEvent` callback on `BatchDocStatusBar` → page `handleBatchProgress` refreshes rows per step/error (Tasks 5, 6) + test (H2).
+- **H3 (active-batch ⏳/disabled):** batch state is `{jobId, videoIds:Set}`; `activeBatchVideoIds` threaded to `VideoList`→`VideoRow`, reusing the existing `busy` prop for ⏳ and disabling the checkbox (Tasks 3, 6) + test (H3).
+- **M1:** `VideoRow`'s new props are optional-with-defaults.
+- **M2:** Phase A route returns 400 for `mode:'summary-dig'`.
+
 ## Self-Review
 
-**Spec coverage (Phase A rows):** LA1–LA7 → Task 1; AA1–AA2 + stream → Task 2; CA1–CA3 → Task 3; bar counts → Task 4; status bar + dismissal → Task 5; CA4–CA5 (run + progress + dismissal) → Task 6. Selection-operations table (toggle/select-all/clear/disabled) → Tasks 3+6. Async non-blocking + dismissal → Task 5. URL contracts (`POST/GET batch-docs`) → Task 2. All Phase A spec items mapped. (Mode toggle, dig, cost-confirm, two-level progress = Phase B, not in this plan.)
+**Spec coverage (Phase A rows):** LA1–LA7 → Task 1; AA1–AA2 + stream + cancel → Task 2; CA1–CA3 + H3 → Task 3; bar counts → Task 4; status bar + dismissal + H1/H2 → Task 5; CA4–CA5 (run + progress + dismissal) → Task 6. Selection-operations table (toggle/select-all/clear/disabled) → Tasks 3+6. Async non-blocking + dismissal (✕ aborts, auto-close) → Tasks 5. Incremental refresh + active-row ⏳ → Tasks 3/5/6. URL contracts (`POST/GET batch-docs`, cancel) → Task 2. All Phase A spec items mapped. (Mode toggle, dig, cost-confirm, two-level progress = Phase B, not in this plan.)
 
 **Placeholder scan:** every code step shows complete code; commands have expected outputs. The one conditional ("if assertOutputFolder rejects the test path, mock index-store") is a concrete instruction with the exact mock to add, not a placeholder.
 
