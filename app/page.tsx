@@ -4,11 +4,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FilterState, ProgressEvent, SortColumn, SortOrder, Video } from '@/types';
 import { FILTER_DEFAULTS } from '@/types';
 import BackfillOverlay from '@/components/BackfillOverlay';
+import BatchDocStatusBar from '@/components/BatchDocStatusBar';
+import BulkActionBar from '@/components/BulkActionBar';
 import DeepDiveStatusBar from '@/components/DeepDiveStatusBar';
 import FilterBar from '@/components/FilterBar';
 import Header from '@/components/Header';
 import HtmlDocStatusBar from '@/components/HtmlDocStatusBar';
 import VideoList from '@/components/VideoList';
+import { summaryNeedsWork } from '@/lib/html-doc/eligibility';
 
 type IngestStatus = 'idle' | 'running' | 'error';
 
@@ -23,6 +26,9 @@ interface IngestState {
 }
 
 const IDLE_INGEST: IngestState = { status: 'idle', step: '', progress: 0, error: '', current: 0, total: 0, title: '' };
+
+// Stable empty set — module-level so it never causes unnecessary re-renders
+const EMPTY_SET = new Set<string>();
 
 export default function Page() {
   const [outputFolder, setOutputFolder] = useState('');
@@ -44,6 +50,8 @@ export default function Page() {
   const [busyVideoId, setBusyVideoId] = useState<string | null>(null);
   const [showBackfill, setShowBackfill] = useState(false);
   const [syncNote, setSyncNote] = useState('');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [batchJob, setBatchJob] = useState<{ jobId: string; videoIds: Set<string> } | null>(null);
 
   const ingestESRef = useRef<EventSource | null>(null);
   const ingestJobIdRef = useRef<string | null>(null);
@@ -371,6 +379,54 @@ export default function Page() {
     fetchVideos(outputFolder, col, order); // refresh so the menu flips to View/Regenerate
   }, [fetchVideos, outputFolder]);
 
+  const toggleSelect = useCallback((videoId: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(videoId)) next.delete(videoId); else next.add(videoId);
+      return next;
+    });
+  }, []);
+
+  const selectAllNeeding = useCallback((visible: Video[]) => {
+    const needing = visible.filter(summaryNeedsWork).map((x) => x.id);
+    setSelected((prev) => {
+      const allSel = needing.length > 0 && needing.every((id) => prev.has(id));
+      return allSel ? new Set() : new Set(needing); // toggle: clear if all already selected
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => setSelected(new Set()), []);
+
+  const handleBatchGenerate = useCallback(async () => {
+    const ids = videos.filter((x) => selected.has(x.id) && summaryNeedsWork(x)).map((x) => x.id);
+    if (ids.length === 0) return;
+    try {
+      const res = await fetch('/api/videos/batch-docs', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ outputFolder, videoIds: ids, mode: 'summary' }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setBatchJob({ jobId: data.jobId, videoIds: new Set(ids) });
+    } catch { /* best-effort */ }
+  }, [videos, selected, outputFolder]);
+
+  // H2: refresh rows as each item completes (a 'step' means the prior video finished). The
+  // fetchSeqRef race guard in fetchVideos dedupes overlapping refreshes.
+  const handleBatchProgress = useCallback((e: ProgressEvent) => {
+    if (e.type === 'step' || (e.type === 'error' && 'videoId' in e && e.videoId)) {
+      const { col, order } = sortRef.current;
+      fetchVideos(outputFolder, col, order);
+    }
+  }, [fetchVideos, outputFolder]);
+
+  const handleBatchClose = useCallback(() => {
+    setBatchJob(null);
+    setSelected(new Set());
+    const { col, order } = sortRef.current;
+    fetchVideos(outputFolder, col, order);
+  }, [fetchVideos, outputFolder]);
+
   const handleArchive = useCallback(
     async (videoId: string, action: 'archive' | 'unarchive') => {
       try {
@@ -418,6 +474,10 @@ export default function Page() {
     : '—';
   const koreanCount = filteredVideos.filter((v) => v.language === 'ko').length;
   const backfillCount = videos.filter((v) => v.summaryMd && !v.tldr).length;
+
+  const selectedVideos = videos.filter((x) => selected.has(x.id));
+  const willGenerateCount = selectedVideos.filter(summaryNeedsWork).length;
+  const skipCount = selectedVideos.length - willGenerateCount;
 
   return (
     <main className="min-h-screen bg-zinc-950">
@@ -516,6 +576,13 @@ export default function Page() {
       </div>
 
       <div className="px-6 py-4">
+        <BulkActionBar
+          selectedCount={selected.size}
+          willGenerateCount={willGenerateCount}
+          skipCount={skipCount}
+          onGenerate={handleBatchGenerate}
+          onClear={clearSelection}
+        />
         <VideoList
           videos={filteredVideos}
           outputFolder={outputFolder}
@@ -530,6 +597,10 @@ export default function Page() {
           onSort={handleSort}
           minPersonalScore={filters.minPersonalScore}
           onAnnotationChange={handleAnnotationChange}
+          selected={selected}
+          onToggleSelect={toggleSelect}
+          onSelectAllNeeding={selectAllNeeding}
+          activeBatchVideoIds={batchJob?.videoIds ?? EMPTY_SET}
         />
       </div>
 
@@ -551,6 +622,13 @@ export default function Page() {
           viewUrl={htmlJob.viewUrl}
           onClose={handleHtmlClose}
           onError={() => setBusyVideoId(null)}
+        />
+      )}
+      {batchJob && (
+        <BatchDocStatusBar
+          jobId={batchJob.jobId}
+          onClose={handleBatchClose}
+          onProgressEvent={handleBatchProgress}
         />
       )}
       {showBackfill && (
