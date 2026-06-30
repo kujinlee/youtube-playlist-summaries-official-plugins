@@ -365,7 +365,10 @@ export async function runIngestion(
         onProgress({ type: 'step', videoId: meta.videoId, title: meta.title, step: 'Generating HTML doc…', current: newIndex, total: newTotal });
         try {
           await runHtmlDoc(meta.videoId, outputFolder, () => {});
-        } catch {
+        } catch (err) {
+          // Best-effort: defer to on-demand. Log with videoId so the deferred SSE step is
+          // correlatable to a cause (the underlying Gemini failure also logs upstream).
+          console.warn(`[pregen-html] deferred for ${meta.videoId}: ${err instanceof Error ? err.message : String(err)}`);
           onProgress({ type: 'step', videoId: meta.videoId, title: meta.title, step: 'HTML doc deferred (will generate on open)', current: newIndex, total: newTotal });
         }
       }
