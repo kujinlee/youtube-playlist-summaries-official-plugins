@@ -1064,7 +1064,12 @@ describe('renderDigDeeperDoc', () => {
       const summary = makeSummaryWithDugSection(312);
       const dug = [makeDugWithBody(312, '### How it works\n\nBody.')];
       const html = renderDigDeeperDoc({ summary, envelope: null, dug, mdPath, videoId: 'vid123' });
+      // Distinct, stand-out style: gold, larger than prose, bold (Option C).
+      // Color (--gold, not --ink) + size (1.12rem, not .95rem) are what make it
+      // read as a heading rather than bold prose — assert both, not just weight.
+      expect(html).toMatch(/\.dg \.dug h3\{[^}]*font-size:1\.12rem/);
       expect(html).toMatch(/\.dg \.dug h3\{[^}]*font-weight:700/);
+      expect(html).toMatch(/\.dg \.dug h3\{[^}]*color:var\(--gold\)/);
       // ONE structural assertion — proves the h3 is INSIDE .dug, not merely both-present:
       expect(html).toMatch(/<div class="dug">[\s\S]*<h3>How it works<\/h3>/);
     });
