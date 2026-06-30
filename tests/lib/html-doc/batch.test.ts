@@ -1,10 +1,21 @@
 jest.mock('../../../lib/index-store');
 jest.mock('../../../lib/html-doc/ensure');
+jest.mock('../../../lib/dig/dig-section');
+jest.mock('../../../lib/html-doc/parse');
+jest.mock('../../../lib/dig/companion-doc');
+jest.mock('node:fs/promises');
 
 import * as indexStore from '../../../lib/index-store';
 import * as ensureMod from '../../../lib/html-doc/ensure';
+import * as digMod from '../../../lib/dig/dig-section';
+import * as parseMod from '../../../lib/html-doc/parse';
+import * as companion from '../../../lib/dig/companion-doc';
+import fs from 'node:fs/promises';
 import { runBatchDocs } from '../../../lib/html-doc/batch';
+import { DIG_GENERATOR_VERSION } from '../../../lib/dig/generate';
 import type { ProgressEvent, Video } from '../../../types';
+
+const mockDig = jest.mocked(digMod.digSection);
 
 const mockReadIndex = jest.mocked(indexStore.readIndex);
 const mockAssertOutputFolder = jest.mocked(indexStore.assertOutputFolder);
@@ -97,5 +108,90 @@ describe('runBatchDocs (mode summary)', () => {
     expect(events[0]).toMatchObject({ type: 'start', total: 0 });
     expect(mockEnsure).not.toHaveBeenCalled();
     expect(events[events.length - 1]).toMatchObject({ type: 'done', succeeded: 0, failed: 0 });
+  });
+});
+
+function digReady() {
+  mockDig.mockResolvedValue(undefined);
+  jest.mocked(fs.readFile).mockResolvedValue('md' as any);
+  jest.mocked(parseMod.parseSummaryMarkdown).mockReturnValue({
+    sections: [
+      { title: 'A', timeRange: { startSec: 10 } },
+      { title: 'B', timeRange: { startSec: 20 } },
+    ],
+  } as any);
+  jest.mocked(companion.parseDugSections).mockReturnValue([]); // nothing dug yet
+}
+
+describe('runBatchDocs (mode summary-dig)', () => {
+  beforeEach(digReady);
+
+  it('LB3: per video, summary (if needed) then each missing section dug, flat counter', async () => {
+    indexWith([v('x', { summaryHtml: null, summaryMd: 'x.md', digDeeperMd: null })]);
+    const events: ProgressEvent[] = [];
+    await runBatchDocs(['x'], 'summary-dig', OF, (e) => events.push(e));
+    // total = 1 summary + 2 sections = 3
+    expect(events[0]).toMatchObject({ type: 'start', total: 3 });
+    expect(mockDig.mock.calls.map((c) => c[1])).toEqual([10, 20]); // both sections dug
+    expect(events.filter((e) => e.type === 'step').map((e: any) => e.step)).toEqual([
+      'Generating HTML doc…', 'Digging "A"…', 'Digging "B"…',
+    ]);
+    expect(events[events.length - 1]).toMatchObject({ type: 'done', succeeded: 3, failed: 0 });
+  });
+
+  it('LB2: skips sections already dug at the current version', async () => {
+    indexWith([v('x', { summaryHtml: 'x.html', docVersion: { major: 3, minor: 3 }, summaryMd: 'x.md', digDeeperMd: 'x-dig-deeper.md' })]);
+    jest.mocked(companion.parseDugSections).mockReturnValue([
+      { sectionId: 10, startSec: 10, title: 'A', bodyMarkdown: '', generatedAt: '', genVersion: DIG_GENERATOR_VERSION }, // current → skip
+    ] as any);
+    const events: ProgressEvent[] = [];
+    await runBatchDocs(['x'], 'summary-dig', OF, (e) => events.push(e));
+    expect(events[0]).toMatchObject({ type: 'start', total: 1 }); // summary current (skipped); only section 20 needs dig
+    expect(mockDig.mock.calls.map((c) => c[1])).toEqual([20]);
+  });
+
+  it('LB4: dig best-effort — one section fails, rest continue', async () => {
+    indexWith([v('x', { summaryHtml: 'x.html', docVersion: { major: 3, minor: 3 }, summaryMd: 'x.md', digDeeperMd: null })]);
+    mockDig.mockRejectedValueOnce(new Error('yt-dlp boom'));
+    const events: ProgressEvent[] = [];
+    await runBatchDocs(['x'], 'summary-dig', OF, (e) => events.push(e));
+    expect(events.some((e) => e.type === 'error' && 'videoId' in e && e.videoId === 'x')).toBe(true);
+    expect(mockDig).toHaveBeenCalledTimes(2);
+    expect(events[events.length - 1]).toMatchObject({ type: 'done', succeeded: 1, failed: 1 });
+  });
+
+  it('LB5: a video with no timestamped sections contributes 0 dig items', async () => {
+    indexWith([v('x', { summaryHtml: 'x.html', docVersion: { major: 3, minor: 3 }, summaryMd: 'x.md' })]);
+    jest.mocked(parseMod.parseSummaryMarkdown).mockReturnValue({ sections: [{ title: 'A', timeRange: null }] } as any);
+    const events: ProgressEvent[] = [];
+    await runBatchDocs(['x'], 'summary-dig', OF, (e) => events.push(e));
+    expect(events[0]).toMatchObject({ type: 'start', total: 0 });
+    expect(mockDig).not.toHaveBeenCalled();
+  });
+
+  it('LB6 (Blocking): a dig that EMITS error (not throws) counts as failed, not success', async () => {
+    indexWith([v('x', { summaryHtml: 'x.html', docVersion: { major: 3, minor: 3 }, summaryMd: 'x.md', digDeeperMd: null })]);
+    jest.mocked(parseMod.parseSummaryMarkdown).mockReturnValue({ sections: [{ title: 'A', timeRange: { startSec: 10 } }] } as any);
+    // digSection resolves but emits an error event (its real failure mode) — must NOT count as success.
+    mockDig.mockImplementation(async (_v, _s, _of, _sig, emit) => { emit({ type: 'error', log: 'no window' }); });
+    const events: ProgressEvent[] = [];
+    await runBatchDocs(['x'], 'summary-dig', OF, (e) => events.push(e));
+    expect(events.some((e) => e.type === 'error' && 'videoId' in e && e.videoId === 'x')).toBe(true);
+    expect(events[events.length - 1]).toMatchObject({ type: 'done', succeeded: 0, failed: 1 });
+  });
+
+  it('LB7 (High): a video whose summary parse throws contributes 0 dig and the batch continues', async () => {
+    indexWith([
+      v('bad', { summaryHtml: 'bad.html', docVersion: { major: 3, minor: 3 }, summaryMd: 'bad.md', digDeeperMd: null }),
+      v('ok', { summaryHtml: 'ok.html', docVersion: { major: 3, minor: 3 }, summaryMd: 'ok.md', digDeeperMd: null }),
+    ]);
+    jest.mocked(parseMod.parseSummaryMarkdown)
+      .mockImplementationOnce(() => { throw new Error('no ## sections'); }) // 'bad' parse throws
+      .mockReturnValue({ sections: [{ title: 'A', timeRange: { startSec: 10 } }] } as any); // 'ok'
+    const events: ProgressEvent[] = [];
+    await runBatchDocs(['bad', 'ok'], 'summary-dig', OF, (e) => events.push(e));
+    // 'bad' contributes 0 dig items (parse swallowed); 'ok' contributes section 10. No batch rejection.
+    expect(mockDig.mock.calls.map((c) => c[0])).toEqual(['ok']);
+    expect(events.some((e) => e.type === 'done')).toBe(true);
   });
 });

@@ -20,10 +20,8 @@ export async function POST(request: Request) {
   if (!Array.isArray(videoIds) || videoIds.length === 0 || !videoIds.every((x) => typeof x === 'string')) {
     return NextResponse.json({ error: 'videoIds[] is required' }, { status: 400 });
   }
-  // Phase A supports only 'summary'. Phase B will accept 'summary-dig'. Reject explicitly so a
-  // caller does not silently get summary-only behavior for a dig request.
-  if (mode !== 'summary') {
-    return NextResponse.json({ error: "mode 'summary-dig' is not supported yet" }, { status: 400 });
+  if (mode !== 'summary' && mode !== 'summary-dig') {
+    return NextResponse.json({ error: 'invalid mode' }, { status: 400 });
   }
   try {
     assertOutputFolder(outputFolder);
