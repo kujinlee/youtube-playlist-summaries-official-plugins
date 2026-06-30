@@ -198,13 +198,13 @@ describe('VideoList — sort column headers', () => {
     );
   }
 
-  it('renders 7 sort buttons in the column header row when onSort is provided', () => {
-    // Sortable: #, Title, Published, Added, Lang, OVR, My Score.
-    // Channel and Duration are display-only (non-sortable); Note has no sort button.
+  it('renders 9 sort buttons in the column header row when onSort is provided', () => {
+    // Sortable: #, Title, Channel, Duration, Published, Added, Lang, OVR, My Score.
+    // Note has no sort button.
     renderWithSort();
     const headers = screen.getAllByRole('columnheader');
     const sortableHeaders = headers.filter((th) => th.querySelector('button') !== null);
-    expect(sortableHeaders).toHaveLength(7);
+    expect(sortableHeaders).toHaveLength(9);
   });
 
   it('clicking # column calls onSort("serialNumber", "asc") when unsorted', () => {
@@ -228,12 +228,18 @@ describe('VideoList — sort column headers', () => {
     expect(onSort).toHaveBeenCalledWith('overall', 'asc');
   });
 
-  it('Channel and Duration columns are display-only (header text, no sort button)', () => {
-    renderWithSort();
-    expect(screen.getByText('Channel')).toBeInTheDocument();
-    expect(screen.getByText('Duration')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /channel/i })).toBeNull();
-    expect(screen.queryByRole('button', { name: /duration/i })).toBeNull();
+  it('clicking Channel column calls onSort("channel", "asc")', () => {
+    const onSort = jest.fn();
+    renderWithSort({ onSort });
+    fireEvent.click(screen.getByRole('button', { name: 'Channel' }));
+    expect(onSort).toHaveBeenCalledWith('channel', 'asc');
+  });
+
+  it('clicking Duration column calls onSort("durationSeconds", "asc")', () => {
+    const onSort = jest.fn();
+    renderWithSort({ onSort });
+    fireEvent.click(screen.getByRole('button', { name: 'Duration' }));
+    expect(onSort).toHaveBeenCalledWith('durationSeconds', 'asc');
   });
 
   it('clicking active column (asc) calls onSort with desc', () => {

@@ -241,4 +241,64 @@ describe('GET /api/videos', () => {
       expect(videos.map((v: Video) => v.id)).toEqual(['v1', 'v2']); // stable: unchanged
     });
   });
+
+  describe('sort by channel', () => {
+    it('sorts by channel ascending (A→Z)', async () => {
+      mockReadIndex.mockReturnValue(makeIndex([
+        { ...makeVideo('v1', 3), channel: 'Eric Tech' },
+        { ...makeVideo('v2', 3), channel: 'AI Engineer' },
+        { ...makeVideo('v3', 3), channel: 'DeepLearningAI' },
+      ]));
+      const res = await get({ sortColumn: 'channel', sortOrder: 'asc' });
+      const { videos } = await res.json();
+      expect(videos.map((v: Video) => v.id)).toEqual(['v2', 'v3', 'v1']);
+    });
+
+    it('sorts by channel descending (Z→A)', async () => {
+      mockReadIndex.mockReturnValue(makeIndex([
+        { ...makeVideo('v1', 3), channel: 'Eric Tech' },
+        { ...makeVideo('v2', 3), channel: 'AI Engineer' },
+        { ...makeVideo('v3', 3), channel: 'DeepLearningAI' },
+      ]));
+      const res = await get({ sortColumn: 'channel', sortOrder: 'desc' });
+      const { videos } = await res.json();
+      expect(videos.map((v: Video) => v.id)).toEqual(['v1', 'v3', 'v2']);
+    });
+
+    it('sorts videos with missing channel to the bottom, regardless of direction', async () => {
+      mockReadIndex.mockReturnValue(makeIndex([
+        { ...makeVideo('v1', 3), channel: 'Beta' },
+        { ...makeVideo('v2', 3), channel: undefined },
+        { ...makeVideo('v3', 3), channel: 'Alpha' },
+      ]));
+      const asc = await (await get({ sortColumn: 'channel', sortOrder: 'asc' })).json();
+      expect(asc.videos.map((v: Video) => v.id)).toEqual(['v3', 'v1', 'v2']);
+      const desc = await (await get({ sortColumn: 'channel', sortOrder: 'desc' })).json();
+      expect(desc.videos.map((v: Video) => v.id)).toEqual(['v1', 'v3', 'v2']);
+    });
+  });
+
+  describe('sort by durationSeconds', () => {
+    it('sorts by duration ascending (shortest first)', async () => {
+      mockReadIndex.mockReturnValue(makeIndex([
+        { ...makeVideo('v1', 3), durationSeconds: 985 },
+        { ...makeVideo('v2', 3), durationSeconds: 120 },
+        { ...makeVideo('v3', 3), durationSeconds: 8927 },
+      ]));
+      const res = await get({ sortColumn: 'durationSeconds', sortOrder: 'asc' });
+      const { videos } = await res.json();
+      expect(videos.map((v: Video) => v.id)).toEqual(['v2', 'v1', 'v3']);
+    });
+
+    it('sorts by duration descending (longest first)', async () => {
+      mockReadIndex.mockReturnValue(makeIndex([
+        { ...makeVideo('v1', 3), durationSeconds: 985 },
+        { ...makeVideo('v2', 3), durationSeconds: 120 },
+        { ...makeVideo('v3', 3), durationSeconds: 8927 },
+      ]));
+      const res = await get({ sortColumn: 'durationSeconds', sortOrder: 'desc' });
+      const { videos } = await res.json();
+      expect(videos.map((v: Video) => v.id)).toEqual(['v3', 'v1', 'v2']);
+    });
+  });
 });

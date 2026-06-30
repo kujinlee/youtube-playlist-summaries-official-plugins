@@ -12,6 +12,7 @@ const AUDIENCE_ORDER: Record<string, number> = { Beginner: 1, Intermediate: 2, A
 const SORT_COLUMNS = new Set<SortColumn>([
   'name', 'overall', 'usefulness', 'depth', 'originality', 'recency', 'completeness',
   'language', 'videoType', 'audience', 'serialNumber', 'videoPublishedAt', 'addedToPlaylistAt', 'personalScore',
+  'channel', 'durationSeconds',
 ]);
 
 function sortVideos(videos: Video[], column: SortColumn, order: SortOrder): Video[] {
@@ -54,6 +55,18 @@ function sortVideos(videos: Video[], column: SortColumn, order: SortOrder): Vide
       if (a.personalScore === undefined) return 1;
       if (b.personalScore === undefined) return -1;
       const cmp = a.personalScore - b.personalScore;
+      return order === 'asc' ? cmp : -cmp;
+    } else if (column === 'channel') {
+      // Optional field — videos with no channel always sort to the bottom, regardless of direction.
+      const aCh = a.channel ?? '';
+      const bCh = b.channel ?? '';
+      if (!aCh && !bCh) return 0;
+      if (!aCh) return 1;
+      if (!bCh) return -1;
+      const cmp = aCh.localeCompare(bCh);
+      return order === 'asc' ? cmp : -cmp;
+    } else if (column === 'durationSeconds') {
+      const cmp = a.durationSeconds - b.durationSeconds;
       return order === 'asc' ? cmp : -cmp;
     } else {
       aVal = a.ratings[column as keyof typeof a.ratings];

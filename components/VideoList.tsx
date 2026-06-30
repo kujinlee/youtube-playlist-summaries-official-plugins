@@ -29,13 +29,13 @@ interface VideoListProps {
 const COLUMNS: { key: SortColumn | null; label: string; fullName: string; align: 'left' | 'right' }[] = [
   { key: 'serialNumber', label: '#', fullName: 'Serial number', align: 'left' },
   { key: 'name', label: 'Title', fullName: 'Title', align: 'left' },
-  { key: null,             label: 'Channel',  fullName: 'Channel',  align: 'left'  },
-  { key: null,             label: 'Duration', fullName: 'Duration', align: 'right' },
+  { key: 'channel',        label: 'Channel',  fullName: 'Channel',  align: 'left'  },
+  { key: 'durationSeconds', label: 'Duration', fullName: 'Duration', align: 'right' },
   { key: 'videoPublishedAt', label: 'Published', fullName: 'Published on YouTube', align: 'left' },
   { key: 'addedToPlaylistAt', label: 'Added', fullName: 'Added to playlist', align: 'left' },
   { key: 'language', label: 'Lang', fullName: 'Language', align: 'left' },
   { key: 'overall', label: 'OVR', fullName: 'Overall', align: 'right' },
-  { key: 'personalScore', label: 'My Score', fullName: 'My Score', align: 'right' },
+  { key: 'personalScore', label: 'My Score', fullName: 'My Score', align: 'left' },
   { key: null,            label: 'Note',     fullName: 'Note',     align: 'left'  },
 ];
 
