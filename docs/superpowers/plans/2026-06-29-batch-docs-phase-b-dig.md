@@ -53,7 +53,12 @@ jest.mock('../../../lib/index-store');
 jest.mock('../../../lib/html-doc/parse');
 jest.mock('../../../lib/transcript-source');
 jest.mock('../../../lib/dig/section-window');
-jest.mock('../../../lib/dig/generate');
+// Partial mock: stub only generateDig; keep the REAL DIG_GENERATOR_VERSION const (it is exported
+// and read-only — mutating it can throw under the SWC/TS transform).
+jest.mock('../../../lib/dig/generate', () => ({
+  ...jest.requireActual('../../../lib/dig/generate'),
+  generateDig: jest.fn(),
+}));
 jest.mock('../../../lib/transcript-timestamps');
 jest.mock('../../../lib/dig/slides');
 jest.mock('../../../lib/dig/companion-doc');
@@ -85,7 +90,6 @@ beforeEach(() => {
   jest.mocked(tts.resolveTranscriptTokens).mockReturnValue('withts' as any);
   jest.mocked(slides.resolveSlideTokens).mockResolvedValue({ markdown: 'final', slides: [] } as any);
   jest.mocked(companion.upsertDugSection).mockResolvedValue(undefined as any);
-  (gen as any).DIG_GENERATOR_VERSION = 9;
 });
 afterEach(() => jest.clearAllMocks());
 
@@ -238,6 +242,32 @@ describe('runBatchDocs (mode summary-dig)', () => {
     expect(events[0]).toMatchObject({ type: 'start', total: 0 });
     expect(mockDig).not.toHaveBeenCalled();
   });
+
+  it('LB6 (Blocking): a dig that EMITS error (not throws) counts as failed, not success', async () => {
+    indexWith([v('x', { summaryHtml: 'x.html', docVersion: { major: 3, minor: 3 }, summaryMd: 'x.md', digDeeperMd: null })]);
+    jest.mocked(parseMod.parseSummaryMarkdown).mockReturnValue({ sections: [{ title: 'A', timeRange: { startSec: 10 } }] } as any);
+    // digSection resolves but emits an error event (its real failure mode) — must NOT count as success.
+    mockDig.mockImplementation(async (_v, _s, _of, _sig, emit) => { emit({ type: 'error', log: 'no window' }); });
+    const events: ProgressEvent[] = [];
+    await runBatchDocs(['x'], 'summary-dig', OF, (e) => events.push(e));
+    expect(events.some((e) => e.type === 'error' && 'videoId' in e && e.videoId === 'x')).toBe(true);
+    expect(events[events.length - 1]).toMatchObject({ type: 'done', succeeded: 0, failed: 1 });
+  });
+
+  it('LB7 (High): a video whose summary parse throws contributes 0 dig and the batch continues', async () => {
+    indexWith([
+      v('bad', { summaryHtml: 'bad.html', docVersion: { major: 3, minor: 3 }, summaryMd: 'bad.md', digDeeperMd: null }),
+      v('ok', { summaryHtml: 'ok.html', docVersion: { major: 3, minor: 3 }, summaryMd: 'ok.md', digDeeperMd: null }),
+    ]);
+    jest.mocked(parseMod.parseSummaryMarkdown)
+      .mockImplementationOnce(() => { throw new Error('no ## sections'); }) // 'bad' parse throws
+      .mockReturnValue({ sections: [{ title: 'A', timeRange: { startSec: 10 } }] } as any); // 'ok'
+    const events: ProgressEvent[] = [];
+    await runBatchDocs(['bad', 'ok'], 'summary-dig', OF, (e) => events.push(e));
+    // 'bad' contributes 0 dig items (parse swallowed); 'ok' contributes section 10. No batch rejection.
+    expect(mockDig.mock.calls.map((c) => c[0])).toEqual(['ok']);
+    expect(events.some((e) => e.type === 'done')).toBe(true);
+  });
 });
 ```
 
@@ -266,16 +296,23 @@ type WorkItem =
 /** Dig-eligible sections (have a timeRange) that are missing or stale in the companion doc. */
 async function missingDigSections(video: Video, outputFolder: string): Promise<{ sectionId: number; title: string }[]> {
   if (!video.summaryMd) return [];
-  let md: string;
-  try { md = await fs.readFile(path.join(outputFolder, video.summaryMd), 'utf8'); } catch { return []; }
-  const eligible = parseSummaryMarkdown(md).sections
-    .filter((s) => s.timeRange)
-    .map((s) => ({ sectionId: s.timeRange!.startSec, title: s.title }));
+  let eligible: { sectionId: number; title: string }[];
+  try {
+    const md = await fs.readFile(path.join(outputFolder, video.summaryMd), 'utf8');
+    // parseSummaryMarkdown THROWS on a summary with no `##` sections — treat as 0 dig sections,
+    // never let it reject the whole pre-pass.
+    eligible = parseSummaryMarkdown(md).sections
+      .filter((s) => s.timeRange)
+      .map((s) => ({ sectionId: s.timeRange!.startSec, title: s.title }));
+  } catch {
+    return [];
+  }
   if (eligible.length === 0) return [];
-  const base = path.basename(video.summaryMd, '.md');
+  // Use the INDEXED companion path when present (it may differ from the derived name); else derive.
+  const companionRel = video.digDeeperMd ?? `${path.basename(video.summaryMd, '.md')}-dig-deeper.md`;
   let dug: { sectionId: number; genVersion: number }[] = [];
   try {
-    const content = await fs.readFile(path.join(outputFolder, `${base}-dig-deeper.md`), 'utf8');
+    const content = await fs.readFile(path.join(outputFolder, companionRel), 'utf8');
     dug = parseDugSections(content).map((s) => ({ sectionId: s.sectionId, genVersion: s.genVersion }));
   } catch { /* no companion yet → all eligible are missing */ }
   const versionById = new Map(dug.map((s) => [s.sectionId, s.genVersion]));
@@ -323,7 +360,14 @@ export async function runBatchDocs(
       if (item.kind === 'summary') {
         await ensureHtmlDoc(item.videoId, outputFolder, () => {});
       } else {
-        await digSection(item.videoId, item.sectionId, outputFolder, signal, () => {});
+        // CRITICAL: digSection EMITS {type:'error'} and RETURNS for failures (missing video/section,
+        // null window, abort-before-write) — it does NOT throw. Capture that error and rethrow so the
+        // catch below counts it as failed (otherwise failures become silent successes).
+        let digErr: string | null = null;
+        await digSection(item.videoId, item.sectionId, outputFolder, signal, (e) => {
+          if (e.type === 'error') digErr = e.log;
+        });
+        if (digErr) throw new Error(digErr);
       }
       succeeded++;
     } catch (err) {
@@ -467,14 +511,41 @@ git commit -m "feat(batch-docs): BulkActionBar mode toggle + dig cost-confirm"
 
 ---
 
-## Task B4: page mode wiring + `start`-event seed + E2E
+## Task B4: mode-aware client eligibility + page wiring + `start`-event seed + E2E
 
 **Files:**
-- Modify: `app/page.tsx`, `components/BatchDocStatusBar.tsx`
-- Test: `tests/e2e/batch-docs.spec.ts` (add a summary-dig case)
+- Modify: `lib/html-doc/eligibility.ts` (add `videoNeedsBatchWork`), `components/VideoList.tsx` (mode-aware select-all), `app/page.tsx`, `components/BatchDocStatusBar.tsx`
+- Test: `tests/lib/html-doc/eligibility.test.ts` (add cases), `tests/e2e/batch-docs.spec.ts` (add a summary-dig case incl. a summary-current/never-dug video)
 
 **Interfaces:**
 - Consumes: `BatchMode` (`@/lib/html-doc/batch`); `BulkActionBar` (B3).
+- Produces: `videoNeedsBatchWork(v: Video, mode: BatchMode): boolean` in `lib/html-doc/eligibility.ts` — `summary` → `summaryNeedsWork(v)`; `summary-dig` → `summaryNeedsWork(v) || (!!v.summaryMd && !v.digDeeperMd)` (coarse: summary-stale OR never-dug; version-stale-but-dug videos are reachable by manual selection + backend skip — a documented edge case). `VideoList` gains `batchMode?: BatchMode` (default `'summary'`); its select-all uses `videoNeedsBatchWork(v, batchMode)`.
+
+- [ ] **Step 0a: Add `videoNeedsBatchWork` (TDD)** — add to `tests/lib/html-doc/eligibility.test.ts`:
+
+```typescript
+import { videoNeedsBatchWork } from '../../../lib/html-doc/eligibility';
+it('summary mode: needs work iff summary missing/stale', () => {
+  expect(videoNeedsBatchWork(v({ summaryHtml: null }), 'summary')).toBe(true);
+  expect(videoNeedsBatchWork(v({ summaryHtml: 'h.html', docVersion: { major: 3, minor: 3 } }), 'summary')).toBe(false);
+});
+it('summary-dig: a current summary that was never dug still needs work', () => {
+  expect(videoNeedsBatchWork(v({ summaryHtml: 'h.html', docVersion: { major: 3, minor: 3 }, digDeeperMd: null }), 'summary-dig')).toBe(true);
+  expect(videoNeedsBatchWork(v({ summaryHtml: 'h.html', docVersion: { major: 3, minor: 3 }, digDeeperMd: 'x-dig-deeper.md' }), 'summary-dig')).toBe(false);
+  expect(videoNeedsBatchWork(v({ summaryMd: null, summaryHtml: null, digDeeperMd: null }), 'summary-dig')).toBe(false); // no summary → nothing
+});
+```
+Run `npx jest eligibility.test` → FAIL, then implement in `lib/html-doc/eligibility.ts`:
+```typescript
+import type { BatchMode } from './batch';
+export function videoNeedsBatchWork(v: Video, mode: BatchMode): boolean {
+  if (mode === 'summary') return summaryNeedsWork(v);
+  return summaryNeedsWork(v) || (!!v.summaryMd && !v.digDeeperMd);
+}
+```
+Run `npx jest eligibility.test` → PASS.
+
+- [ ] **Step 0b: Mode-aware select-all in `VideoList`** — add `batchMode?: BatchMode` to `VideoListProps` (default `'summary'`); change `const needing = visible.filter(summaryNeedsWork)` to `const needing = visible.filter((vid) => videoNeedsBatchWork(vid, batchMode))`; import `videoNeedsBatchWork`. (The existing Phase A `VideoList.selection` tests pass `batchMode` undefined → defaults to `'summary'` → identical behavior.)
 
 - [ ] **Step 1: Add the E2E summary-dig case** to `tests/e2e/batch-docs.spec.ts`:
 
@@ -483,7 +554,10 @@ test('summary-dig mode posts mode:summary-dig after confirm', async ({ page }) =
   await page.route('**/api/settings', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ outputFolder: OUTPUT_FOLDER }) }));
   await page.route('**/api/videos**', (route) => {
     if (route.request().method() !== 'GET' || route.request().url().includes('/api/videos/')) return route.continue();
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ videos: [v('a')] }) });
+    // 'a' has a CURRENT summary HTML but was NEVER dug → must still be eligible in summary-dig mode.
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+      videos: [v('a', { summaryHtml: 'a.html', docVersion: { major: 3, minor: 3 }, digDeeperMd: null })],
+    }) });
   });
   let postedBody: any = null;
   await page.route('**/api/videos/batch-docs', (route) => {
@@ -509,10 +583,19 @@ test('summary-dig mode posts mode:summary-dig after confirm', async ({ page }) =
 
 - [ ] **Step 3: Wire mode into `app/page.tsx`**
 
-(a) Import the type: `import type { BatchMode } from '@/lib/html-doc/batch';` (alongside the existing `ProgressEvent` import).
+(a) Imports: `import type { BatchMode } from '@/lib/html-doc/batch';` and add `videoNeedsBatchWork` to the existing `@/lib/html-doc/eligibility` import (keep `summaryNeedsWork` too).
 (b) State (near `selected`): `const [batchMode, setBatchMode] = useState<BatchMode>('summary');`.
-(c) In `handleBatchGenerate`, change the POST body mode to the state: `body: JSON.stringify({ outputFolder, videoIds: ids, mode: batchMode })`. Add `batchMode` to its `useCallback` deps.
-(d) Pass to `BulkActionBar`: add `mode={batchMode}` and `onModeChange={setBatchMode}`.
+(c) `handleBatchGenerate` — filter and post with the MODE-AWARE predicate (so a summary-current/never-dug video is included in summary-dig):
+```typescript
+    const ids = videos.filter((x) => selected.has(x.id) && videoNeedsBatchWork(x, batchMode)).map((x) => x.id);
+    ...
+    body: JSON.stringify({ outputFolder, videoIds: ids, mode: batchMode }),
+```
+Add `batchMode` to its `useCallback` deps.
+(d) `selectAllNeeding` — use the mode-aware predicate: `const needing = visible.filter((x) => videoNeedsBatchWork(x, batchMode)).map((x) => x.id);` and add `batchMode` to deps.
+(e) Counts — `const willGenerateCount = selectedVideos.filter((x) => videoNeedsBatchWork(x, batchMode)).length;` (skipCount unchanged: `selectedVideos.length - willGenerateCount`).
+(f) Pass to `BulkActionBar`: add `mode={batchMode}` and `onModeChange={setBatchMode}`.
+(g) Pass `batchMode={batchMode}` to `<VideoList>` (so its header select-all is mode-aware).
 
 - [ ] **Step 4: Seed `total` from `start` in `BatchDocStatusBar`** (Phase-A Low)
 
@@ -538,6 +621,15 @@ git commit -m "feat(batch-docs): wire summary-dig mode into the page + seed tota
 ```
 
 ---
+
+## Codex plan-review fixes folded in (2026-06-29)
+
+- **Blocking — silent dig failures:** `digSection` emits `{type:'error'}` and returns (doesn't throw); the batch dig branch now captures that via a local emitter and rethrows so the catch counts it `failed`. Test LB6.
+- **High — summary-dig client eligibility:** added mode-aware `videoNeedsBatchWork(v, mode)` used by select-all (VideoList `batchMode`), `willGenerateCount`, `skipCount`, and `handleBatchGenerate` so a summary-current/never-dug video is included; E2E uses such a fixture. (B4 Step 0a/0b.)
+- **High — parse throw in pre-pass:** `missingDigSections` wraps `parseSummaryMarkdown` in try/catch → 0 dig sections, never rejects the batch. Test LB7.
+- **Medium — companion path:** pre-pass reads `video.digDeeperMd ?? derived` (indexed path may differ).
+- **Medium — cancel mid-dig:** the abort-before-write error is now captured+rethrown → counted failed (not silent success); top-of-loop abort check still emits `cancelled`.
+- **Low — read-only const in test:** B1 test uses a partial mock of `lib/dig/generate` (keeps real `DIG_GENERATOR_VERSION`) instead of mutating it.
 
 ## Self-Review
 
