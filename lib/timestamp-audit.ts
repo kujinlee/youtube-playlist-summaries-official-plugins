@@ -2,7 +2,6 @@ import fs from 'fs';
 import path from 'path';
 import { readIndex } from './index-store';
 import { CURRENT_DOC_VERSION } from './doc-version';
-import { CURRENT_DEEP_DIVE_VERSION } from './deep-dive/version';
 
 const PRE_FEATURE = { major: 1, minor: 0 };
 
@@ -13,7 +12,7 @@ export interface KindAudit {
   total: number; withTs: number; noTsWouldRegen: number; noTsStuck: number; mdMissing: number;
   stuckIds: string[]; wouldRegenIds: string[];
 }
-export interface AuditReport { folder: string; summaries: KindAudit; deepDives: KindAudit; }
+export interface AuditReport { folder: string; summaries: KindAudit; }
 
 function emptyKind(): KindAudit {
   return { total: 0, withTs: 0, noTsWouldRegen: 0, noTsStuck: 0, mdMissing: 0, stuckIds: [], wouldRegenIds: [] };
@@ -34,16 +33,11 @@ function classify(
 export function auditTimestamps(folder: string): AuditReport {
   const { videos } = readIndex(folder);
   const summaries = emptyKind();
-  const deepDives = emptyKind();
   for (const v of videos) {
     if (v.summaryMd) {
       const ver = v.docVersion ?? PRE_FEATURE;
       classify(summaries, folder, v.id, v.summaryMd, ver.major, CURRENT_DOC_VERSION.major);
     }
-    if (v.deepDiveMd) {
-      const ver = v.deepDiveVersion ?? PRE_FEATURE;
-      classify(deepDives, folder, v.id, v.deepDiveMd, ver.major, CURRENT_DEEP_DIVE_VERSION.major);
-    }
   }
-  return { folder, summaries, deepDives };
+  return { folder, summaries };
 }

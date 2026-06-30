@@ -1,4 +1,4 @@
-import { generateDeepDive, generateSummary, extractQuickView, fixSummary, transcribeViaGemini } from '../../lib/gemini';
+import { generateSummary, extractQuickView, fixSummary, transcribeViaGemini } from '../../lib/gemini';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { TranscriptSegment } from '../../lib/transcript-timestamps';
 
@@ -433,44 +433,6 @@ describe('fixSummary', () => {
   it('throws when GEMINI_API_KEY is not set', async () => {
     delete process.env.GEMINI_API_KEY;
     await expect(fixSummary(MARKDOWN, CORRECTIONS)).rejects.toThrow('GEMINI_API_KEY is not set');
-  });
-});
-
-describe('generateDeepDive', () => {
-  it('passes YouTube URL as fileData.fileUri with mimeType and includes Korean in prompt', async () => {
-    mockGenerateContent.mockResolvedValueOnce({
-      response: { text: () => 'Deep analysis text...' },
-    });
-
-    await generateDeepDive('https://www.youtube.com/watch?v=abc123', 'ko');
-
-    const request = mockGenerateContent.mock.calls[0][0] as {
-      contents: Array<{ parts: Array<{ fileData?: { fileUri: string; mimeType: string }; text?: string }> }>;
-    };
-    expect(request.contents[0].parts[0].fileData).toEqual({
-      fileUri: 'https://www.youtube.com/watch?v=abc123',
-      mimeType: 'video/mp4',
-    });
-    const textPart = request.contents[0].parts[1].text ?? '';
-    expect(textPart.toLowerCase()).toMatch(/korean|한국어/);
-  });
-
-  it('wraps Gemini API errors with a clear message and preserves cause', async () => {
-    const apiError = new Error('quota exceeded');
-    mockGenerateContent.mockRejectedValueOnce(apiError);
-
-    const err = await generateDeepDive('https://www.youtube.com/watch?v=test', 'en').catch((e) => e);
-
-    expect(err.message).toMatch(/Gemini deep-dive failed/);
-    expect(err.cause).toBe(apiError);
-  });
-
-  it('throws when GEMINI_API_KEY is not set', async () => {
-    delete process.env.GEMINI_API_KEY;
-
-    await expect(
-      generateDeepDive('https://www.youtube.com/watch?v=test', 'en'),
-    ).rejects.toThrow('GEMINI_API_KEY is not set');
   });
 });
 
