@@ -357,10 +357,18 @@ export async function runIngestion(
       alreadyIndexed.add(meta.videoId);
 
       // Pre-generate the summary HTML doc so it opens instantly (no on-demand Gemini wait).
-      // runHtmlDoc (NOT ensureHtmlDoc — circular import) is called with a no-op onProgress so its
-      // own start/step/done events never corrupt the ingest stream's "video N of M" counter.
-      onProgress({ type: 'step', videoId: meta.videoId, title: meta.title, step: 'Generating HTML doc…', current: newIndex, total: newTotal });
-      await runHtmlDoc(meta.videoId, outputFolder, () => {});
+      // Best-effort: the .md is already written and the video already upserted, so a transform
+      // failure must never fail the video or abort the batch — it just defers HTML to on-demand.
+      // No-op onProgress keeps runHtmlDoc's own events off the ingest stream. Opt out with
+      // PREGEN_SUMMARY_HTML=off (mirrors DIG_CROP=off).
+      if (process.env.PREGEN_SUMMARY_HTML !== 'off') {
+        onProgress({ type: 'step', videoId: meta.videoId, title: meta.title, step: 'Generating HTML doc…', current: newIndex, total: newTotal });
+        try {
+          await runHtmlDoc(meta.videoId, outputFolder, () => {});
+        } catch {
+          onProgress({ type: 'step', videoId: meta.videoId, title: meta.title, step: 'HTML doc deferred (will generate on open)', current: newIndex, total: newTotal });
+        }
+      }
 
       onProgress({ type: 'step', videoId: meta.videoId, title: meta.title, step: 'Saved', current: newIndex, total: newTotal });
     } catch (err) {

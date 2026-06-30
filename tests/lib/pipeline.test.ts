@@ -99,6 +99,7 @@ describe('runIngestion', () => {
   afterEach(() => {
     fs.rmSync(outputFolder, { recursive: true, force: true });
     jest.clearAllMocks();
+    delete process.env.PREGEN_SUMMARY_HTML;
   });
 
   it('emits start event first and done event last for a successful pipeline', async () => {
@@ -810,6 +811,7 @@ describe('runIngestion', () => {
       await expect(runIngestion(PLAYLIST_URL, outputFolder, () => {})).resolves.toBeUndefined();
       expect(lastWrittenVideos().find((v) => v.id === 'vidA')?.playlistIndex).toBe(7);
     });
+  });
 
   describe('summary HTML pre-generation', () => {
     it('calls runHtmlDoc once per new video with (videoId, outputFolder, noop)', async () => {
@@ -864,7 +866,40 @@ describe('runIngestion', () => {
       expect(received).not.toBe(outer);                              // pipeline passed its own no-op, not the ingest callback
       expect(events.some((e) => 'step' in e && e.step === '__SENTINEL__')).toBe(false); // sentinel never leaked
     });
-  });
+
+    it('is best-effort: a runHtmlDoc failure does not fail the video or abort the batch', async () => {
+      mockFetchPlaylistVideos.mockResolvedValue([makeVideoMeta('vid1'), makeVideoMeta('vid2')]);
+      mockFetchTranscriptSegments.mockResolvedValue([{ text: 'transcript', offset: 0, duration: 5 }]);
+      mockGenerateSummary.mockResolvedValue(makeSummaryResponse());
+      mockRunHtmlDoc.mockRejectedValueOnce(new Error('Gemini transform failed')); // vid1 fails, vid2 ok
+
+      const events: ProgressEvent[] = [];
+      await runIngestion(PLAYLIST_URL, outputFolder, (e) => events.push(e));
+
+      // Both videos still ingested; no 'error' event from the failed pre-gen.
+      expect(mockUpsertVideo).toHaveBeenCalledWith(outputFolder, expect.objectContaining({ id: 'vid1' }));
+      expect(mockUpsertVideo).toHaveBeenCalledWith(outputFolder, expect.objectContaining({ id: 'vid2' }));
+      expect(events.some((e) => e.type === 'error')).toBe(false);
+      // Non-fatal deferred note emitted for vid1.
+      expect(events.some((e) => e.type === 'step' && 'step' in e && e.step === 'HTML doc deferred (will generate on open)' && 'videoId' in e && e.videoId === 'vid1')).toBe(true);
+      // Batch still completes.
+      expect(events[events.length - 1]).toMatchObject({ type: 'done' });
+    });
+
+    it('does not call runHtmlDoc when PREGEN_SUMMARY_HTML=off', async () => {
+      process.env.PREGEN_SUMMARY_HTML = 'off';
+      mockFetchPlaylistVideos.mockResolvedValue([makeVideoMeta('vid1')]);
+      mockFetchTranscriptSegments.mockResolvedValue([{ text: 'transcript', offset: 0, duration: 5 }]);
+      mockGenerateSummary.mockResolvedValue(makeSummaryResponse());
+
+      const events: ProgressEvent[] = [];
+      await runIngestion(PLAYLIST_URL, outputFolder, (e) => events.push(e));
+
+      expect(mockRunHtmlDoc).not.toHaveBeenCalled();
+      expect(events.some((e) => e.type === 'step' && 'step' in e && e.step === 'Generating HTML doc…')).toBe(false);
+      // Video still ingested normally.
+      expect(mockUpsertVideo).toHaveBeenCalledWith(outputFolder, expect.objectContaining({ id: 'vid1' }));
+    });
   });
 });
 
