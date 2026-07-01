@@ -27,10 +27,19 @@ export async function POST(request: Request, { params }: Params) {
     return NextResponse.json({ error: 'invalid request' }, { status: 400 });
   }
 
+  // `force: true` (Re-summarize) bypasses the version check in ensureHtmlDoc → always re-summarizes.
+  const force = body?.force === true;
+
   // Same-video double-submit guard: one live job per (folder, video).
   const key = `${outputFolder}::${videoId}`;
   const existing = getActiveJob(key);
-  if (existing) return NextResponse.json({ jobId: existing });
+  if (existing) {
+    // A force request must not silently JOIN a possibly-non-force job (which would report "done"
+    // for a re-summarize that never ran). Signal conflict so the client shows no misleading bar.
+    // A non-force request joins the live job as before.
+    if (force) return NextResponse.json({ error: 'a job is already running for this video' }, { status: 409 });
+    return NextResponse.json({ jobId: existing });
+  }
 
   const jobId = crypto.randomUUID();
   createJob(jobId, key);
@@ -43,8 +52,6 @@ export async function POST(request: Request, { params }: Params) {
     (t as { unref?: () => void }).unref?.();
   };
 
-  // `force: true` (Re-summarize) bypasses the version check in ensureHtmlDoc → always re-summarizes.
-  const force = body?.force === true;
   ensureHtmlDoc(videoId, outputFolder, (event: ProgressEvent) => {
     emitJobEvent(jobId, event);
     if (event.type === 'done' || event.type === 'error') onTerminal();

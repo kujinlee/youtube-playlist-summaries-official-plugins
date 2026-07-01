@@ -37,11 +37,19 @@ it('passes force=true when the body sets it (Re-summarize)', async () => {
   expect(mockEnsure).toHaveBeenCalledWith('vid12345', HOME, expect.any(Function), CURRENT_DOC_VERSION, true);
 });
 
-it('joins an active job — a force POST while a job is live returns the same jobId, no 2nd run', async () => {
+it('409s a force POST while a job is live (must not silently join a non-force job)', async () => {
   mockEnsure.mockReturnValue(new Promise(() => {})); // stays active
+  await POST(req({ outputFolder: HOME }), ctx);           // start a (non-force) job
+  const res = await POST(req({ outputFolder: HOME, force: true }), ctx);
+  expect(res.status).toBe(409);
+  expect(mockEnsure).toHaveBeenCalledTimes(1);            // no 2nd run
+});
+
+it('a non-force duplicate still joins the active job (returns same jobId)', async () => {
+  mockEnsure.mockReturnValue(new Promise(() => {}));
   const first = await (await POST(req({ outputFolder: HOME }), ctx)).json();
-  const second = await (await POST(req({ outputFolder: HOME, force: true }), ctx)).json();
-  expect(second.jobId).toBe(first.jobId); // joins active (non-force) job — documented tradeoff
+  const second = await (await POST(req({ outputFolder: HOME }), ctx)).json();
+  expect(second.jobId).toBe(first.jobId);
   expect(mockEnsure).toHaveBeenCalledTimes(1);
 });
 

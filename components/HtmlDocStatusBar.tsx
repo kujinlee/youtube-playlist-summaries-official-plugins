@@ -106,7 +106,7 @@ export default function HtmlDocStatusBar({ videoId, jobId, title, viewUrl, onClo
             rel="noopener noreferrer"
             className="text-xs text-amber-400 underline flex-shrink-0"
           >
-            View HTML doc ↗
+            {label === 'HTML doc' ? 'View HTML doc ↗' : 'View result ↗'}
           </a>
         )}
         {state.status === 'error' && (

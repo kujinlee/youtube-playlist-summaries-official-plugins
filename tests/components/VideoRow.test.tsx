@@ -34,10 +34,12 @@ function renderRow(
     onAnnotationChange?: jest.Mock;
     onArchive?: jest.Mock;
     onGenerateHtml?: jest.Mock;
+    onResummarize?: jest.Mock;
   } = {},
 ) {
   const video = { ...baseVideo, ...overrides };
   const onAnnotationChange = options.onAnnotationChange ?? jest.fn();
+  const onResummarize = options.onResummarize ?? jest.fn();
   render(
     <table>
       <tbody>
@@ -49,12 +51,13 @@ function renderRow(
           dimUnscored={options.dimUnscored ?? false}
           onArchive={options.onArchive ?? jest.fn()}
           onGenerateHtml={options.onGenerateHtml ?? jest.fn()}
+          onResummarize={onResummarize}
           onAnnotationChange={onAnnotationChange}
         />
       </tbody>
     </table>,
   );
-  return { onAnnotationChange, video };
+  return { onAnnotationChange, onResummarize, video };
 }
 
 function openMenu(overrides: Partial<Video> = {}, onArchive = jest.fn()) {
@@ -64,6 +67,14 @@ function openMenu(overrides: Partial<Video> = {}, onArchive = jest.fn()) {
 }
 
 describe('VideoRow', () => {
+  it('threads onResummarize to the menu — clicking Re-summarize fires the callback with the video id', () => {
+    const onResummarize = jest.fn();
+    renderRow({ summaryMd: 'base.md' }, { onResummarize });
+    fireEvent.click(screen.getByRole('button', { name: /menu/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^Re-summarize$/i }));
+    expect(onResummarize).toHaveBeenCalledWith(baseVideo.id);
+  });
+
   describe('rank cell (serial number)', () => {
     // The rank cell is the only <td> carrying both `tabular-nums` and `text-zinc-500`
     // (the Published/Added cells use `text-zinc-400`), so scope assertions to it —

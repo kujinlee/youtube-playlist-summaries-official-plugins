@@ -321,7 +321,7 @@ test('Re-summarize menu action force-regenerates: POSTs force:true and shows a R
   const video = makeVideo({
     id: 'vid-resum',
     summaryHtml: 'htmls/deep-dive-into-llms.html',
-    docVersion: { major: 2, minor: 0 },
+    docVersion: { major: 3, minor: 3 }, // genuinely CURRENT → "HTML doc" is a link, but Re-summarize still force-regenerates
   });
 
   await stubSettings(page);
