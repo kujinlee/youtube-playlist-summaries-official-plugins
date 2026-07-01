@@ -78,6 +78,7 @@ export type Video = z.infer<typeof VideoSchema>;
 // --- PlaylistIndex: root of playlist-index.json ---
 export const PlaylistIndexSchema = z.object({
   playlistUrl: z.string().url(),
+  playlistTitle: z.string().optional(),
   outputFolder: z.string(),
   videos: z.array(VideoSchema),
 });

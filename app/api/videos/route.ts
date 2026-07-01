@@ -111,5 +111,5 @@ export async function GET(request: Request) {
     throw err;
   }
   const videos = sortVideos(index.videos, sortColumn, sortOrder);
-  return NextResponse.json({ videos, playlistUrl: index.playlistUrl });
+  return NextResponse.json({ videos, playlistUrl: index.playlistUrl, playlistTitle: index.playlistTitle });
 }

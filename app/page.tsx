@@ -39,6 +39,7 @@ export default function Page() {
   const [showArchive, setShowArchive] = useState(false);
   const [filters, setFilters] = useState<FilterState>(FILTER_DEFAULTS);
   const [currentPlaylistUrl, setCurrentPlaylistUrl] = useState('');
+  const [currentPlaylistTitle, setCurrentPlaylistTitle] = useState('');
   const [ingest, setIngest] = useState<IngestState>(IDLE_INGEST);
   const [htmlJob, setHtmlJob] = useState<{ videoId: string; jobId: string; title: string; viewUrl: string; label?: string } | null>(null);
   // The row whose doc job is actively running, driving its ⏳. Set on job start; cleared on
@@ -131,6 +132,7 @@ export default function Page() {
           // so a stale playlist URL doesn't linger in the field. The Header's
           // urlEditedByUser guard still protects a URL the user typed themselves.
           setCurrentPlaylistUrl(data.playlistUrl ?? '');
+          setCurrentPlaylistTitle(data.playlistTitle ?? '');
         }
       } catch {
         // leave existing video list unchanged on network error
@@ -478,6 +480,7 @@ export default function Page() {
         defaultBaseOutputFolder={baseOutputFolder}
         defaultOutputFolder={outputFolder}
         currentPlaylistUrl={currentPlaylistUrl}
+        currentPlaylistTitle={currentPlaylistTitle}
         onIngest={handleIngest}
         onSync={handleSync}
         onFolderChange={handleFolderChange}
