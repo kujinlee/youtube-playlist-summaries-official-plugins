@@ -111,9 +111,24 @@ const MAGAZINE_RESPONSE_SCHEMA: ResponseSchema = {
 };
 
 /**
+ * Reject a truncated/blocked generation (MAX_TOKENS, SAFETY, RECITATION, …). Such a response can
+ * still be structurally valid JSON — or non-empty text — so text/JSON validation alone would
+ * silently persist it (a summary cut mid-sentence parses fine). Throwing lets the caller's retry
+ * loop re-roll; the truncation is stochastic (thinking-model token budget), so a re-roll usually
+ * succeeds. Absent/UNSPECIFIED finishReason is treated as OK (don't reject on missing telemetry).
+ * Shared by generateJson, transcribeViaGemini, and fixSummary — every direct generateContent caller.
+ */
+function assertNotTruncated(result: { response: { candidates?: Array<{ finishReason?: string }> } }): void {
+  const finishReason = result.response.candidates?.[0]?.finishReason;
+  if (finishReason && finishReason !== 'STOP' && finishReason !== 'FINISH_REASON_UNSPECIFIED') {
+    throw new Error(`response not complete (finishReason=${finishReason})`);
+  }
+}
+
+/**
  * Call Gemini, parse + validate its JSON response, retrying on ANY failure (malformed JSON,
- * schema-validation, or transient API error) since the model is stochastic. Throws the last
- * error after all attempts. Logs each retry so failures are visible in dev.
+ * schema-validation, truncated/blocked response, or transient API error) since the model is
+ * stochastic. Throws the last error after all attempts. Logs each retry so failures are visible in dev.
  */
 export async function generateJson<T>(
   model: GenerativeModel,
@@ -127,6 +142,7 @@ export async function generateJson<T>(
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const result = await model.generateContent(prompt, { timeout: REQUEST_TIMEOUT_MS });
+      assertNotTruncated(result);
       return schema.parse(JSON.parse(result.response.text()));
     } catch (err) {
       lastErr = err;
@@ -263,6 +279,8 @@ ${summaryMarkdown}
 export async function fixSummary(
   mdContent: string,
   corrections: string,
+  retries = 2,
+  baseDelayMs = 400,
 ): Promise<string> {
   const client = new GoogleGenerativeAI(getApiKey());
   const model = client.getGenerativeModel({ model: SUMMARY_MODEL });
@@ -279,15 +297,26 @@ ${corrections}
 ${mdContent}
 </document>`;
 
-  try {
-    const result = await model.generateContent(prompt, { timeout: REQUEST_TIMEOUT_MS });
-    const corrected = result.response.text().trim();
-    if (!corrected) throw new Error('Gemini returned empty content');
-    return corrected;
-  } catch (err) {
-    const cause = err instanceof Error ? err.message : String(err);
-    throw new Error(`Gemini summary fix failed: ${cause}`, { cause: err });
+  // Retry loop mirrors generateJson: a truncated (non-STOP) or empty correction re-rolls rather
+  // than silently persisting a half-corrected document (this path returns text, not JSON).
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const result = await model.generateContent(prompt, { timeout: REQUEST_TIMEOUT_MS });
+      assertNotTruncated(result);
+      const corrected = result.response.text().trim();
+      if (!corrected) throw new Error('Gemini returned empty content');
+      return corrected;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < retries) {
+        console.warn(`[gemini-retry] fix-summary: attempt ${attempt + 1} failed (${err instanceof Error ? err.message : String(err)}); retrying…`);
+        if (baseDelayMs > 0) await new Promise((r) => setTimeout(r, baseDelayMs * 2 ** attempt));
+      }
+    }
   }
+  const cause = lastErr instanceof Error ? lastErr.message : String(lastErr);
+  throw new Error(`Gemini summary fix failed: ${cause}`, { cause: lastErr });
 }
 
 export async function generateMagazineModel(
@@ -424,6 +453,7 @@ export async function transcribeViaGemini(
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const result = await model.generateContent(request, { timeout: REQUEST_TIMEOUT_MS });
+      assertNotTruncated(result);
       const parsed = GeminiTranscriptSchema.parse(JSON.parse(result.response.text()));
       const segments = mapGeminiTranscriptSegments(parsed.segments);
       if (segments.length === 0) throw new Error('Gemini returned zero usable transcript segments');

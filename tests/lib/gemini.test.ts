@@ -364,6 +364,47 @@ describe('generateSummary — timestamp guard', () => {
   });
 });
 
+describe('generateSummary — truncation guard (finishReason)', () => {
+  // Both carry a resolvable [[TS:0]] so the timestamp re-roll never fires — this isolates the
+  // finishReason guard. Only the finishReason differs between the two responses.
+  const truncated = '## 1. A\n[[TS:0]]\n\ntruncated body that stops mid-sen';
+  const complete = '## 1. A\n[[TS:0]]\n\nbody\n\n## Conclusion\n[[TS:1]]\n\nend';
+  const ratings = { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 };
+
+  it('rejects a MAX_TOKENS (truncated) response and retries for a clean one', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockGenerateContent
+      .mockResolvedValueOnce({ response: { candidates: [{ finishReason: 'MAX_TOKENS' }], text: () => JSON.stringify({ summary: truncated, ratings }) } })
+      .mockResolvedValueOnce({ response: { candidates: [{ finishReason: 'STOP' }], text: () => JSON.stringify({ summary: complete, ratings }) } });
+
+    const result = await generateSummary(SEGS, 'en', 'vid123');
+
+    expect(result.summary).toContain('Conclusion');
+    expect(result.summary).not.toContain('mid-sen');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('[gemini-retry] summary'));
+    warn.mockRestore();
+  });
+
+  it('accepts a STOP response (finishReason present and OK)', async () => {
+    mockGenerateContent.mockResolvedValue({ response: { candidates: [{ finishReason: 'STOP' }], text: () => JSON.stringify({ summary: complete, ratings }) } });
+
+    const result = await generateSummary(SEGS, 'en', 'vid123');
+
+    expect(mockGenerateContent).toHaveBeenCalledTimes(1);
+    expect(result.summary).toContain('Conclusion');
+  });
+
+  it('throws a clear error after all retries return MAX_TOKENS (exhaustion)', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockGenerateContent.mockResolvedValue({ response: { candidates: [{ finishReason: 'MAX_TOKENS' }], text: () => JSON.stringify({ summary: complete, ratings }) } });
+
+    await expect(generateSummary(SEGS, 'en', 'vid123')).rejects.toThrow(/response not complete/);
+    expect(mockGenerateContent).toHaveBeenCalledTimes(3); // 1 + 2 retries
+
+    warn.mockRestore();
+  });
+});
+
 describe('extractQuickView', () => {
   it('returns tldr and takeaways from summary markdown', async () => {
     mockGenerateContent.mockResolvedValueOnce({
@@ -416,18 +457,34 @@ describe('fixSummary', () => {
   });
 
   it('throws with a clear message when Gemini returns empty content', async () => {
-    mockGenerateContent.mockResolvedValueOnce({
+    // mockResolvedValue (not Once) + baseDelayMs 0 so all retry attempts see empty and exhaust fast.
+    mockGenerateContent.mockResolvedValue({
       response: { text: () => '' },
     });
-    await expect(fixSummary(MARKDOWN, CORRECTIONS)).rejects.toThrow('Gemini summary fix failed');
+    await expect(fixSummary(MARKDOWN, CORRECTIONS, 2, 0)).rejects.toThrow('Gemini summary fix failed');
   });
 
   it('wraps Gemini API errors with a clear message', async () => {
     const apiError = new Error('network error');
-    mockGenerateContent.mockRejectedValueOnce(apiError);
-    const err = await fixSummary(MARKDOWN, CORRECTIONS).catch((e) => e);
+    // mockRejectedValue (not Once) so every retry fails identically and .cause is the original error.
+    mockGenerateContent.mockRejectedValue(apiError);
+    const err = await fixSummary(MARKDOWN, CORRECTIONS, 2, 0).catch((e) => e);
     expect(err.message).toMatch(/Gemini summary fix failed/);
     expect(err.cause).toBe(apiError);
+  });
+
+  it('rejects a MAX_TOKENS (truncated) correction and retries for a clean one', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockGenerateContent
+      .mockResolvedValueOnce({ response: { candidates: [{ finishReason: 'MAX_TOKENS' }], text: () => 'truncated half-corrected doc' } })
+      .mockResolvedValueOnce({ response: { candidates: [{ finishReason: 'STOP' }], text: () => 'full corrected doc' } });
+
+    const result = await fixSummary(MARKDOWN, CORRECTIONS, 2, 0);
+
+    expect(result).toBe('full corrected doc');
+    expect(mockGenerateContent).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('[gemini-retry] fix-summary'));
+    warn.mockRestore();
   });
 
   it('throws when GEMINI_API_KEY is not set', async () => {
@@ -444,6 +501,19 @@ describe('transcribeViaGemini', () => {
       response: { text: () => JSON.stringify({ segments }) },
     });
   }
+
+  it('rejects a MAX_TOKENS (truncated) transcript and retries for a clean one', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockGenerateContent
+      .mockResolvedValueOnce({ response: { candidates: [{ finishReason: 'MAX_TOKENS' }], text: () => JSON.stringify({ segments: [{ startSec: 0, text: 'partial' }] }) } })
+      .mockResolvedValueOnce({ response: { candidates: [{ finishReason: 'STOP' }], text: () => JSON.stringify({ segments: [{ startSec: 0, text: 'full' }, { startSec: 30, text: 'more' }] }) } });
+
+    const segs = await transcribeViaGemini(VIDEO_URL, 'vidGated', 600, 2, 0);
+
+    expect(mockGenerateContent).toHaveBeenCalledTimes(2);
+    expect(segs.map((s) => s.text)).toEqual(['full', 'more']);
+    warn.mockRestore();
+  });
 
   it('sends the YouTube URL as fileData and requests low media resolution', async () => {
     mockTranscriptResponse([{ startSec: 0, text: 'hello world' }]);
