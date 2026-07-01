@@ -21,7 +21,14 @@ export function auditSummaries(folder: string): SummaryAuditReport {
     if (!v.summaryMd) continue;
     total++;
     const serial = v.serialNumber ?? null;
-    const abs = path.join(folder, v.summaryMd);
+    // Archived videos keep their base summaryMd name but the file moves to archived/. Try the
+    // direct path first, then the archived/ subfolder, before declaring the md missing.
+    const candidates = [path.join(folder, v.summaryMd), path.join(folder, 'archived', v.summaryMd)];
+    const abs = candidates.find((p) => fs.existsSync(p));
+    if (!abs) {
+      suspects.push({ id: v.id, serial, reason: 'md-missing', confidence: 'high' });
+      continue;
+    }
     let md: string;
     try {
       md = fs.readFileSync(abs, 'utf8');

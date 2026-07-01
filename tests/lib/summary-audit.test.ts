@@ -39,6 +39,28 @@ it('lists truncated + structural suspects with index-sourced serial, reports mis
   expect(r.suspects.find((s) => s.id === 'gone')!.reason).toBe('md-missing');
 });
 
+it('resolves an archived video\'s md from the archived/ subfolder (not a false md-missing)', () => {
+  fs.mkdirSync(path.join(dir, 'archived'), { recursive: true });
+  // archived video: summaryMd base name unchanged, file lives under archived/
+  fs.writeFileSync(path.join(dir, 'archived', '005_arch.md'), '## 1. A\n▶ [0:00–1:00](u)\nComplete archived summary.');
+  const videos = [{ id: 'arch', serialNumber: 5, summaryMd: '005_arch.md', archived: true }];
+  fs.writeFileSync(path.join(dir, 'playlist-index.json'),
+    JSON.stringify({ playlistUrl: 'p', outputFolder: dir, videos }));
+
+  const r = auditSummaries(dir);
+  expect(r.total).toBe(1);
+  expect(r.suspects).toEqual([]); // found in archived/, complete → not a suspect
+});
+
+it('flags a truly-orphaned archived md (absent from both root and archived/) as md-missing', () => {
+  const videos = [{ id: 'orph', serialNumber: 6, summaryMd: '006_orph.md', archived: true }];
+  fs.writeFileSync(path.join(dir, 'playlist-index.json'),
+    JSON.stringify({ playlistUrl: 'p', outputFolder: dir, videos }));
+
+  const r = auditSummaries(dir);
+  expect(r.suspects).toEqual([{ id: 'orph', serial: 6, reason: 'md-missing', confidence: 'high' }]);
+});
+
 it('skips videos without a summaryMd and returns an empty suspect list for a clean corpus', () => {
   const videos = [
     { id: 'nosum', serialNumber: 1 },                            // no summaryMd → not counted
