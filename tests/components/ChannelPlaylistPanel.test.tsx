@@ -65,3 +65,40 @@ it('remembers the handle and refills the input from a chip', async () => {
   fireEvent.click(screen.getByRole('button', { name: '@Anthropic' }));
   expect((screen.getByRole('textbox') as HTMLInputElement).value).toBe('@Anthropic');
 });
+
+// Task 5: two-line result rows
+const body = { channelTitle: 'Anthropic', playlists: [
+  { id: 'PLc', title: 'Research Talks', url: 'https://youtube.com/playlist?list=PLc', source: 'channel', meta: { videoCount: 31 } },
+  { id: 'PLd', title: 'No URL Talks', url: '', source: 'channel', meta: {} },
+] };
+
+it('renders result rows as title + muted URL line', async () => {
+  global.fetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => body })) as unknown as typeof fetch;
+  render(<ChannelPlaylistPanel onSelect={jest.fn()} onClose={jest.fn()} />);
+  fireEvent.change(screen.getByPlaceholderText(/@channel/), { target: { value: '@Anthropic' } });
+  fireEvent.click(screen.getByText('Go'));
+  await screen.findByText('Research Talks');
+  expect(screen.getByText('Research Talks')).toBeInTheDocument();
+  expect(screen.getByText('https://youtube.com/playlist?list=PLc')).toBeInTheDocument();
+});
+
+it('a result without a url renders the title only', async () => {
+  global.fetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => body })) as unknown as typeof fetch;
+  render(<ChannelPlaylistPanel onSelect={jest.fn()} onClose={jest.fn()} />);
+  fireEvent.change(screen.getByPlaceholderText(/@channel/), { target: { value: '@Anthropic' } });
+  fireEvent.click(screen.getByText('Go'));
+  await screen.findByText('Research Talks');
+  expect(screen.getByText('No URL Talks')).toBeInTheDocument();
+  expect(screen.getAllByText(/youtube\.com\/playlist/).length).toBe(1);
+});
+
+it('picking a result calls onSelect with the url and closes', async () => {
+  global.fetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => body })) as unknown as typeof fetch;
+  const onSelect = jest.fn(); const onClose = jest.fn();
+  render(<ChannelPlaylistPanel onSelect={onSelect} onClose={onClose} />);
+  fireEvent.change(screen.getByPlaceholderText(/@channel/), { target: { value: '@Anthropic' } });
+  fireEvent.click(screen.getByText('Go'));
+  fireEvent.click(await screen.findByText('Research Talks'));
+  expect(onSelect).toHaveBeenCalledWith('https://youtube.com/playlist?list=PLc');
+  expect(onClose).toHaveBeenCalled();
+});
