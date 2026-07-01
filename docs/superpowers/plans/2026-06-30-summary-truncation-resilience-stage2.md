@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development. Steps use `- [ ]`.
 
-**Status:** draft — pending Codex plan review + AFK adversarial approval.
+**Status:** v2 — Codex plan-reviewed (no Blocking; HIGH test-migration + MEDIUMs addressed); AFK-approved via adversarial review.
 
 **Goal:** In `generateSummary`, auto-retry a truncated (or timestamp-missing) generation within one bounded attempt budget, keeping the best result and warning on exhaustion — never throwing for a soft quality miss.
 
@@ -14,7 +14,8 @@
 - Reuses `checkSummaryCompleteness` (Stage 1) — no new fingerprint logic.
 - Never throws for truncation/timestamp miss (keep-best + warn). Hard errors from `generateJson` still propagate (wrapped as today).
 - One budget: timestamp-miss and completeness share `MAX_SUMMARY_ATTEMPTS`; they do NOT each add a separate re-roll.
-- `MAX_SUMMARY_ATTEMPTS = 4`, a named test-injectable constant.
+- `MAX_SUMMARY_ATTEMPTS = 4`, a private module constant; tests assert call counts black-box.
+- **Hard errors still propagate:** if an `attempt()` throws (generateJson inner retries exhausted) after an earlier soft-miss, the outer catch wraps and throws — the soft-best is NOT returned. Keep-best applies only to soft misses (Codex MEDIUM — documented as intended).
 - `tsc --noEmit` clean + full `npm test` green before commit.
 
 ---
@@ -71,6 +72,30 @@ describe('generateSummary — auto-retry (completeness)', () => {
     expect(mockGenerateContent).toHaveBeenCalledTimes(1);
     expect(r.summary).toContain('All done.');
   });
+
+  it('exhausts the budget on a deterministic timestamp-miss (complete, no ▶) — warns, no throw', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    // complete prose but NO [[TS:i]] tokens → resolveTranscriptTokens emits no ▶ → timestamp miss.
+    const noTs = '## 1. A\n\nbody\n\n## Conclusion\n\nAll done.';
+    mockGenerateContent.mockResolvedValue(resp(noTs));
+    const r = await generateSummary(SEGS, 'en', 'vid1');           // resolves, not rejects
+    expect(mockGenerateContent).toHaveBeenCalledTimes(4);
+    expect(r.summary).toContain('All done.');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('[timestamp-miss] vid1'));
+    warn.mockRestore();
+  });
+
+  it('persists the FULL response of the selected attempt (ratings/tldr), not just the summary', async () => {
+    const good = { response: { candidates: [{ finishReason: 'STOP' }], text: () => JSON.stringify({
+      summary: complete, ratings: { usefulness: 5, depth: 5, originality: 5, recency: 5, completeness: 5 },
+      tldr: 'This video is complete.', tags: ['x'],
+    }) } };
+    mockGenerateContent.mockResolvedValueOnce(resp(truncated)).mockResolvedValueOnce(good);
+    const r = await generateSummary(SEGS, 'en', 'vid1');
+    expect(r.summary).toContain('All done.');
+    expect(r.ratings.usefulness).toBe(5);        // from the selected (2nd) attempt
+    expect(r.tldr).toBe('This video is complete.');
+  });
 });
 ```
 
@@ -115,7 +140,8 @@ function betterThan(a: number[], b: number[]): boolean {
     const chosen = best as GeminiSummaryResponse;
     const c = checkSummaryCompleteness(chosen.summary);
     if (!c.complete) {
-      console.warn(`[summary-suspicious] ${videoId} attempts=${MAX_SUMMARY_ATTEMPTS} reason=${c.reason} confidence=${c.confidence} len=${chosen.summary.length}`);
+      const sections = (chosen.summary.match(/^## /gm) ?? []).length;
+      console.warn(`[summary-suspicious] ${videoId} attempts=${MAX_SUMMARY_ATTEMPTS}/${MAX_SUMMARY_ATTEMPTS} reason=${c.reason} confidence=${c.confidence} complete=false len=${chosen.summary.length} sections=${sections}`);
     }
     if (hasSegments && !hasTimestamp(chosen.summary)) warnTimestampMiss(videoId, segments.length, MAX_SUMMARY_ATTEMPTS);
     return chosen;
@@ -126,7 +152,12 @@ function betterThan(a: number[], b: number[]): boolean {
 ```
 
 - [ ] **Step 4: Run → PASS** (`npx jest gemini.test -t "auto-retry"`)
-- [ ] **Step 5: Run the existing `— timestamp guard` describe** — confirm the folded budget didn't break timestamp-miss behavior (the "retries once … attempt 2 does" test may now assert differently; update to the new single-budget semantics if needed, preserving intent: a timestamp-miss re-rolls within the budget).
+- [ ] **Step 5: FULL generateSummary fixture migration (Codex HIGH — blast radius is the whole describe, not just the timestamp block).** Completeness now gates early-return for every generateSummary test, so any fixture that is section-less or ends without terminal punctuation will re-roll — exhausting `mockResolvedValueOnce` mocks (throw) or changing call counts. Sweep ALL generateSummary tests:
+  - Tests NOT exercising incompleteness/errors → give a completeness-clean summary: `## 1. A\n[[TS:0]]\n\nbody\n\n## Conclusion\n[[TS:1]]\n\ndone.` (with `[[TS:i]]` when SEGS present so timestamps resolve and the loop early-returns on attempt 1).
+  - Tests using `mockResolvedValueOnce` for a single response → switch to `mockResolvedValue` OR make the single response completeness-clean so only 1 attempt runs.
+  - Update call-count assertions: the timestamp-guard "warns and returns last when both attempts lack ▶" test changes from 2 → 4 (`MAX_SUMMARY_ATTEMPTS`); the "retries once when attempt 1 has no ▶ and attempt 2 does" test still early-returns at 2 (attempt 2 is complete+has-▶) — keep 2.
+  - Error-path tests (`throws when malformed JSON`, `wraps API errors`, out-of-range ratings, unexpected fields) use `mockResolvedValue`/`mockRejectedValue` (repeatable) and throw on EVERY attempt → still throw; no change needed, but verify they don't now expect a specific low call count.
+  - Run `npx jest gemini.test` and fix every failure until green.
 - [ ] **Step 6: Full suite + tsc** → green/clean
 - [ ] **Step 7: Commit** — `feat(summary): auto-retry truncated generations (keep-best + warn)`
 
