@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ChannelPlaylistPanel from './ChannelPlaylistPanel';
 import PlaylistPicker from './PlaylistPicker';
+import AddByLink from './AddByLink';
+import CurrentPlaylist from './CurrentPlaylist';
+import { playlistDisplayTitle } from '../lib/playlists/display-title';
 
 interface HeaderProps {
   /** The data ROOT (baseOutputFolder). Seeds the editable root field. */
@@ -12,6 +15,8 @@ interface HeaderProps {
   currentPlaylistUrl?: string;
   /** Display name of the currently-viewed playlist — shown as a caption near Row 2. */
   currentPlaylistTitle?: string;
+  /** True once the parent finished its initial settings→videos load (gates empty-state auto-open). */
+  playlistLoaded?: boolean;
   /** Called with the server-resolved DERIVED TARGET (<root>/<slug>/raw), not the root field. */
   onIngest: (playlistUrl: string, outputFolder: string) => void;
   onSync?: (outputFolder: string, playlistUrl: string) => void;
@@ -30,6 +35,7 @@ export default function Header({
   defaultOutputFolder: _defaultOutputFolder,
   currentPlaylistUrl,
   currentPlaylistTitle,
+  playlistLoaded = false,
   onIngest,
   onSync,
   onFolderChange,
@@ -46,6 +52,10 @@ export default function Header({
   const [resolvedKey, setResolvedKey] = useState<string | null>(null);
   const [resolving, setResolving] = useState(false);
   const [isMac, setIsMac] = useState(false);
+
+  const [addByLinkOpen, setAddByLinkOpen] = useState(false);
+  // opens the disclosure exactly once when we settle (loaded) into the empty state
+  const emptyInitRef = useRef(false);
 
   // true once the user types into the URL field; reset only on Browse success
   const urlEditedByUser = useRef(false);
@@ -78,6 +88,15 @@ export default function Header({
       setPlaylistUrl(currentPlaylistUrl);
     }
   }, [currentPlaylistUrl]);
+
+  const hasCurrentPlaylist = !!currentPlaylistTitle || !!currentPlaylistUrl;
+  // Empty state (loaded, no playlist yet) → start with the add-by-link field expanded, once.
+  useEffect(() => {
+    if (playlistLoaded && !hasCurrentPlaylist && !emptyInitRef.current) {
+      emptyInitRef.current = true;
+      setAddByLinkOpen(true);
+    }
+  }, [playlistLoaded, hasCurrentPlaylist]);
 
   // SINGLE debounced resolver. Keyed on (url, root). Empty url or root → no target.
   // The seq guard drops stale responses; a server-normalized root self-corrects the
@@ -113,7 +132,10 @@ export default function Header({
         // Let the displayed list follow the playlist URL: the page switches its
         // viewing folder to the resolved target (existing playlist → its videos;
         // new playlist → empty until Fetch/Sync populates it incrementally).
-        if (data.outputFolder) onResolvedTarget?.(data.outputFolder);
+        if (data.outputFolder) {
+          onResolvedTarget?.(data.outputFolder);
+          if (urlEditedByUser.current) setAddByLinkOpen(false);
+        }
         if (data.root && data.root !== trimRoot) {
           // server normalized the root → self-correct (no user-dirty flag, converges)
           setRoot(data.root);
@@ -207,6 +229,7 @@ export default function Header({
   const isFresh =
     trimUrl !== '' && trimRoot !== '' && !resolving && resolvedKey === currentKey && !!target;
   const canAct = isFresh && !disabled;
+  const displayTitle = playlistDisplayTitle(currentPlaylistTitle, target ?? _defaultOutputFolder);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -259,17 +282,23 @@ export default function Header({
           )}
         </p>
 
-        {currentPlaylistTitle && <p className="text-xs text-zinc-400 pl-1">▶ {currentPlaylistTitle}</p>}
+        {hasCurrentPlaylist && <CurrentPlaylist title={displayTitle} url={currentPlaylistUrl} />}
 
-        {/* Row 2: Playlist URL + Fetch & Summarize */}
+        {/* Row 2: Recent picker + Add-by-link + Fetch & Summarize */}
         <div className="flex gap-2 items-center">
           <PlaylistPicker
             root={trimRoot}
-            value={playlistUrl}
-            onChange={handleUrlChange}
             onPick={applyPickedUrl}
             onBrowseChannel={() => setChannelPanelOpen(true)}
             disabled={disabled}
+          />
+          <AddByLink
+            value={playlistUrl}
+            onChange={handleUrlChange}
+            open={addByLinkOpen}
+            onOpenChange={setAddByLinkOpen}
+            disabled={disabled}
+            currentUrl={currentPlaylistUrl}
           />
           <button
             type="submit"
