@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { fetchPlaylistVideos, detectLanguage } from './youtube';
+import { fetchPlaylistVideos, fetchPlaylistTitle, detectLanguage } from './youtube';
 import { generateSummary, extractQuickView } from './gemini';
 import { resolveTranscriptSegments } from './transcript-source';
 import { assertOutputFolder, assertVideoId, upsertVideo, readIndex, writeIndex } from './index-store';
@@ -269,10 +269,15 @@ export async function runIngestion(
 
   const metas = await fetchPlaylistVideos(playlistUrl, apiKey);
 
-  // Stamp playlistUrl into the index before processing — upsertVideo reads-then-writes
-  // and would silently carry forward the empty string it gets from a new index.
+  // Stamp playlistUrl + human title into the index before processing. Title fetch
+  // degrades to OMITTED on failure (network/auth/quota) — never persists a bare id.
+  const playlistId = (() => { try { return new URL(playlistUrl).searchParams.get('list'); } catch { return null; } })();
+  let playlistTitle: string | undefined;
+  if (playlistId) {
+    try { playlistTitle = await fetchPlaylistTitle(playlistId, apiKey); } catch { playlistTitle = undefined; }
+  }
   const existing = readIndex(outputFolder);
-  writeIndex(outputFolder, { ...existing, playlistUrl, outputFolder });
+  writeIndex(outputFolder, { ...existing, playlistUrl, outputFolder, ...(playlistTitle ? { playlistTitle } : {}) });
 
   // Recover any .md files written in a prior interrupted run before processing new videos.
   recoverOrphanedVideos(outputFolder);
