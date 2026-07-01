@@ -61,6 +61,22 @@ describe('checkSummaryCompleteness', () => {
     expect(r.complete).toBe(false);
     expect(r.confidence).toBe('low');
   });
+  it('treats a fence line with trailing text as NOT a closer → unterminated (low confidence)', () => {
+    // ```` ```stuff ```` after an opener is content, not a valid closer → fence stays open.
+    const r = checkSummaryCompleteness('## 1. A\n▶ [0:00–1:00](u)\n```\ncode\n```not a closer\nmore');
+    expect(r.complete).toBe(false);
+    expect(r.confidence).toBe('low');
+  });
+  it('works on a full on-disk .md (frontmatter + H1 + meta + callout), not just the raw body', () => {
+    const full = [
+      '---', 'tags:', '  - video-summary', 'video_id: "abc"', 'score: 4', '---', '',
+      '# Some Title', '', '**Channel:** C | **Duration:** 1:00 | **URL:** https://x', '', '---', '',
+      '> [!summary] Quick Reference', '> **TL;DR:** short.', '',
+      '## 1. A', '▶ [0:00–1:00](u)', 'body.', '', '## Conclusion', '▶ [1:00–2:00](u)', 'Final wrap-up.',
+    ].join('\n');
+    expect(checkSummaryCompleteness(full).complete).toBe(true);
+    expect(checkSummaryCompleteness(full.replace('Final wrap-up.', 'Final wrap-up cut off')).complete).toBe(false);
+  });
   it('flags an unresolved trailing [[TS:i]] token', () => {
     expect(checkSummaryCompleteness(withSections('[[TS:3]]')).complete).toBe(false);
   });

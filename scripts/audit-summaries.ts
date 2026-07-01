@@ -1,7 +1,9 @@
 /**
  * audit-summaries.ts — read-only completeness health-check over a corpus folder. NO Gemini.
  * Usage:  npm run audit-summaries -- --folder <outputFolder>
- *         (defaults to OUTPUT_FOLDER). Always exits 0 — it is a report tool.
+ *         (defaults to OUTPUT_FOLDER).
+ * ALWAYS exits 0 — it is a report tool. Missing folder or a bad/unreadable index is printed to
+ * stderr as a diagnostic, never a nonzero exit (so it can be piped/chained without gating).
  */
 import { auditSummaries } from '../lib/summary-audit';
 
@@ -12,13 +14,17 @@ function arg(name: string): string | undefined {
 
 const folder = arg('folder') ?? process.env.OUTPUT_FOLDER ?? '';
 if (!folder) {
-  console.error('Set --folder <outputFolder> or OUTPUT_FOLDER');
-  process.exit(1);
+  console.error('audit-summaries: set --folder <outputFolder> or OUTPUT_FOLDER — nothing to audit');
+  process.exit(0);
 }
 
-const r = auditSummaries(folder);
-console.log(`[${folder}] total ${r.total}, suspects ${r.suspects.length}`);
-for (const s of r.suspects) {
-  console.log(`  ${s.serial ?? '?'} | ${s.id} | ${s.reason} | ${s.confidence}`);
+try {
+  const r = auditSummaries(folder);
+  console.log(`[${folder}] total ${r.total}, suspects ${r.suspects.length}`);
+  for (const s of r.suspects) {
+    console.log(`  ${s.serial ?? '?'} | ${s.id} | ${s.reason} | ${s.confidence}`);
+  }
+} catch (e) {
+  console.error(`audit-summaries: could not audit ${folder}: ${e instanceof Error ? e.message : String(e)}`);
 }
-process.exit(0); // read-only report tool — never gate on suspects
+process.exit(0); // read-only report tool — never gate on suspects or data errors

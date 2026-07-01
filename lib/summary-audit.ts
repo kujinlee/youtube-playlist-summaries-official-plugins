@@ -21,9 +21,24 @@ export function auditSummaries(folder: string): SummaryAuditReport {
     if (!v.summaryMd) continue;
     total++;
     const serial = v.serialNumber ?? null;
-    // Archived videos keep their base summaryMd name but the file moves to archived/. Try the
-    // direct path first, then the archived/ subfolder, before declaring the md missing.
-    const candidates = [path.join(folder, v.summaryMd), path.join(folder, 'archived', v.summaryMd)];
+    // `summaryMd` is index-controlled; a corrupt/hand-edited entry could contain `../`. Only accept
+    // paths that stay within the corpus root (covers both raw/ and archived/). Reject traversal.
+    const root = path.resolve(folder);
+    const contained = (p: string) => {
+      const abs = path.resolve(folder, p);
+      return abs === root || abs.startsWith(root + path.sep) ? abs : null;
+    };
+    // Validate the raw summaryMd first — a `../` here is an unsafe (traversal) index entry. Only
+    // once it's known-safe do we also try the archived/ subfolder (archived videos keep their base
+    // name but the file moves under archived/). This ordering stops `../x` from collapsing to an
+    // in-root path via the archived join and being mislabeled md-missing.
+    const direct = contained(v.summaryMd);
+    if (!direct) {
+      suspects.push({ id: v.id, serial, reason: 'unsafe path (outside corpus)', confidence: 'high' });
+      continue;
+    }
+    const candidates = [direct, contained(path.join('archived', v.summaryMd))]
+      .filter((p): p is string => p !== null);
     const abs = candidates.find((p) => fs.existsSync(p));
     if (!abs) {
       suspects.push({ id: v.id, serial, reason: 'md-missing', confidence: 'high' });

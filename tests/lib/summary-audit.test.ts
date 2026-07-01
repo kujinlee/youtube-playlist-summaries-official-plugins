@@ -61,6 +61,19 @@ it('flags a truly-orphaned archived md (absent from both root and archived/) as 
   expect(r.suspects).toEqual([{ id: 'orph', serial: 6, reason: 'md-missing', confidence: 'high' }]);
 });
 
+it('rejects a summaryMd that escapes the corpus root (path traversal) without reading it', () => {
+  // Plant a file outside the corpus that a traversal path would resolve to.
+  const outside = path.join(os.homedir(), `.tmp-secret-${path.basename(dir)}.md`);
+  fs.writeFileSync(outside, '## 1. A\n▶ [0:00–1:00](u)\nComplete secret.');
+  const videos = [{ id: 'evil', serialNumber: 9, summaryMd: `../${path.basename(outside)}` }];
+  fs.writeFileSync(path.join(dir, 'playlist-index.json'),
+    JSON.stringify({ playlistUrl: 'p', outputFolder: dir, videos }));
+
+  const r = auditSummaries(dir);
+  fs.rmSync(outside, { force: true });
+  expect(r.suspects).toEqual([{ id: 'evil', serial: 9, reason: 'unsafe path (outside corpus)', confidence: 'high' }]);
+});
+
 it('skips videos without a summaryMd and returns an empty suspect list for a clean corpus', () => {
   const videos = [
     { id: 'nosum', serialNumber: 1 },                            // no summaryMd → not counted

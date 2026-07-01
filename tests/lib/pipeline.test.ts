@@ -1249,6 +1249,8 @@ describe('writeSummaryDoc', () => {
     });
 
     expect(result.summaryMd).toBe('trunc.md'); // non-blocking — doc still written
+    const md = fsReal.readFileSync(`${outputFolder}/trunc.md`, 'utf-8'); // file actually on disk
+    expect(md).toContain('this body is cut off mid');                    // with the suspicious body
     expect(warn).toHaveBeenCalledWith(expect.stringMatching(/\[summary-suspicious\] vidTrunc11:.*mid-sentence/));
     warn.mockRestore();
   });
