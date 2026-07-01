@@ -7,4 +7,6 @@ describe('safeHttpUrl', () => {
   it('rejects data:', () => expect(safeHttpUrl('data:text/html,<script>alert(1)</script>')).toBeNull());
   it('rejects undefined and empty', () => { expect(safeHttpUrl()).toBeNull(); expect(safeHttpUrl('')).toBeNull(); });
   it('rejects a malformed string', () => expect(safeHttpUrl('not a url')).toBeNull());
+  it('rejects a mixed-case javascript scheme', () => expect(safeHttpUrl('JavaScript:alert(1)')).toBeNull());
+  it('rejects a protocol-relative url', () => expect(safeHttpUrl('//evil.com/path')).toBeNull());
 });
