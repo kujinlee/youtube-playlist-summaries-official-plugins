@@ -119,7 +119,7 @@ test('a CURRENT video (summaryHtml + docVersion:{2,0}) shows a single HTML doc l
   const video = makeVideo({
     id: 'vid-hd-current',
     summaryHtml: 'htmls/deep-dive-into-llms.html',
-    docVersion: { major: 2, minor: 0 },
+    docVersion: { major: 3, minor: 3 }, // == CURRENT_DOC_VERSION → genuinely current (was a stale {2,0})
   });
 
   await stubSettings(page);
@@ -314,4 +314,40 @@ test('KO summary generates without mangling Korean text', async ({ page }) => {
   expect(body).toContain('한국어 딥 다이브');
   expect(body).toContain('핵심 요약입니다.');
   expect(body).toContain('첫 번째 요점.');
+});
+
+test('Re-summarize menu action force-regenerates: POSTs force:true and shows a Re-summarize status bar', async ({ page }) => {
+  // A CURRENT video — "HTML doc" would be a link, but "Re-summarize" is always a force button.
+  const video = makeVideo({
+    id: 'vid-resum',
+    summaryHtml: 'htmls/deep-dive-into-llms.html',
+    docVersion: { major: 2, minor: 0 },
+  });
+
+  await stubSettings(page);
+  await stubVideos(page, [video]);
+
+  // Capture the POST body so we can assert force:true was sent.
+  let postedBody: any = null;
+  await page.route('**/api/videos/vid-resum/html-doc', (route) => {
+    if (route.request().url().includes('/html-doc/')) { route.continue(); return; }
+    postedBody = route.request().postDataJSON();
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ jobId: 'resum-1' }) });
+  });
+  await stubHtmlDocStream(page, 'vid-resum', [
+    { type: 'step', step: 'Re-summarizing (adding timestamps)…', current: 1, total: 2 },
+    { type: 'done' },
+  ]);
+
+  await page.goto('/');
+  await expect(page.getByText('Deep Dive into LLMs')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Menu' }).click();
+  await page.getByRole('button', { name: /^Re-summarize$/i }).click();
+
+  // The shared status bar is labeled "Re-summarize" (label prop), not "HTML doc".
+  await expect(page.getByRole('status', { name: /re-summarize progress/i })).toBeVisible();
+
+  // The POST carried force:true (the whole point of Re-summarize).
+  expect(postedBody).toMatchObject({ outputFolder: OUTPUT_FOLDER, force: true });
 });

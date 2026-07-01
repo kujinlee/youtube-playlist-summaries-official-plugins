@@ -11,6 +11,7 @@ interface VideoMenuProps {
   onArchive: (videoId: string, action: 'archive' | 'unarchive') => void;
   onEditCorrections: () => void;
   onGenerateHtml: (videoId: string) => void;
+  onResummarize?: (videoId: string) => void;
   onClose: () => void;
   busy?: boolean;
 }
@@ -37,7 +38,7 @@ function obsidianHref(baseOutputFolder: string, outputFolder: string, file: stri
 const itemClass = 'block w-full px-4 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-700';
 const disabledClass = 'block w-full px-4 py-2 text-left text-sm text-zinc-500 cursor-not-allowed';
 
-export default function VideoMenu({ video, outputFolder, baseOutputFolder, onArchive, onEditCorrections, onGenerateHtml, onClose, busy = false }: VideoMenuProps) {
+export default function VideoMenu({ video, outputFolder, baseOutputFolder, onArchive, onEditCorrections, onGenerateHtml, onResummarize = () => {}, onClose, busy = false }: VideoMenuProps) {
   const summaryFile = video.summaryMd?.replace(/\.md$/, '') ?? video.id;
   const hasSummary = !!video.summaryMd;
   const htmlViewHref = `/api/html/${encodeURIComponent(video.id)}?outputFolder=${encodeURIComponent(outputFolder)}&type=summary`;
@@ -70,6 +71,14 @@ export default function VideoMenu({ video, outputFolder, baseOutputFolder, onArc
             : <button type="button" onClick={() => { onGenerateHtml(video.id); onClose(); }} className={itemClass}>HTML doc</button>;
         })()}
       </li>
+      {hasSummary && (
+        <li role="none">
+          {/* Always force-regenerates (never opens cached) — for a doc the audit flags or that looks off. */}
+          {busy
+            ? <span aria-disabled="true" className={disabledClass}>Re-summarize <span aria-hidden="true">⏳</span></span>
+            : <button type="button" onClick={() => { onResummarize(video.id); onClose(); }} className={itemClass}>Re-summarize</button>}
+        </li>
+      )}
       {video.summaryMd && (
         <li role="none">
           <button

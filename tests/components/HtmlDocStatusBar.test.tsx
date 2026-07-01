@@ -44,6 +44,16 @@ it('shows an error message on error', () => {
   expect(screen.getByRole('alert')).toHaveTextContent('transform failed');
 });
 
+it('defaults the label to "HTML doc"', () => {
+  render(<HtmlDocStatusBar videoId="v" jobId="j1" title="T" viewUrl={viewUrl} onClose={() => {}} />);
+  expect(screen.getByRole('status', { name: /HTML doc Progress/i })).toBeInTheDocument();
+});
+
+it('uses a custom label (Re-summarize) in the heading and aria-label', () => {
+  render(<HtmlDocStatusBar videoId="v" jobId="j1" title="T" viewUrl={viewUrl} onClose={() => {}} label="Re-summarize" />);
+  expect(screen.getByRole('status', { name: /Re-summarize Progress/i })).toBeInTheDocument();
+});
+
 it('shows a connection-lost error when EventSource errors', () => {
   render(<HtmlDocStatusBar videoId="v" jobId="j1" title="T" viewUrl={viewUrl} onClose={() => {}} />);
   act(() => { FakeES.last!.onerror?.(); });

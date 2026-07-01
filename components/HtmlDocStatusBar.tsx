@@ -12,6 +12,9 @@ interface HtmlDocStatusBarProps {
   // Fired when the job reaches a terminal error (SSE `error` event or a lost connection).
   // The page uses it to clear the row's busy ⏳ — an errored job is no longer "regenerating".
   onError?: () => void;
+  // Operation label shown in the bar heading + aria-label. Defaults to 'HTML doc'; the Re-summarize
+  // path passes 'Re-summarize' so the shared bar reads correctly for that action.
+  label?: string;
 }
 
 type BarState =
@@ -19,7 +22,7 @@ type BarState =
   | { status: 'done' }
   | { status: 'error'; message: string };
 
-export default function HtmlDocStatusBar({ videoId, jobId, title, viewUrl, onClose, onError }: HtmlDocStatusBarProps) {
+export default function HtmlDocStatusBar({ videoId, jobId, title, viewUrl, onClose, onError, label = 'HTML doc' }: HtmlDocStatusBarProps) {
   const [state, setState] = useState<BarState>({ status: 'running', progress: 0, step: '' });
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -71,13 +74,13 @@ export default function HtmlDocStatusBar({ videoId, jobId, title, viewUrl, onClo
   return (
     <div
       role="status"
-      aria-label="HTML Doc Progress"
+      aria-label={`${label} Progress`}
       aria-live="polite"
       className="fixed bottom-0 left-0 right-0 z-40 bg-zinc-900 border-t border-zinc-700 px-6 py-3 shadow-lg"
     >
       <div className="max-w-5xl mx-auto flex items-center gap-3">
         <span className="text-xs text-zinc-400 flex-shrink-0">
-          HTML doc{title && <span className="text-zinc-300 ml-1">— {title}</span>}
+          {label}{title && <span className="text-zinc-300 ml-1">— {title}</span>}
         </span>
 
         <div

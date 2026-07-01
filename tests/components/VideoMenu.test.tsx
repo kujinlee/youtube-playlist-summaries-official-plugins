@@ -33,3 +33,27 @@ it('does not render PDF menu items (PDF generation removed)', () => {
   expect(screen.queryByText('View Summary PDF')).not.toBeInTheDocument();
   expect(screen.queryByText('View Deep Dive PDF')).not.toBeInTheDocument();
 });
+
+// ── Re-summarize (Stage 3) ───────────────────────────────────────────────────
+
+it('renders a "Re-summarize" button and calls onResummarize(id) + onClose on click', () => {
+  const onResummarize = jest.fn();
+  const onClose = jest.fn();
+  render(<VideoMenu {...props} onResummarize={onResummarize} onClose={onClose} video={base as any} />);
+  const btn = screen.getByRole('button', { name: /Re-summarize/i });
+  fireEvent.click(btn);
+  expect(onResummarize).toHaveBeenCalledWith('vid11111111');
+  expect(onClose).toHaveBeenCalled();
+});
+
+it('disables Re-summarize (⏳, no button) while busy', () => {
+  render(<VideoMenu {...props} busy video={base as any} />);
+  const el = screen.getByText(/Re-summarize/i).closest('a,button,span');
+  expect(el).toHaveAttribute('aria-disabled', 'true');
+  expect(screen.queryByRole('button', { name: /Re-summarize/i })).toBeNull();
+});
+
+it('omits Re-summarize when there is no summary', () => {
+  render(<VideoMenu {...props} video={{ ...base, summaryMd: null } as any} />);
+  expect(screen.queryByText(/Re-summarize/i)).toBeNull();
+});

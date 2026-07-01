@@ -40,7 +40,7 @@ export default function Page() {
   const [filters, setFilters] = useState<FilterState>(FILTER_DEFAULTS);
   const [currentPlaylistUrl, setCurrentPlaylistUrl] = useState('');
   const [ingest, setIngest] = useState<IngestState>(IDLE_INGEST);
-  const [htmlJob, setHtmlJob] = useState<{ videoId: string; jobId: string; title: string; viewUrl: string } | null>(null);
+  const [htmlJob, setHtmlJob] = useState<{ videoId: string; jobId: string; title: string; viewUrl: string; label?: string } | null>(null);
   // The row whose doc job is actively running, driving its ⏳. Set on job start; cleared on
   // close OR when a status bar reports a terminal error (so a failed job stops showing ⏳ while
   // its error bar stays open). Derived-from-job-existence would leave ⏳ stuck through the error.
@@ -344,6 +344,27 @@ export default function Page() {
     [outputFolder, videos],
   );
 
+  const handleResummarize = useCallback(
+    async (videoId: string) => {
+      const title = videos.find((v) => v.id === videoId)?.title ?? '';
+      const viewUrl = `/api/html/${encodeURIComponent(videoId)}?outputFolder=${encodeURIComponent(outputFolder)}&type=summary`;
+      try {
+        const res = await fetch(`/api/videos/${encodeURIComponent(videoId)}/html-doc`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ outputFolder, force: true }), // force → always re-summarize
+        });
+        if (!res.ok || !mountedRef.current) return;
+        const data = await res.json();
+        setHtmlJob({ videoId, jobId: data.jobId, title, viewUrl, label: 'Re-summarize' });
+        setBusyVideoId(videoId);
+      } catch {
+        // ignore — no status bar opened
+      }
+    },
+    [outputFolder, videos],
+  );
+
   const handleHtmlClose = useCallback(() => {
     setHtmlJob(null);
     setBusyVideoId(null);
@@ -565,6 +586,7 @@ export default function Page() {
           busyVideoId={busyVideoId}
           onArchive={handleArchive}
           onGenerateHtml={handleGenerateHtml}
+          onResummarize={handleResummarize}
           sortColumn={sortColumn}
           sortOrder={sortOrder}
           onSort={handleSort}
@@ -584,6 +606,7 @@ export default function Page() {
           jobId={htmlJob.jobId}
           title={htmlJob.title}
           viewUrl={htmlJob.viewUrl}
+          label={htmlJob.label}
           onClose={handleHtmlClose}
           onError={() => setBusyVideoId(null)}
         />

@@ -20,6 +20,7 @@ interface VideoRowProps {
   busy?: boolean;
   onArchive: (videoId: string, action: 'archive' | 'unarchive') => void;
   onGenerateHtml: (videoId: string) => void;
+  onResummarize?: (videoId: string) => void;
   onAnnotationChange: (videoId: string, patch: Partial<Pick<Video, 'personalScore' | 'personalNote' | 'corrections' | 'tldr' | 'takeaways' | 'summaryHtml'>>) => void;
   selected?: boolean;
   selectable?: boolean;
@@ -34,7 +35,7 @@ const LANG_COLOR: Record<string, string> = {
 // Total column count in VideoList: 1 checkbox + 1 chevron + 10 data columns = 12
 const TOTAL_COLUMNS = 12;
 
-export default function VideoRow({ video, rank, outputFolder, baseOutputFolder, dimUnscored, busy = false, onArchive, onGenerateHtml, onAnnotationChange, selected = false, selectable = true, onToggleSelect = () => {} }: VideoRowProps) {
+export default function VideoRow({ video, rank, outputFolder, baseOutputFolder, dimUnscored, busy = false, onArchive, onGenerateHtml, onResummarize = () => {}, onAnnotationChange, selected = false, selectable = true, onToggleSelect = () => {} }: VideoRowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [showCorrections, setShowCorrections] = useState(false);
@@ -112,6 +113,7 @@ export default function VideoRow({ video, rank, outputFolder, baseOutputFolder, 
                   busy={busy}
                   onArchive={onArchive}
                   onGenerateHtml={onGenerateHtml}
+                  onResummarize={onResummarize}
                   onEditCorrections={() => setShowCorrections(true)}
                   onClose={() => setMenuOpen(false)}
                 />
