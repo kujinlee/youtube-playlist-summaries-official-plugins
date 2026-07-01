@@ -7,6 +7,7 @@ import { assertOutputFolder, assertVideoId, upsertVideo, readIndex, writeIndex }
 import { slugify } from './slugify';
 import { nextSerial } from './serial-assign';
 import { applySerial, padSerial } from './serial-filename';
+import { checkSummaryCompleteness } from './summary-completeness';
 import type { ProgressEvent, Video, VideoMeta, RatingValue, VideoType, Audience, GeminiSummaryResponse } from '../types';
 import { CURRENT_DOC_VERSION } from './doc-version';
 import { padDividers } from './markdown-dividers';
@@ -50,6 +51,12 @@ export async function writeSummaryDoc(input: SummaryDocInput): Promise<SummaryDo
   const { summary: rawSummary, ratings, overallScore, videoType, audience, tags, tldr, takeaways } =
     await generateSummary(segments, language, videoId);
   const summary = padDividers(rawSummary);
+  // Non-blocking observability: flag a summary that looks truncated (see summary-completeness).
+  // Never blocks the write — Stage 2 adds auto-retry; Stage 1 only makes it visible.
+  const completeness = checkSummaryCompleteness(summary);
+  if (!completeness.complete) {
+    console.warn(`[summary-suspicious] ${videoId}: ${completeness.reason} (confidence=${completeness.confidence})`);
+  }
 
   const structuralTags = ['video-summary', language];
   const allTags = [...structuralTags, ...(tags ?? [])];

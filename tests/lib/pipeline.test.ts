@@ -1239,6 +1239,33 @@ describe('writeSummaryDoc', () => {
     );
   });
 
+  it('warns [summary-suspicious] with a reason when the summary looks truncated, but still writes the doc', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockGenerateSummary.mockResolvedValue(makeSummaryResponse({ summary: '## 1. A\n▶ [0:00–0:05](u)\nthis body is cut off mid' }));
+
+    const result = await writeSummaryDoc({
+      videoId: 'vidTrunc11', title: 'T', youtubeUrl: 'https://youtu.be/x',
+      channel: 'C', durationSeconds: 5, outputFolder, baseName: 'trunc',
+    });
+
+    expect(result.summaryMd).toBe('trunc.md'); // non-blocking — doc still written
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/\[summary-suspicious\] vidTrunc11:.*mid-sentence/));
+    warn.mockRestore();
+  });
+
+  it('does NOT warn [summary-suspicious] when the summary is complete', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockGenerateSummary.mockResolvedValue(makeSummaryResponse({ summary: '## 1. A\n▶ [0:00–0:05](u)\nAll wrapped up.' }));
+
+    await writeSummaryDoc({
+      videoId: 'vidOk111111', title: 'T', youtubeUrl: 'https://youtu.be/x',
+      channel: 'C', durationSeconds: 5, outputFolder, baseName: 'ok',
+    });
+
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('[summary-suspicious]'));
+    warn.mockRestore();
+  });
+
   it('falls back to Gemini transcription when captions are unavailable', async () => {
     mockFetchTranscriptSegments.mockRejectedValueOnce(new Error('Transcript is disabled on this video'));
     mockTranscribeViaGemini.mockResolvedValueOnce([{ text: 'gemini transcript', offset: 0, duration: 5 }]);
