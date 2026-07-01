@@ -70,7 +70,10 @@ untouched. Channel-recents storage (localStorage) migrates to server settings at
 
 ### Label fallback chain (never show a bare hash)
 
-`playlistTitle` → folder slug (e.g. `agentic-ai-claude-code`) → `id`.
+`playlistTitle` → folder slug (e.g. `agentic-ai-claude-code`) → `"Untitled playlist"` (synthetic).
+
+The raw `list=` id is **never** used as a display label. In `recent-provider` the folder name always exists, so
+the synthetic last resort is belt-and-suspenders (Codex M1).
 
 ---
 
@@ -78,12 +81,19 @@ untouched. Channel-recents storage (localStorage) migrates to server settings at
 
 Add `playlistTitle: string` to the top of `raw/playlist-index.json` (next to `playlistUrl`, `outputFolder`).
 
-**Write path (going forward):** the ingest/output-folder resolution already calls `fetchPlaylistTitle` to build
-the slug — keep the result and persist it. No new API call.
+**Write path (going forward):** persisted **server-side inside `runIngestion`** (`lib/pipeline.ts`), which already
+holds `playlistUrl` + `apiKey`. The existing index stamp (`writeIndex(outputFolder, { ...existing, playlistUrl,
+outputFolder })`, pipeline.ts:271) gains `playlistTitle` from a `fetchPlaylistTitle` call (degrades to omitted on
+failure). **No client threading** — `/api/resolve-folder` and `onIngest` are unchanged (Codex B2).
+
+**Display path:** `playlistTitle` is surfaced on the `/api/videos` response → `app/page.tsx` `currentPlaylistTitle`
+state → Header name caption. This is what replaces the hash the user sees.
 
 **Backfill (existing 3 playlists):** **Script** `scripts/backfill-playlist-titles.ts`
 (+ `npm run backfill-playlist-titles`), mirroring the existing `audit-*` / `backfill-serial` scripts: for each
-index missing `playlistTitle`, fetch by id, write it. Run once after merge.
+index missing `playlistTitle`, fetch by id, write it. Run once after merge. The script does read-modify-write on
+`playlist-index.json`, so it prints the same **"do not run concurrently with ingestion/sync"** warning the existing
+`audit-*` / `backfill-serial` scripts carry (Codex M4).
 
 **No per-open fetching.** `recent-provider` stays pure fs — it never calls the API. If a folder still lacks a
 `playlistTitle` (script not yet run, or a hand-added folder), the provider shows the **slug** via the fallback
@@ -106,8 +116,22 @@ chain; running the backfill script fixes it. This keeps the dropdown instant and
 
 | Route | Params | Returns | Guards |
 |---|---|---|---|
-| `GET /api/playlists/recent` | `root` (base output folder) | `PlaylistOption[]` | root validation (no traversal), reuse `assertOutputFolder`-style check |
-| `GET /api/playlists/channel` | `handle` (`@x`, `x`, or channel URL) | `{ channelTitle, playlists: PlaylistOption[] }` | `YOUTUBE_API_KEY` from env |
+| `GET /api/playlists/recent` | `root` (base output folder) | `200 PlaylistOption[]` · `400` missing/invalid root | `assertOutputFolder(root)` — `path.resolve` normalize + realpath symlink check + reject outside `$HOME` |
+| `GET /api/playlists/channel` | `handle` (`@x`, `x`, or channel URL) | `200 { channelTitle, playlists }` · `400` missing handle · `404` channel not found · `502` upstream error · `500` no API key | strict handle parse (below); `YOUTUBE_API_KEY` from env |
+
+**Security — `root` boundary (Codex B1).** `assertOutputFolder` normalizes and realpath-checks, rejecting anything
+outside `$HOME`. This is the **same guard the app already applies to ingest writes** (`/api/ingest`), `/api/videos`,
+and `/api/html`; the picker only **reads** playlist metadata under it, so it adds **no new exposure** beyond the
+existing app-wide boundary. Because the root is user-chosen via "Browse…", there is no single fixed base to anchor
+to today. **Accepted for the localhost single-user app; tightening `root` to a per-user base is multi-tenant
+hardening tracked in the roadmap** (see [[cloud-multitenant-goal]]). A non-OK response makes the recent dropdown
+show empty recents (read-only, acceptable) — it never surfaces raw errors.
+
+**Strict handle parse (Codex H2).** Parse the input into exactly one of:
+`{ kind: 'handle', value: /^[A-Za-z0-9._-]{1,30}$/ }` (from `@x`, bare `x`, or `youtube.com/@x`) or
+`{ kind: 'channelId', value: /^UC[A-Za-z0-9_-]{20,}$/ }` (from `/channel/UC…`). Anything else → treated as
+not-found (no API call). The handle is URL-encoded before the API call and only ever passed to the YouTube API
+(never fs/shell).
 
 Channel-recents (remembered handles) are **not** a server route — `localStorage` for now.
 
@@ -165,6 +189,8 @@ Row 2:  [ Paste a playlist URL — or pick ▾ ]              [ Fetch & Summariz
 
 - Successful lookup pushes the handle onto the remembered-recents chips.
 - Selecting a playlist fills the URL field and closes the panel.
+- When exactly 50 results return (the one-page cap), show a "showing first 50" note so users know the list may not
+  be exhaustive (Codex M3). "Load more" is deferred (roadmap).
 
 ### Overlay Dismissal — channel panel
 
