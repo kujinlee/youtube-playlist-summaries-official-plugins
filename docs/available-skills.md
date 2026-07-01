@@ -1,6 +1,6 @@
 # Available Skills Reference
 
-> **Generated** 2026-05-27 · `scripts/regen-skills-doc.py`
+> **Generated** 2026-06-30 · `scripts/regen-skills-doc.py`
 > Re-run after: `/plugin install`, `/plugin update`, `/plugin enable/disable`,
 > or `npx skills@latest add/remove mattpocock/skills`.
 
@@ -41,7 +41,7 @@ The **Trigger** column in each table tells you who fires the skill and how:
 
 ---
 
-## 🔵 superpowers — `superpowers@claude-plugins-official` v5.1.0 ✅
+## 🔵 superpowers — `superpowers@claude-plugins-official` v6.0.3 ✅
 
 Core workflow skills for the gate-based dev process in `docs/dev-process.md`.
 
@@ -57,7 +57,7 @@ Core workflow skills for the gate-based dev process in `docs/dev-process.md`.
 | **systematic-debugging** | `superpowers:systematic-debugging` | `auto + /slash` | Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes |
 | **test-driven-development** | `superpowers:test-driven-development` | `auto + /slash` | Use when implementing any feature or bugfix, before writing implementation code |
 | **using-git-worktrees** | `superpowers:using-git-worktrees` | `auto + /slash` | Use when starting feature work that needs isolation from current workspace or before executing implementation plans - ensures an isolated workspace ex… |
-| **using-superpowers** | `superpowers:using-superpowers` | `auto + /slash` | Use when starting any conversation - establishes how to find and use skills, requiring Skill tool invocation before ANY response including clarifying… |
+| **using-superpowers** | `superpowers:using-superpowers` | `auto + /slash` | Use when starting any conversation - establishes how to find and use skills, requiring skill invocation before ANY response including clarifying quest… |
 | **verification-before-completion** | `superpowers:verification-before-completion` | `auto + /slash` | Use when about to claim work is complete, fixed, or passing, before committing or creating PRs - requires running verification commands and confirming… |
 | **writing-plans** | `superpowers:writing-plans` | `auto + /slash` | Use when you have a spec or requirements for a multi-step task, before touching code |
 | **writing-skills** | `superpowers:writing-skills` | `auto + /slash` | Use when creating new skills, editing existing skills, or verifying skills work before deployment |
@@ -221,7 +221,7 @@ Iterative agent loop — repeatedly feeds Claude a task until a "completion prom
 | **help** | `/help` | `/command` | Explain Ralph Loop plugin and available commands |
 | **ralph-loop** | `/ralph-loop` | `/command` | Start Ralph Loop in current session |
 
-### 🟣 remember — `remember@claude-plugins-official` v0.7.2 ✅
+### 🟣 remember — `remember@claude-plugins-official` v0.8.3 ✅
 
 Session continuity — saves state to `.remember/now.md` for clean resumption next session.
 
@@ -229,7 +229,7 @@ Session continuity — saves state to `.remember/now.md` for clean resumption ne
 |---|---|---|---|
 | **remember** | `remember:remember` | `auto + /slash` | Save session state for clean continuation next session. |
 
-### 🟣 security-guidance — `security-guidance@claude-plugins-official` v2.0.0 ✅
+### 🟣 security-guidance — `security-guidance@claude-plugins-official` v2.0.6 ✅
 
 Security-focused code review and vulnerability guidance.
 
@@ -243,7 +243,7 @@ Create, edit, eval, and benchmark Claude Code skills.
 |---|---|---|---|
 | **skill-creator** | `skill-creator:skill-creator` | `auto + /slash` | Create new skills, modify and improve existing skills, and measure skill performance. |
 
-### 🟣 supabase — `supabase@claude-plugins-official` v0.1.9 ✅
+### 🟣 supabase — `supabase@claude-plugins-official` v0.1.11 ✅
 
 Postgres performance optimization and best practices from Supabase.
 
@@ -301,7 +301,7 @@ Skills are unavailable until re-enabled.
 | Plugin | Version | Re-enable |
 |---|---|---|
 | `asana@claude-plugins-official` | d45efab8c85b — Asana task and project management commands. | `/plugin enable asana@claude-plugins-official` |
-| `deploy-on-aws@claude-plugins-official` | 1.2.0 — Deploy to AWS and generate validated architecture diagrams (draw.io with AWS4 icons). | `/plugin enable deploy-on-aws@claude-plugins-official` |
+| `deploy-on-aws@claude-plugins-official` | 1.3.0 — Deploy to AWS and generate validated architecture diagrams (draw.io with AWS4 icons). | `/plugin enable deploy-on-aws@claude-plugins-official` |
 | `github@claude-plugins-official` | d45efab8c85b — GitHub PR, issue, and repo management commands. | `/plugin enable github@claude-plugins-official` |
 
 ---
