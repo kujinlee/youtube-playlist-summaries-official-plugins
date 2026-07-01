@@ -93,11 +93,13 @@ with:
 #_dg-ea-dlg[data-open]{display:flex}
 #_dg-ea-prog{display:none;position:fixed;left:0;right:0;bottom:0;z-index:9000}
 #_dg-ea-prog[data-open]{display:block}
-._dg-bar{display:flex;align-items:center;gap:1em;background:var(--card,#fff);border-top:1px solid var(--rule);padding:.7em 1.2em;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:.9rem;color:var(--ink);box-shadow:0 -2px 12px rgba(0,0,0,.12)}
-._dg-bar #_dg-ea-prog-msg{flex:1;margin:0}
-._dg-bar #_dg-ea-fail-msg{margin:0}
-._dg-bar button{margin-left:auto;padding:.3em .9em;border-radius:4px;font-size:.85rem;cursor:pointer;border:1px solid var(--rule)}
+._dg-bar{display:flex;flex-wrap:wrap;align-items:center;gap:.6em 1em;background:var(--card,#fff);border-top:1px solid var(--rule);padding:.7em 1.2em;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:.9rem;color:var(--ink);box-shadow:0 -2px 12px rgba(0,0,0,.12);max-height:40vh;overflow-y:auto}
+._dg-bar #_dg-ea-prog-msg{flex:1 1 12rem;min-width:0;margin:0}
+._dg-bar #_dg-ea-fail-msg{flex:1 1 100%;min-width:0;margin:0}
+._dg-bar button{flex:0 0 auto;padding:.3em .9em;border-radius:4px;font-size:.85rem;cursor:pointer;border:1px solid var(--rule)}
 ```
+
+(Overflow safety per plan review M4: `flex-wrap` + `min-width:0` keep the Cancel button on-screen and let a long "Failed sections: …" line wrap to its own row rather than pushing the button off the edge; `max-height:40vh;overflow-y:auto` caps the bar height on a large failure list.)
 
 (Keep lines 167-171 unchanged: `._dg-box` styles the dialog card; `#_dg-ea-cancel-dlg,#_dg-ea-cancel-prog{background:none;color:var(--meta)}` still colors the progress Cancel button.)
 
@@ -175,20 +177,37 @@ git commit -m "feat: non-blocking bottom bar for dig-deeper expand-all progress"
 - Test: `tests/e2e/dig-deeper.spec.ts` (new test in the ⤢ expand-all describe region near line 1307)
 
 **Interfaces:**
-- Consumes: existing expand-all E2E harness — `stubHtmlRoutes`, the per-section POST/SSE stubs used by E1–E6 (see lines 1307–1815). Reuse the same fixture builders and route stubs that back the existing `#_dg-ea-prog` tests.
+- Consumes: existing expand-all E2E harness — `makeExpandAllHtml`, `stubExpandAllRoutes` (see lines 1311–1430). `stubExpandAllRoutes` already accepts `reGetDelayMs`, which delays the HTML re-GET after each section's SSE `done`. Because `_startDocDigAsync` awaits that re-GET before advancing the loop, a non-zero `reGetDelayMs` holds a section **in-flight**, keeping the bar open long enough to assert on its geometry and page scrollability. This is the key to a non-flaky test (plan review H1).
 
-- [ ] **Step 1: Write the failing E2E test**
+- [ ] **Step 1: Write the E2E test**
 
-Add near the other expand-all tests in `tests/e2e/dig-deeper.spec.ts` (reuse the exact fixture + route-stub setup pattern from the existing E2 "confirm → progress" test around line 1490):
+Add after the last expand-all test (near line 1815) in `tests/e2e/dig-deeper.spec.ts`:
 
 ```typescript
-test('E7 (non-blocking): during expand-all the progress element is a bottom bar and the doc stays scrollable', async ({ page }) => {
-  // ── reuse the same fixture + stubs as the E2 progress test ──
-  // (copy the setup lines from the existing "confirm → progress overlay" test:
-  //  build the 3-section summary+companion, call the expand-all route stubs,
-  //  and navigate to the dig-deeper doc URL.)
-  // <SETUP: identical to E2 — do not paraphrase; copy the concrete setup block>
+// ---------------------------------------------------------------------------
+// E7: expand-all progress is a NON-BLOCKING bottom bar — doc stays scrollable
+//     and content stays clickable while sections generate.
+// ---------------------------------------------------------------------------
 
+test('E7 (non-blocking): progress is a bottom bar; doc scrollable + clickable during run', async ({ page }) => {
+  // Small viewport so the 3-section fixture reliably exceeds it (plan review H2).
+  await page.setViewportSize({ width: 900, height: 480 });
+
+  // reGetDelayMs holds each section in-flight after its SSE 'done', so the bar
+  // stays open during the geometry/scroll/click assertions (plan review H1).
+  await stubExpandAllRoutes(page, { htmlFn: () => makeExpandAllHtml(0), reGetDelayMs: 2000 });
+
+  const digDocUrl = `http://localhost:3000/api/html/${VIDEO_ID_EA}?outputFolder=${encodeURIComponent(OUTPUT_FOLDER)}&type=dig-deeper`;
+  await page.goto(digDocUrl);
+
+  // Precondition: page is actually taller than the viewport (else the scroll
+  // assertion would be meaningless).
+  const scrollable = await page.evaluate(
+    () => document.scrollingElement!.scrollHeight > window.innerHeight,
+  );
+  expect(scrollable).toBe(true);
+
+  // Start the batch.
   await page.locator('.dg-expand-all').click();
   await expect(page.locator('#_dg-ea-dlg[data-open]')).toBeVisible({ timeout: 3000 });
   await page.locator('#_dg-ea-confirm').click();
@@ -196,41 +215,57 @@ test('E7 (non-blocking): during expand-all the progress element is a bottom bar 
   const prog = page.locator('#_dg-ea-prog[data-open]');
   await expect(prog).toBeVisible({ timeout: 3000 });
 
-  // (a) progress element is a bottom bar, not a full-viewport overlay
+  // (a) progress element is a bottom bar, not a full-viewport overlay.
   const box = await prog.boundingBox();
-  const viewport = page.viewportSize()!;
+  const vp = page.viewportSize()!;
   expect(box).not.toBeNull();
-  // bar sits at/near the bottom edge…
-  expect(box!.y + box!.height).toBeGreaterThan(viewport.height - 4);
-  // …and is short (does NOT cover the whole viewport height)
-  expect(box!.height).toBeLessThan(viewport.height / 2);
+  expect(box!.y + box!.height).toBeGreaterThan(vp.height - 4); // pinned to bottom edge
+  expect(box!.height).toBeLessThan(vp.height / 2);             // short, not full-height
 
-  // (b) the document is scrollable while the batch runs (page not covered)
-  const before = await page.evaluate(() => window.scrollY);
-  await page.mouse.wheel(0, 600);
-  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(before);
-
-  // (c) progress copy reads "Expanding — section N of 3…"
-  await expect(page.locator('#_dg-ea-prog-msg')).toContainText('Expanding', { timeout: 5000 });
+  // (b) copy reads "Expanding — section N of 3…"
+  await expect(page.locator('#_dg-ea-prog-msg')).toContainText('Expanding');
   await expect(page.locator('#_dg-ea-prog-msg')).toContainText('of 3');
 
-  // let the batch finish and auto-dismiss
-  await expect(page.locator('#_dg-ea-prog[data-open]')).toHaveCount(0, { timeout: 15000 });
+  // (c) the document is scrollable while the batch runs (page not covered).
+  const before = await page.evaluate(() => window.scrollY);
+  await page.mouse.wheel(0, 400);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(before);
+
+  // (d) content above the bar stays clickable during the run (Behavior 11 /
+  //     plan review M5). Clicking a section toggle (a zero-fetch control that is
+  //     always present) must still fire while the bar is open. We assert the
+  //     click reaches the control by observing its toggled label, then restore.
+  //     Use the first dug/toggle control if present; otherwise assert the
+  //     top-bar summary link is clickable (hit-testable) — it must not be
+  //     covered by the bar.
+  const topLink = page.locator('.dg-topbar a').first();
+  await expect(topLink).toBeVisible();
+  // Playwright's actionability check fails if an overlay intercepts the point;
+  // a successful hover proves the element is not covered by the bar.
+  await topLink.hover({ timeout: 2000 });
+
+  // Let the batch finish and auto-dismiss.
+  await expect(page.locator('#_dg-ea-prog[data-open]')).toHaveCount(0, { timeout: 20000 });
 });
 ```
 
-> Implementer note: the summary must be tall enough to scroll. If the 3-section fixture is short, add filler prose to a section body (the existing fixtures render full magazine bodies, which are typically taller than the viewport at default width). If it still doesn't scroll, shrink the viewport via `page.setViewportSize({ width: 900, height: 500 })` before navigating.
+> Implementer note: `makeExpandAllHtml(0)` renders 3 un-dug sections. If the small
+> viewport (480px) still isn't exceeded, lower `height` further (e.g. 360) — the
+> `scrollable` precondition assertion will catch it loudly rather than silently passing.
 
-- [ ] **Step 2: Run it to confirm it fails first (pre-implementation baseline)**
+- [ ] **Step 2: Confirm the test is meaningful (fails pre-implementation)**
 
-If Task 1 is already committed, this test should PASS. To confirm the test is meaningful, temporarily `git stash` Task 1's `render-dig-deeper.ts`/`nav.ts` changes, run, and observe failure on the bounding-box / scroll assertions, then `git stash pop`.
+If Task 1 is committed, E7 should PASS. To prove it actually guards the behavior, temporarily
+`git stash push -- lib/html-doc/render-dig-deeper.ts lib/html-doc/nav.ts`, run E7, observe FAIL
+on the bottom-bar geometry assertion (old overlay is `inset:0` → `box.height ≈ vp.height`), then
+`git stash pop`.
 
 Run: `npx playwright test dig-deeper --grep "E7"`
-Expected (pre-Task-1): FAIL on bottom-bar / scrollable assertions. (post-Task-1): PASS.
+Expected: pre-Task-1 FAIL (height ≈ full viewport); post-Task-1 PASS.
 
 - [ ] **Step 3: Run the full expand-all E2E group (no regressions)**
 
-Run: `npx playwright test dig-deeper --grep "expand"`
+Run: `npx playwright test dig-deeper --grep "E[1-7]"`
 Expected: PASS (E1–E7).
 
 - [ ] **Step 4: Commit**

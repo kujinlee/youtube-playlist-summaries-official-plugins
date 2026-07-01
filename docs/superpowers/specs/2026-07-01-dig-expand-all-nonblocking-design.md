@@ -62,8 +62,9 @@ Currently `#_dg-ea-dlg` and `#_dg-ea-prog` share one full-viewport rule. Split t
 - **`#_dg-ea-prog`** (progress) — restyle to a bottom status bar:
   - `position:fixed; left:0; right:0; bottom:0; z-index:9000`
   - full-width bar, no full-viewport backdrop (no `inset:0`, no dimming of the page)
-  - `display:none` by default; `#_dg-ea-prog[data-open]{display:flex}` (retain the
-    `[data-open]` open/close mechanism already used by `_eaOpen`/`_eaClose`)
+  - `display:none` by default; `#_dg-ea-prog[data-open]{display:block}` (retain the
+    `[data-open]` open/close mechanism already used by `_eaOpen`/`_eaClose`). The inner
+    `._dg-bar` container owns the flex row layout, so the outer element is `block`, not `flex`.
   - horizontal layout: progress text on the left, Cancel button on the right — mirroring the
     `BatchDocStatusBar`/`HtmlDocStatusBar` bottom-bar look (`bg-zinc-900`-equivalent using the
     doc's `--card`/`--rule` theme variables, top border, small padding)
@@ -132,3 +133,10 @@ Gemini calls occur.
 - **Theme variables** — the bar must use the doc's CSS variables (`--card`, `--rule`, `--ink`,
   `--meta`) so it renders correctly in both light and dark exports. Covered by using the same
   variables already used by `#_dg-ai-toast`.
+- **Z-index / AI-toast overlap** — the bar is `z-index:9000`; the Ask-AI toast (`#_dg-ai-toast`)
+  is `z-index:9600` at `bottom:1.4rem`. Now that content is clickable during a batch, a user could
+  trigger the toast mid-run and it would visually overlap the bar. **Decision:** accept it — the
+  toast is transient (~seconds) and correctly renders above the bar; no suppression logic added.
+- **Failure-list overflow** — a long "Failed sections: …" line must not push the Cancel button
+  off-screen. The bar uses `flex-wrap` + `min-width:0` (fail line wraps to its own row) and
+  `max-height:40vh;overflow-y:auto`.
