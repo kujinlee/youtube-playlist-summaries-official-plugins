@@ -116,7 +116,7 @@ chain; running the backfill script fixes it. This keeps the dropdown instant and
 
 | Route | Params | Returns | Guards |
 |---|---|---|---|
-| `GET /api/playlists/recent` | `root` (base output folder) | `200 PlaylistOption[]` · `400` missing/invalid root | `assertOutputFolder(root)` — `path.resolve` normalize + realpath symlink check + reject outside `$HOME` |
+| `GET /api/playlists/recent` | `root` (base output folder) | `200 { playlists: PlaylistOption[] }` · `400` missing/invalid root | `assertOutputFolder(root)` — `path.resolve` normalize + realpath symlink check + reject outside `$HOME` |
 | `GET /api/playlists/channel` | `handle` (`@x`, `x`, or channel URL) | `200 { channelTitle, playlists }` · `400` missing handle · `404` channel not found · `502` upstream error · `500` no API key | strict handle parse (below); `YOUTUBE_API_KEY` from env |
 
 **Security — `root` boundary (Codex B1).** `assertOutputFolder` normalizes and realpath-checks, rejecting anything
