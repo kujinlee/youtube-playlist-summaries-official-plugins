@@ -50,6 +50,13 @@ it('400s when type is missing or unsupported', async () => {
   expect((await GET(new Request(`${base}&type=bogus`), ctx)).status).toBe(400); // unsupported type
 });
 
+it('400s on the retired ?type=deep-dive (regression guard)', async () => {
+  writeIndex(video({ summaryHtml: 'htmls/a.html' }));
+  const base = `http://localhost/api/html/${VIDEO_ID}?outputFolder=${encodeURIComponent(dir)}`;
+  const res = await GET(new Request(`${base}&type=deep-dive`), ctx);
+  expect(res.status).toBe(400); // deep-dive was retired; must never 200
+});
+
 it('404s on a path-traversal summaryHtml value (Codex BLOCKING)', async () => {
   writeIndex(video({ summaryHtml: '../../../../etc/passwd' }));
   const res = await GET(url(), ctx);

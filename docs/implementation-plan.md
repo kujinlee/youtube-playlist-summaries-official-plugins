@@ -108,6 +108,8 @@
 ---
 
 ### Task 9: Deep-Dive Pipeline
+> **HISTORICAL:** the deep-dive feature was later retired (superseded by dig-deeper). This task documents the original build.
+
 **File:** `lib/deep-dive.ts`
 
 - `runDeepDive(videoId, outputFolder, onProgress): Promise<void>`

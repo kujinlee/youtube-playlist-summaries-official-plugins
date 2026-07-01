@@ -41,6 +41,40 @@ describe('readIndex', () => {
   it('rejects outputFolder outside home directory', () => {
     expect(() => readIndex('/etc')).toThrow(expect.objectContaining({ statusCode: 400 }));
   });
+
+  it('strips retired deep-dive and PDF keys from legacy index entries', () => {
+    const dir = path.join(TEST_DIR, 'legacy-deepdive');
+    fs.mkdirSync(dir, { recursive: true });
+    // Simulate an index file written before the PDF-generation and deep-dive
+    // removals — it still carries the fields those efforts retired.
+    const legacy = {
+      playlistUrl: 'https://www.youtube.com/playlist?list=PLlegacy',
+      outputFolder: dir,
+      videos: [
+        {
+          ...makeVideo(),
+          summaryPdf: 'abc12345678.pdf',
+          deepDiveMd: 'abc12345678-deep-dive.md',
+          deepDiveHtml: 'htmls/abc12345678-deep-dive.html',
+          deepDivePdf: 'abc12345678-deep-dive.pdf',
+          deepDiveVersion: { major: 2, minor: 2 },
+        },
+      ],
+    };
+    fs.writeFileSync(path.join(dir, 'playlist-index.json'), JSON.stringify(legacy), 'utf-8');
+
+    const result = readIndex(dir);
+
+    const v = result.videos[0] as Record<string, unknown>;
+    expect(v.summaryPdf).toBeUndefined();
+    expect(v.deepDiveMd).toBeUndefined();
+    expect(v.deepDiveHtml).toBeUndefined();
+    expect(v.deepDivePdf).toBeUndefined();
+    expect(v.deepDiveVersion).toBeUndefined();
+    // Non-retired fields are untouched.
+    expect(v.summaryMd).toBeNull();
+    expect(v.id).toBe('abc12345678');
+  });
 });
 
 describe('writeIndex + readIndex', () => {

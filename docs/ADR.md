@@ -186,7 +186,7 @@ Request B: reads index  →  sets video 2 personalScore=5  →  writes
                                                             ↑ A's change is lost
 ```
 
-Affected routes: `POST /ingest`, `POST /videos/[id]/archive`, `POST /videos/[id]/deep-dive`, `POST /videos/[id]/review` — any route that calls `upsertVideo`, `updateVideoFields`, or `writeIndex` directly.
+Affected routes: `POST /ingest`, `POST /videos/[id]/archive`, `POST /videos/[id]/deep-dive` (later retired), `POST /videos/[id]/review` — any route that calls `upsertVideo`, `updateVideoFields`, or `writeIndex` directly.
 
 **Decision:**
 No locking is added at this time. The app is a single-user local tool. The race window is a few milliseconds, and losing an annotation or archive flag requires two writes to the same playlist index to interleave within that window — practically impossible for one person at one keyboard. Adding per-`outputFolder` file locking now would add a dependency, complicate every write route, and introduce lock-timeout failure modes.

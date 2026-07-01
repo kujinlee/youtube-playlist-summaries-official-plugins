@@ -57,7 +57,7 @@ async function moveIfExists(src: string, dest: string): Promise<boolean> {
   }
 }
 
-// Cached HTML files for a video: htmls/<summaryBase>.html and htmls/<deepDiveBase>.html.
+// Cached HTML files for a video: htmls/<summaryBase>.html.
 // Returns only paths safely within outputFolder.
 function getCachedHtmlPaths(outputFolder: string, videoId: string): string[] {
   const index = readIndex(outputFolder);

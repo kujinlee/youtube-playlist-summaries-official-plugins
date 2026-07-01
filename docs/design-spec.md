@@ -58,9 +58,9 @@ interface Video {
   ratings: Ratings
   overallScore: number    // average of 5 ratings, computed at write time
   summaryMd: string | null
-  summaryPdf: string | null
-  deepDiveMd: string | null
-  deepDivePdf: string | null
+  summaryPdf: string | null    // HISTORICAL: PDF generation later removed (browser Print)
+  deepDiveMd: string | null    // HISTORICAL: deep-dive feature retired; superseded by dig-deeper
+  deepDivePdf: string | null   // HISTORICAL: retired with deep-dive + PDF generation
   processedAt: string     // ISO 8601
 }
 
@@ -104,6 +104,7 @@ GET  /api/ingest/stream
   Query: ?jobId=xxx
   Returns: SSE stream of ProgressEvent ← scoped to the given jobId
 
+// HISTORICAL: the deep-dive endpoints below were retired; dig-deeper supersedes them.
 POST /api/videos/[id]/deep-dive
   Returns: { jobId: string }           ← unique ID for this deep-dive run
 
