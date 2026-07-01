@@ -340,10 +340,10 @@ export function renderDigDeeperDoc(args: {
     <button id="_dg-ea-cancel-dlg">Cancel</button>
   </div>
 </div>
-<div id="_dg-ea-prog" role="status">
+<div id="_dg-ea-prog" role="region" aria-label="Expand-all progress">
   <div class="_dg-bar">
-    <span id="_dg-ea-prog-msg">Starting…</span>
-    <span id="_dg-ea-fail-msg" style="color:#c00;display:none"></span>
+    <span id="_dg-ea-prog-msg" role="status" aria-live="polite">Starting…</span>
+    <span id="_dg-ea-fail-msg" aria-live="polite" style="color:#c00;display:none"></span>
     <button id="_dg-ea-cancel-prog">Cancel</button>
   </div>
 </div>`;

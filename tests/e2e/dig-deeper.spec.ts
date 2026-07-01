@@ -1890,6 +1890,51 @@ test('E7 (non-blocking): progress is a bottom bar; doc scrollable + clickable du
   await expect(page.locator('#_dg-ea-prog[data-open]')).toHaveCount(0, { timeout: 20000 });
 });
 
+// ---------------------------------------------------------------------------
+// E8: no concurrent generation. The non-blocking bar makes controls clickable
+//     during a run; a batch-running guard must prevent a 2nd expand-all and
+//     manual single digs (the old full-screen overlay masked these clicks).
+// ---------------------------------------------------------------------------
+
+test('E8 (no concurrent generation): 2nd expand-all opens no dialog; manual dig ignored mid-run', async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 480 });
+
+  let dugCount = 0;
+  const postsSeen: number[] = [];
+  // Long reGetDelayMs holds section 1 in-flight so we can attempt concurrent
+  // actions in a deterministic window (batch has fired exactly 1 POST).
+  await stubExpandAllRoutes(page, {
+    htmlFn: () => makeExpandAllHtml(dugCount),
+    postSpy: (sec) => { postsSeen.push(sec); dugCount++; },
+    reGetDelayMs: 5000,
+  });
+
+  const digDocUrl = `http://localhost:3000/api/html/${VIDEO_ID_EA}?outputFolder=${encodeURIComponent(OUTPUT_FOLDER)}&type=dig-deeper`;
+  await page.goto(digDocUrl);
+
+  await page.locator('.dg-expand-all').click();
+  await expect(page.locator('#_dg-ea-dlg[data-open]')).toBeVisible({ timeout: 3000 });
+  await page.locator('#_dg-ea-confirm').click();
+  await expect(page.locator('#_dg-ea-prog[data-open]')).toBeVisible({ timeout: 3000 });
+
+  // Batch is holding section 1 in-flight → exactly 1 POST so far.
+  await expect.poll(() => postsSeen.length).toBe(1);
+
+  // (1) Re-clicking expand-all must NOT open a second confirm dialog.
+  await page.locator('.dg-expand-all').click();
+  await expect(page.locator('#_dg-ea-dlg[data-open]')).toHaveCount(0);
+
+  // (2) Manually clicking a still-un-dug section trigger must NOT fire its POST.
+  await page.locator(`.dig-trigger[data-section="${SEC_EA_3}"]`).click();
+  await page.waitForTimeout(500); // let the (guarded) handler run
+  expect(postsSeen).not.toContain(SEC_EA_3);
+  expect(postsSeen.length).toBe(1); // still only section 1 in-flight
+
+  // Batch finishes naturally → exactly one POST per section, in order, no extras.
+  await expect(page.locator('#_dg-ea-prog[data-open]')).toHaveCount(0, { timeout: 30000 });
+  expect(postsSeen).toEqual([SEC_EA_1, SEC_EA_2, SEC_EA_3]);
+});
+
 // ===========================================================================
 // DIG-REFRESH (Task 6)
 // Tests for the ↻ outdated click delegation: clicking the badge on a stale

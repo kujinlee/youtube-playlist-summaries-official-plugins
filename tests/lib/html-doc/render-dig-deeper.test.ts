@@ -1163,4 +1163,12 @@ describe('Expand-all progress is a non-blocking bottom bar', () => {
     expect(html).toContain('._dg-bar{display:flex;flex-wrap:wrap');
     expect(html).toContain('max-height:40vh;overflow-y:auto');
   });
+
+  it('separates the live region (message) from the interactive Cancel button', () => {
+    // Outer bar is a labelled region; the live announcement lives on the message
+    // span (role=status), not on the container wrapping the button.
+    expect(html).toContain('id="_dg-ea-prog" role="region" aria-label="Expand-all progress"');
+    expect(html).toContain('id="_dg-ea-prog-msg" role="status" aria-live="polite"');
+    expect(html).not.toContain('id="_dg-ea-prog" role="status"');
+  });
 });
