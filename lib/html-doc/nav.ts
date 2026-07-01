@@ -286,7 +286,7 @@ export const NAV_SCRIPT = `<script>
               return;
             }
             k++;
-            _eaProgMsg.textContent='section '+k+' of '+N+'\\u2026';
+            _eaProgMsg.textContent='Expanding \\u2014 section '+k+' of '+N+'\\u2026';
             var trig=remaining[0];
             _startDocDigAsync(trig)
               .then(function(){_next();})

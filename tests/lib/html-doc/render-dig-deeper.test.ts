@@ -1122,3 +1122,45 @@ describe('renderDigDeeperDoc — slide image class (dig-slide)', () => {
     expect(html).not.toContain('<img class="dig-slide"'); // 'dig-slide' appears in CSS/script always; assert no slide IMG carries it
   });
 });
+
+// ===========================================================================
+// Expand-all progress is a NON-BLOCKING bottom bar (2026-07-01)
+// The confirm dialog (#_dg-ea-dlg) stays a centered blocking modal; the
+// progress element (#_dg-ea-prog) becomes a fixed bottom bar so the reader can
+// keep scrolling while sections generate.
+// ===========================================================================
+describe('Expand-all progress is a non-blocking bottom bar', () => {
+  let html: string;
+  beforeAll(() => {
+    const dir = makeTempDir();
+    const summary = makeSummaryWithDugSection(60);
+    const dug = [makeDugWithBody(60, '## Test Section\n\nBody prose.\n')];
+    html = renderDigDeeperDoc({ summary, envelope: null, dug, mdPath: path.join(dir, 'doc.md'), videoId: 'vid123' });
+  });
+
+  it('progress overlay is pinned to the bottom (position:fixed; bottom:0)', () => {
+    expect(html).toContain('#_dg-ea-prog{display:none;position:fixed;left:0;right:0;bottom:0');
+  });
+
+  it('progress overlay does NOT use a full-viewport inset:0 backdrop', () => {
+    expect(html).not.toContain('#_dg-ea-prog{display:none;position:fixed;inset:0');
+    expect(html).not.toContain('#_dg-ea-dlg,#_dg-ea-prog{');
+  });
+
+  it('confirm dialog is still a centered inset:0 blocking modal', () => {
+    expect(html).toContain('#_dg-ea-dlg{display:none;position:fixed;inset:0');
+  });
+
+  it('progress bar markup uses the flat bar container, not the centered card', () => {
+    expect(html).toContain('id="_dg-ea-prog"');
+    expect(html).toContain('class="_dg-bar"');
+    expect(html).toContain('id="_dg-ea-prog-msg"');
+    expect(html).toContain('id="_dg-ea-fail-msg"');
+    expect(html).toContain('id="_dg-ea-cancel-prog"');
+  });
+
+  it('bar is overflow-safe (flex-wrap + capped height)', () => {
+    expect(html).toContain('._dg-bar{display:flex;flex-wrap:wrap');
+    expect(html).toContain('max-height:40vh;overflow-y:auto');
+  });
+});
