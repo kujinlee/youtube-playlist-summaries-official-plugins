@@ -60,7 +60,8 @@ it('blur keeps open for a new half-typed url', () => {
   fireEvent.blur(screen.getByPlaceholderText(/Paste a playlist URL/));
   expect(onOpenChange).not.toHaveBeenCalled();
 });
-it('disables the input when disabled', () => {
+it('disables both the toggle and the input when disabled', () => {
   render(<AddByLink {...base} open disabled />);
+  expect(screen.getByRole('button', { name: /Add by link/ })).toBeDisabled();
   expect(screen.getByPlaceholderText(/Paste a playlist URL/)).toBeDisabled();
 });
