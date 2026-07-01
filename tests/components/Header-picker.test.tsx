@@ -70,6 +70,19 @@ it('auto-collapses the disclosure after a pasted URL resolves', async () => {
   await waitFor(() => expect(screen.queryByPlaceholderText(/Paste a playlist URL/)).toBeNull());
 });
 
+it('does NOT collapse the disclosure when currentPlaylistUrl auto-fills (no user edit)', async () => {
+  // Existing playlist → disclosure starts closed; the user opens it manually (no typing).
+  const { rerender } = render(<Header {...common} currentPlaylistTitle="건강" playlistLoaded />);
+  fireEvent.click(screen.getByRole('button', { name: /Add by link/ }));
+  expect(screen.getByPlaceholderText(/Paste a playlist URL/)).toBeInTheDocument();
+  // Parent supplies a playlist URL → auto-fills the field (NOT a user edit) → resolves.
+  rerender(<Header {...common} currentPlaylistTitle="건강" currentPlaylistUrl="https://youtube.com/playlist?list=PLa" playlistLoaded />);
+  // Wait for the debounced resolve to actually complete (derived-target reflects the resolved folder)…
+  await waitFor(() => expect(screen.getByTestId('derived-target')).toHaveTextContent('/home/x/data/a/raw'));
+  // …the guarded collapse must NOT have fired for an auto-fill: the disclosure is still open.
+  expect(screen.getByPlaceholderText(/Paste a playlist URL/)).toBeInTheDocument();
+});
+
 it('picking a recent playlist enables Fetch', async () => {
   render(<Header {...common} currentPlaylistTitle="건강" playlistLoaded />);
   fireEvent.click(screen.getByRole('button', { name: /Recent/ }));
