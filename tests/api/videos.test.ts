@@ -138,6 +138,12 @@ describe('GET /api/videos', () => {
     expect(body.playlistUrl).toBe('https://youtube.com/playlist?list=PLtest');
   });
 
+  it('includes playlistTitle from the index', async () => {
+    mockReadIndex.mockReturnValue({ playlistUrl: 'https://youtube.com/playlist?list=PLa', playlistTitle: 'Building with Claude', videos: [] } as unknown as PlaylistIndex);
+    const res = await get();
+    expect((await res.json()).playlistTitle).toBe('Building with Claude');
+  });
+
   describe('sort by videoPublishedAt', () => {
     it('sorts by videoPublishedAt ascending (oldest first)', async () => {
       mockReadIndex.mockReturnValue(makeIndex([
