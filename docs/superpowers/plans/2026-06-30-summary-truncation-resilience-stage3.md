@@ -2,7 +2,9 @@
 
 > **For agentic workers:** superpowers:subagent-driven-development. Steps use `- [ ]`.
 
-**Status:** draft — pending Codex plan review + AFK adversarial approval.
+**Status:** v2 — Codex plan-reviewed (no Blocking; deviation approved with conditions, folded in). AFK-approved via adversarial review.
+
+**Codex conditions folded in:** (a) add a `label` prop to `HtmlDocStatusBar` so the bar reads "Re-summarize"; (b) document the "join active job even if force" semantics (a force POST while a non-force html-doc job is active returns the existing jobId — the menu item is disabled while busy, so this is UI-prevented in practice; accepted); (c) add a backend test for that join. Relies on existing `html-doc-post` tests for 400/path coverage.
 
 **Goal:** A per-video **"Re-summarize"** menu action that force-regenerates the summary on demand (for a doc the audit flags or that looks off), with non-blocking progress.
 
@@ -47,6 +49,13 @@ it('passes force=true when the body sets it (Re-summarize)', async () => {
   await POST(req({ outputFolder: HOME, force: true }), ctx);
   expect(mockEnsure).toHaveBeenCalledWith('vid12345', HOME, expect.any(Function), CURRENT_DOC_VERSION, true);
 });
+it('joins an active job — a force POST while a job is live returns the same jobId, no 2nd run (Codex)', async () => {
+  mockEnsure.mockReturnValue(new Promise(() => {})); // stays active
+  const first = await (await POST(req({ outputFolder: HOME }), ctx)).json();
+  const second = await (await POST(req({ outputFolder: HOME, force: true }), ctx)).json();
+  expect(second.jobId).toBe(first.jobId);          // joins the active (non-force) job — documented tradeoff
+  expect(mockEnsure).toHaveBeenCalledTimes(1);
+});
 ```
 
 - [ ] **Step 2: Run → FAIL** (`npx jest html-doc-post`)
@@ -67,7 +76,9 @@ ensureHtmlDoc(videoId, outputFolder, (event: ProgressEvent) => { … }, CURRENT_
 - Modify: `components/VideoMenu.tsx` (add `onResummarize: (id: string) => void` prop + menu `<li>`), `components/VideoRow.tsx`, `components/VideoList.tsx`, `app/page.tsx`
 - Test: `tests/components/VideoMenu.test.tsx`; E2E `tests/e2e/playlist-viewer.spec.ts` (or a focused spec)
 
-- [ ] **Step 1: page.tsx** — add `handleResummarize` (clone of `handleGenerateHtml` with `body: { outputFolder, force: true }`; reuses `setHtmlJob`/`HtmlDocStatusBar`/`setBusyVideoId`). Pass `onResummarize={handleResummarize}` down the existing `onGenerateHtml` prop chain (page → VideoList → VideoRow → VideoMenu).
+- [ ] **Step 0: `HtmlDocStatusBar` label prop (Codex condition a)** — add optional `label?: string` (default `'HTML Doc'`); use it in the visible heading + `aria-label` (`${label} Progress`). Update `HtmlDocStatusBar.test.tsx` to cover the custom label. The `htmlJob` state gains an optional `label`; `handleGenerateHtml` leaves it default, `handleResummarize` sets `'Re-summarize'`.
+
+- [ ] **Step 1: page.tsx** — add `handleResummarize` (clone of `handleGenerateHtml` with `body: { outputFolder, force: true }` and `label: 'Re-summarize'`; reuses `setHtmlJob`/`HtmlDocStatusBar`/`setBusyVideoId`). Pass `onResummarize={handleResummarize}` down the existing `onGenerateHtml` prop chain (page → VideoList → VideoRow → VideoMenu).
 
 - [ ] **Step 2: VideoMenu.tsx** — add a `<li>`:
 ```tsx
