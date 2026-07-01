@@ -173,6 +173,10 @@ function warnTimestampMiss(videoId: string, segmentCount: number, attempts: numb
 // Max SUCCESSFUL parsed attempts for the summary quality loop (completeness + timestamp re-rolls
 // share this single budget). Each attempt may still use generateJson's inner retries for hard errors.
 const MAX_SUMMARY_ATTEMPTS = 4;
+// A complete summary that just lacks resolvable ▶ is often deterministic (the LIS drops all tokens),
+// so cap those re-rolls rather than burning the full budget every generation. Incompleteness still
+// gets the full MAX_SUMMARY_ATTEMPTS.
+const TIMESTAMP_MISS_CAP = 2;
 
 /**
  * Rank a candidate summary — higher is better. Compared left→right: complete, #sections,
@@ -241,24 +245,29 @@ ${indexedTranscript}
     const hasSegments = segments.length > 0;
     let best: GeminiSummaryResponse | null = null;
     let bestScore: number[] = [];
+    let completeNoTs = 0;   // count of complete-but-no-▶ attempts (a deterministic timestamp miss)
+    let attemptsUsed = 0;
     // Bounded quality loop: re-roll a soft miss (incomplete summary OR no resolved ▶) within one
     // shared budget. Return as soon as both goals are met; else keep the best-scored attempt.
-    // Hard failures from attempt() (generateJson exhausted) still propagate to the catch below.
+    // Incompleteness gets the full budget; a complete-but-no-▶ miss (often deterministic) is capped
+    // so it can't burn the whole budget every generation. Hard failures from attempt() propagate.
     for (let i = 0; i < MAX_SUMMARY_ATTEMPTS; i++) {
       const r = await attempt();
+      attemptsUsed++;
       const score = scoreSummary(r, hasSegments);
       if (best === null || betterScore(score, bestScore)) { best = r; bestScore = score; }
-      const complete = checkSummaryCompleteness(r.summary).complete;
-      const hasTs = !hasSegments || hasTimestamp(r.summary);
+      const complete = score[0] === 1;   // reuse score — no redundant checkSummaryCompleteness call
+      const hasTs = score[3] === 1;
       if (complete && hasTs) return r;
+      if (complete && !hasTs && ++completeNoTs >= TIMESTAMP_MISS_CAP) break;
     }
     const chosen = best as GeminiSummaryResponse;
     const c = checkSummaryCompleteness(chosen.summary);
     if (!c.complete) {
       const sections = (chosen.summary.match(/^## /gm) ?? []).length;
-      console.warn(`[summary-suspicious] ${videoId} attempts=${MAX_SUMMARY_ATTEMPTS}/${MAX_SUMMARY_ATTEMPTS} reason=${c.reason} confidence=${c.confidence} complete=false len=${chosen.summary.length} sections=${sections}`);
+      console.warn(`[summary-suspicious] ${videoId} attempts=${attemptsUsed}/${MAX_SUMMARY_ATTEMPTS} reason=${c.reason} confidence=${c.confidence} complete=false len=${chosen.summary.length} sections=${sections}`);
     }
-    if (hasSegments && !hasTimestamp(chosen.summary)) warnTimestampMiss(videoId, segments.length, MAX_SUMMARY_ATTEMPTS);
+    if (hasSegments && !hasTimestamp(chosen.summary)) warnTimestampMiss(videoId, segments.length, attemptsUsed);
     return chosen;
   } catch (err) {
     const cause = err instanceof Error ? err.message : String(err);
