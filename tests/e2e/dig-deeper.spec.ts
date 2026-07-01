@@ -1825,6 +1825,71 @@ test('E5 (expand-all failure): POST 500 for one section → batch continues; fai
   await expect(page.locator(`section[data-start="${SEC_EA_3}"][data-dug="true"]`)).toBeVisible();
 });
 
+// ---------------------------------------------------------------------------
+// E7: expand-all progress is a NON-BLOCKING bottom bar — doc stays scrollable
+//     and content stays clickable while sections generate.
+// ---------------------------------------------------------------------------
+
+test('E7 (non-blocking): progress is a bottom bar; doc scrollable + clickable during run', async ({ page }) => {
+  // Small viewport so the 3-section fixture reliably exceeds it (plan review H2).
+  await page.setViewportSize({ width: 900, height: 480 });
+
+  // Stateful HTML (as in E2): dugCount advances on each POST so the re-GET
+  // reflects progress and the loop terminates. reGetDelayMs holds each section
+  // in-flight after its SSE 'done', keeping the bar open during the
+  // geometry/scroll/click assertions (plan review H1).
+  let dugCount = 0;
+  await stubExpandAllRoutes(page, {
+    htmlFn: () => makeExpandAllHtml(dugCount),
+    postSpy: () => { dugCount++; },
+    reGetDelayMs: 1500,
+  });
+
+  const digDocUrl = `http://localhost:3000/api/html/${VIDEO_ID_EA}?outputFolder=${encodeURIComponent(OUTPUT_FOLDER)}&type=dig-deeper`;
+  await page.goto(digDocUrl);
+
+  // Precondition: page is actually taller than the viewport (else the scroll
+  // assertion would be meaningless).
+  const scrollable = await page.evaluate(
+    () => document.scrollingElement!.scrollHeight > window.innerHeight,
+  );
+  expect(scrollable).toBe(true);
+
+  // Start the batch.
+  await page.locator('.dg-expand-all').click();
+  await expect(page.locator('#_dg-ea-dlg[data-open]')).toBeVisible({ timeout: 3000 });
+  await page.locator('#_dg-ea-confirm').click();
+
+  const prog = page.locator('#_dg-ea-prog[data-open]');
+  await expect(prog).toBeVisible({ timeout: 3000 });
+
+  // (a) progress element is a bottom bar, not a full-viewport overlay.
+  const box = await prog.boundingBox();
+  const vp = page.viewportSize()!;
+  expect(box).not.toBeNull();
+  expect(box!.y + box!.height).toBeGreaterThan(vp.height - 4); // pinned to bottom edge
+  expect(box!.height).toBeLessThan(vp.height / 2);             // short, not full-height
+
+  // (b) copy reads "Expanding — section N of 3…"
+  await expect(page.locator('#_dg-ea-prog-msg')).toContainText('Expanding');
+  await expect(page.locator('#_dg-ea-prog-msg')).toContainText('of 3');
+
+  // (c) the document is scrollable while the batch runs (page not covered).
+  const before = await page.evaluate(() => window.scrollY);
+  await page.mouse.wheel(0, 400);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(before);
+
+  // (d) content above the bar stays clickable during the run (Behavior 11 /
+  //     plan review M5). A successful hover on the top-bar link proves the bar
+  //     does not intercept the pointer over page content.
+  const topLink = page.locator('.dg-topbar a').first();
+  await expect(topLink).toBeVisible();
+  await topLink.hover({ timeout: 2000 });
+
+  // Let the batch finish and auto-dismiss.
+  await expect(page.locator('#_dg-ea-prog[data-open]')).toHaveCount(0, { timeout: 20000 });
+});
+
 // ===========================================================================
 // DIG-REFRESH (Task 6)
 // Tests for the ↻ outdated click delegation: clicking the badge on a stale
