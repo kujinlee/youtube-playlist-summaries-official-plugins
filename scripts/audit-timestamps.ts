@@ -20,7 +20,4 @@ if (!folder) { console.error('Set --folder <outputFolder> or OUTPUT_FOLDER'); pr
 const r = auditTimestamps(folder);
 console.log(`[${folder}]`);
 line('Summaries', r.summaries);
-line('Deep-dives', r.deepDives);
-// Gate on SUMMARY stuck only — captionless deep-dives legitimately have 0 ▶ and can't be
-// distinguished from bug-stuck ones by ▶-count, so gating on them would fail permanently.
 process.exit(r.summaries.noTsStuck > 0 ? 1 : 0);

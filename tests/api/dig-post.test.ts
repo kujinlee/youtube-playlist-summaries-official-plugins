@@ -96,7 +96,6 @@ const MOCK_VIDEO = {
   ratings: MOCK_RATINGS,
   overallScore: 3.6,
   summaryMd: 'test-video.md',
-  deepDiveMd: null,
   digDeeperMd: null,
   digDeeperHtml: null,
   processedAt: '2024-01-01T00:00:00.000Z',

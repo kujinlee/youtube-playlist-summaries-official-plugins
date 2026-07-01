@@ -20,7 +20,6 @@ const baseVideo: Video = {
   },
   overallScore: 3.4,
   summaryMd: 'summary.md',
-  deepDiveMd: null,
   processedAt: '2024-01-01T00:00:00.000Z',
 };
 
@@ -33,7 +32,6 @@ function renderRow(
   options: {
     dimUnscored?: boolean;
     onAnnotationChange?: jest.Mock;
-    onDeepDive?: jest.Mock;
     onArchive?: jest.Mock;
     onGenerateHtml?: jest.Mock;
   } = {},
@@ -49,7 +47,6 @@ function renderRow(
           outputFolder={OUTPUT_FOLDER}
           baseOutputFolder={BASE_OUTPUT_FOLDER}
           dimUnscored={options.dimUnscored ?? false}
-          onDeepDive={options.onDeepDive ?? jest.fn()}
           onArchive={options.onArchive ?? jest.fn()}
           onGenerateHtml={options.onGenerateHtml ?? jest.fn()}
           onAnnotationChange={onAnnotationChange}
@@ -60,8 +57,8 @@ function renderRow(
   return { onAnnotationChange, video };
 }
 
-function openMenu(overrides: Partial<Video> = {}, onDeepDive = jest.fn(), onArchive = jest.fn()) {
-  const result = renderRow(overrides, { onDeepDive, onArchive });
+function openMenu(overrides: Partial<Video> = {}, onArchive = jest.fn()) {
+  const result = renderRow(overrides, { onArchive });
   fireEvent.click(screen.getByRole('button', { name: /menu/i }));
   return result;
 }
@@ -81,7 +78,6 @@ describe('VideoRow', () => {
               outputFolder={OUTPUT_FOLDER}
               baseOutputFolder={BASE_OUTPUT_FOLDER}
               dimUnscored={false}
-              onDeepDive={jest.fn()}
               onArchive={jest.fn()}
               onGenerateHtml={jest.fn()}
               onAnnotationChange={jest.fn()}
@@ -263,7 +259,6 @@ describe('VideoRow', () => {
                 outputFolder={specialFolder}
                 baseOutputFolder={specialFolder}
                 dimUnscored={false}
-                onDeepDive={jest.fn()}
                 onArchive={jest.fn()}
                 onGenerateHtml={jest.fn()}
                 onAnnotationChange={jest.fn()}
@@ -296,7 +291,6 @@ describe('VideoRow', () => {
                   outputFolder={outputFolder}
                   baseOutputFolder={baseOutputFolder}
                   dimUnscored={false}
-                  onDeepDive={jest.fn()}
                   onArchive={jest.fn()}
                   onGenerateHtml={jest.fn()}
                   onAnnotationChange={jest.fn()}
@@ -358,66 +352,6 @@ describe('VideoRow', () => {
             `obsidian://open?vault=${encodeURIComponent('agentic-ai-claude-code')}&file=${encodeURIComponent('raw/summary')}`,
           );
         });
-
-        it('deep-dive note keeps the subfolder prefix under the playlist vault', () => {
-          renderMenu('/Users/test/data', '/Users/test/data/agentic-ai-claude-code/raw', {
-            deepDiveMd: 'abc123-deep-dive.md',
-          });
-          const ddHref = screen
-            .getByRole('link', { name: /open deep dive in obsidian/i })
-            .getAttribute('href');
-          expect(ddHref).toBe(
-            `obsidian://open?vault=${encodeURIComponent('agentic-ai-claude-code')}&file=${encodeURIComponent('raw/abc123-deep-dive')}`,
-          );
-        });
-      });
-    });
-
-    describe('Deep Dive', () => {
-      it('is a button (not a link)', () => {
-        openMenu();
-        const btn = screen.getByRole('button', { name: /deep dive doc/i });
-        expect(btn.tagName).toBe('BUTTON');
-      });
-
-      it('is enabled regardless of deepDiveMd value', () => {
-        openMenu({ deepDiveMd: null });
-        expect(screen.getByRole('button', { name: /deep dive doc/i })).toBeEnabled();
-      });
-
-      it('calls onDeepDive with video id when clicked', () => {
-        const onDeepDive = jest.fn();
-        openMenu({}, onDeepDive);
-        fireEvent.click(screen.getByRole('button', { name: /deep dive doc/i }));
-        expect(onDeepDive).toHaveBeenCalledWith('abc123');
-      });
-    });
-
-    describe('Open Deep Dive in Obsidian', () => {
-      it('is disabled when deepDiveMd is null', () => {
-        openMenu({ deepDiveMd: null });
-        const item = screen.getByRole('link', { name: /open deep dive in obsidian/i });
-        expect(item).toHaveAttribute('aria-disabled', 'true');
-        expect(item).toHaveAttribute('tabindex', '-1');
-      });
-
-      it('is enabled when deepDiveMd is non-null', () => {
-        openMenu({ deepDiveMd: 'abc123-deep-dive.md' });
-        const item = screen.getByRole('link', { name: /open deep dive in obsidian/i });
-        expect(item).not.toHaveAttribute('aria-disabled', 'true');
-      });
-
-      it('has correct obsidian:// href with deep-dive file when enabled', () => {
-        openMenu({ deepDiveMd: 'abc123-deep-dive.md' });
-        const link = screen.getByRole('link', { name: /open deep dive in obsidian/i });
-        // vault= is the basename of baseOutputFolder ('/Users/test/vault' → 'vault')
-        // flat layout: no subfolder prefix on file
-        const expectedVault = encodeURIComponent('vault');
-        const expectedFile = encodeURIComponent('abc123-deep-dive');
-        expect(link).toHaveAttribute(
-          'href',
-          `obsidian://open?vault=${expectedVault}&file=${expectedFile}`,
-        );
       });
     });
 
@@ -434,14 +368,14 @@ describe('VideoRow', () => {
 
       it('calls onArchive with video id and "archive" when clicked and not archived', () => {
         const onArchive = jest.fn();
-        openMenu({ archived: false }, jest.fn(), onArchive);
+        openMenu({ archived: false }, onArchive);
         fireEvent.click(screen.getByRole('button', { name: /^archive$/i }));
         expect(onArchive).toHaveBeenCalledWith('abc123', 'archive');
       });
 
       it('calls onArchive with video id and "unarchive" when clicked and archived', () => {
         const onArchive = jest.fn();
-        openMenu({ archived: true }, jest.fn(), onArchive);
+        openMenu({ archived: true }, onArchive);
         fireEvent.click(screen.getByRole('button', { name: /^unarchive$/i }));
         expect(onArchive).toHaveBeenCalledWith('abc123', 'unarchive');
       });
@@ -458,13 +392,9 @@ describe('VideoRow', () => {
 
     describe('menu items present', () => {
       it('renders all active menu actions without PDF items', () => {
-        openMenu({ deepDiveMd: 'abc123-deep-dive.md' });
+        openMenu();
         expect(screen.getByRole('link', { name: /watch on youtube/i })).toBeInTheDocument();
         expect(screen.getByRole('link', { name: /open in obsidian/i })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: /deep dive doc/i })).toBeInTheDocument();
-        expect(
-          screen.getByRole('link', { name: /open deep dive in obsidian/i }),
-        ).toBeInTheDocument();
         expect(
           screen.getByRole('button', { name: /^(archive|unarchive)$/i }),
         ).toBeInTheDocument();
@@ -510,7 +440,6 @@ describe('VideoRow', () => {
       outputFolder: OUTPUT_FOLDER,
       baseOutputFolder: BASE_OUTPUT_FOLDER,
       dimUnscored: false,
-      onDeepDive: jest.fn(),
       onArchive: jest.fn(),
       onGenerateHtml: jest.fn(),
       onAnnotationChange: jest.fn(),

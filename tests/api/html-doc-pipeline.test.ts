@@ -56,7 +56,7 @@ function baseVideo() {
     id: VIDEO_ID, title: '한국어 영상 제목', youtubeUrl: 'https://youtu.be/k', language: 'ko',
     durationSeconds: 598, archived: false,
     ratings: { usefulness: 4, depth: 4, originality: 4, recency: 4, completeness: 4 },
-    overallScore: 4, summaryMd: 'ko-video.md', deepDiveMd: null,
+    overallScore: 4, summaryMd: 'ko-video.md',
     summaryHtml: null, processedAt: '2026-06-09T00:00:00.000Z',
   };
 }

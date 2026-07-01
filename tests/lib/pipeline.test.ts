@@ -68,7 +68,6 @@ function makeIndexedVideo(id: string, overrides: Partial<Video> = {}): Video {
     ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
     overallScore: 3,
     summaryMd: `001_video-${id}.md`,
-    deepDiveMd: null,
     processedAt: new Date().toISOString(),
     ...overrides,
   };

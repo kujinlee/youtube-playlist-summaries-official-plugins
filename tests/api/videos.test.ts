@@ -19,7 +19,6 @@ function makeVideo(id: string, overallScore: number, title = `Video ${id}`, pers
     overallScore,
     personalScore,
     summaryMd: `${id}.md`,
-    deepDiveMd: null,
     processedAt: new Date().toISOString(),
   };
 }

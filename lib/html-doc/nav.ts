@@ -136,8 +136,9 @@ export function startSecFromTsUrl(url: string): number | null {
  */
 export function digControl(startSec: number): string;
 /**
- * The deep-dive-side cross-doc nav control (muted trailing link back to summary).
- * `targetType` must be 'summary'. href computed client-side by wireDigLinks via `data-type`.
+ * The cross-doc "back to summary" nav control (muted trailing link), emitted by the
+ * dig-deeper doc. `targetType` must be 'summary'. href computed client-side by
+ * wireDigLinks via `data-type`.
  */
 export function digControl(targetType: 'summary', startSec: number): string;
 export function digControl(targetTypeOrStartSec: 'summary' | number, startSec?: number): string {
@@ -146,7 +147,7 @@ export function digControl(targetTypeOrStartSec: 'summary' | number, startSec?: 
     const sec = targetTypeOrStartSec;
     return ` <a class="dig" data-section="${sec}" data-t="${sec}">dig deeper ▶</a>`;
   }
-  // Deep-dive-side: cross-doc "↑ summary" link (backward-compat)
+  // Cross-doc: "↑ summary" link back to the summary doc (emitted by the dig-deeper doc)
   return ` <a class="dig" data-type="${targetTypeOrStartSec}" data-t="${startSec}">↑ summary</a>`;
 }
 
@@ -187,7 +188,7 @@ export const NAV_CSS =
 // the TS helpers above and must be kept in sync — the inline string is not covered by jsdom tests.
 export const NAV_SCRIPT = `<script>
 (function(){
-  // ── cross-doc nav (deep-dive → summary) ──────────────────────────────────
+  // ── cross-doc nav (dig-deeper → summary) ─────────────────────────────────
   document.querySelectorAll('a.dig').forEach(function(a){
     if(!a.dataset.type)return;
     var u=new URL(location.href);

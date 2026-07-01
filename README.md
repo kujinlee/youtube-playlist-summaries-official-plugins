@@ -6,9 +6,9 @@ A Next.js web app that ingests a YouTube playlist, generates AI summaries and mu
 
 - **Playlist ingestion** — paste a YouTube playlist URL, stream per-video progress via SSE
 - **AI summaries** — Gemini generates structured summaries with five quality ratings (usefulness, depth, originality, recency, completeness)
-- **On-demand deep dive** — richer Gemini analysis using native YouTube video understanding (no upload required)
+- **Dig deeper** — on-demand, per-section elaboration with slide screenshots, grounded in the video clip
 - **Sortable list** — sort by any rating dimension or overall score, ascending or descending
-- **HTML docs** — open any summary or deep dive as a styled, themeable HTML doc; print or save to PDF straight from the browser
+- **HTML docs** — open any summary as a styled, themeable HTML doc; print or save to PDF straight from the browser
 - **Obsidian integration** — one-click `obsidian://open` URI to open notes in your vault
 - **Archive** — move videos to an `archived/` subfolder; greyed-out rows stay visible when "Show Archive" is checked
 - **Bilingual** — summaries are generated in the video's language (English or Korean)
@@ -54,7 +54,7 @@ Copy `.env.local.example` to `.env.local` and set:
 |---|---|
 | `GEMINI_API_KEY` | Gemini API key |
 | `GEMINI_SUMMARY_MODEL` | Model for summaries (default: `gemini-2.5-flash`) |
-| `GEMINI_DEEPDIVE_MODEL` | Model for deep dives (default: `gemini-2.5-pro`) |
+| `GEMINI_DEEPDIVE_MODEL` | Model for dig-deeper section analysis (default: `gemini-2.5-pro`) |
 | `YOUTUBE_API_KEY` | YouTube Data API v3 key |
 | `OUTPUT_FOLDER` | Absolute (or relative) path to the output folder |
 
@@ -68,9 +68,7 @@ The output folder is created automatically on first ingest. If you use it as an 
 4. When done, the video list appears sorted by name
 5. Click **☰** on any row to open the per-video menu:
    - **Open in Obsidian** — opens the summary note in Obsidian
-   - **Summary doc** — opens the summary as a styled HTML doc (print / save-to-PDF in the browser)
-   - **Deep Dive** — triggers a richer Gemini analysis (streams progress)
-   - **Open Deep Dive in Obsidian** / **Deep Dive doc** — available after deep dive completes
+   - **Summary doc** — opens the summary as a styled HTML doc (print / save-to-PDF in the browser); dig into any section on demand
    - **Archive / Unarchive** — moves files to/from `archived/` subfolder
 
 ## Output folder layout
@@ -79,7 +77,7 @@ The output folder is created automatically on first ingest. If you use it as an 
 output-folder/
 ├── playlist-index.json       ← metadata index
 ├── {videoId}.md              ← summary (Markdown)
-├── {videoId}-deep-dive.md    ← deep dive (generated on demand)
+├── {videoId}-dig-deeper.md   ← dig-deeper companion (accumulates dug sections)
 ├── htmls/                    ← cached HTML docs (print / save-to-PDF in browser)
 └── archived/
     └── ...                   ← archived video files
@@ -103,7 +101,6 @@ app/
     videos/route.ts               ← GET video list
     ingest/route.ts               ← POST start ingestion
     ingest/stream/route.ts        ← GET SSE progress stream
-    videos/[id]/deep-dive/        ← POST + GET stream
     videos/[id]/archive/route.ts  ← POST archive/unarchive
     settings/route.ts             ← GET/POST output folder setting
 components/
@@ -111,7 +108,6 @@ components/
   SortBar.tsx                     ← column sort controls
   VideoList.tsx                   ← list + archive filter
   VideoRow.tsx / VideoMenu.tsx    ← per-video row and action menu
-  DeepDiveOverlay.tsx             ← SSE-driven deep dive progress
 lib/
   gemini.ts                       ← all Gemini API calls
   youtube.ts                      ← YouTube Data API + transcripts

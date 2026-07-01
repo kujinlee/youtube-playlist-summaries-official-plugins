@@ -14,7 +14,6 @@ function makeVideo(overrides: Partial<Video>): Video {
     ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
     overallScore: 3,
     summaryMd: null,
-    deepDiveMd: null,
     processedAt: '2026-01-01T00:00:00.000Z',
     ...overrides,
   };
@@ -56,7 +55,7 @@ describe('checkSerialInvariant', () => {
   });
 
   it('skips null and absent path fields', () => {
-    const v = makeVideo({ serialNumber: 7, summaryMd: null, deepDiveMd: null });
+    const v = makeVideo({ serialNumber: 7, summaryMd: null, summaryHtml: null });
     expect(checkSerialInvariant([v], NONE_EXIST)).toEqual([]);
   });
 
@@ -68,10 +67,10 @@ describe('checkSerialInvariant', () => {
   });
 
   it('reports only the offending field when a video mixes clean and dirty fields', () => {
-    const v = makeVideo({ serialNumber: 7, summaryMd: '007_x.md', deepDiveMd: 'x-deep-dive.md' });
+    const v = makeVideo({ serialNumber: 7, summaryMd: '007_x.md', digDeeperMd: 'x-dig-deeper.md' });
     const out = checkSerialInvariant([v], ALL_EXIST);
     expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({ field: 'deepDiveMd', reason: 'prefix' });
+    expect(out[0]).toMatchObject({ field: 'digDeeperMd', reason: 'prefix' });
   });
 
   it('reports a prefix violation (not missing) when the path is both unprefixed and absent', () => {
@@ -102,18 +101,16 @@ describe('checkSerialInvariant', () => {
   // Structural coverage: if PATH_FIELDS grows, this asserts the loop reaches the
   // new field (a dirty value on every field must surface a violation). Pairs with
   // the compile-time PathField⊆keyof Video assertion in serial-invariant.ts.
-  it('reaches all six PATH_FIELDS when every one is dirty', () => {
+  it('reaches all four PATH_FIELDS when every one is dirty', () => {
     const v = makeVideo({
       serialNumber: 7,
       summaryMd: 'a.md',
-      deepDiveMd: 'c.md',
       summaryHtml: 'e.html',
-      deepDiveHtml: 'f.html',
       digDeeperMd: 'g.md',
       digDeeperHtml: 'h.html',
     });
     const out = checkSerialInvariant([v], ALL_EXIST);
-    expect(out).toHaveLength(6);
+    expect(out).toHaveLength(4);
     expect(out.every((x) => x.reason === 'prefix')).toBe(true);
   });
 

@@ -17,7 +17,7 @@ const VIDEO_ID = 'test-video-01';
 const SLUG = 'the-test-video-title';
 
 // Files use title slugs (not videoId) matching what the pipeline writes.
-function makeVideo(id: string, archived = false, withDeepDive = false): Video {
+function makeVideo(id: string, archived = false): Video {
   return {
     id,
     title: 'Test Video',
@@ -28,7 +28,6 @@ function makeVideo(id: string, archived = false, withDeepDive = false): Video {
     ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
     overallScore: 3,
     summaryMd: `${SLUG}.md`,
-    deepDiveMd: withDeepDive ? `${SLUG}-deep-dive.md` : null,
     processedAt: new Date().toISOString(),
   };
 }
@@ -61,18 +60,6 @@ describe('archiveVideo', () => {
     expect(fs.existsSync(path.join(archivedDir, `${SLUG}.md`))).toBe(true);
     // original removed
     expect(fs.existsSync(path.join(outputFolder, `${SLUG}.md`))).toBe(false);
-  });
-
-  it('moves summary and deep-dive md files', async () => {
-    upsertVideo(outputFolder, makeVideo(VIDEO_ID, false, true));
-    writeFile(outputFolder, `${SLUG}.md`, 'summary');
-    writeFile(outputFolder, `${SLUG}-deep-dive.md`, 'deep');
-
-    await archiveVideo(outputFolder, VIDEO_ID);
-
-    const archivedDir = path.join(outputFolder, 'archived');
-    expect(fs.existsSync(path.join(archivedDir, `${SLUG}.md`))).toBe(true);
-    expect(fs.existsSync(path.join(archivedDir, `${SLUG}-deep-dive.md`))).toBe(true);
   });
 
   it('does not throw when only some files are present', async () => {

@@ -4,7 +4,7 @@ import type { Video } from '@/types';
 const v = (over: Partial<Video>): Video => ({
   id: 'x', title: 'T', youtubeUrl: 'u', language: 'en', durationSeconds: 1, archived: false,
   ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
-  overallScore: 3, summaryMd: 's.md', deepDiveMd: null,
+  overallScore: 3, summaryMd: 's.md',
   processedAt: '2026-01-01T00:00:00.000Z', ...over,
 });
 

@@ -53,7 +53,7 @@ function esc(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-export function renderMagazineHtml(parsed: ParsedSummary, model: MagazineModel, hasDeepDive = false): string {
+export function renderMagazineHtml(parsed: ParsedSummary, model: MagazineModel): string {
   const metaParts = [parsed.channel, parsed.duration]
     .filter(Boolean)
     .map((s) => esc(s as string));

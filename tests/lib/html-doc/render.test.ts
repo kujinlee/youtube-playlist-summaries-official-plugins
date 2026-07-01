@@ -252,23 +252,15 @@ describe('renderMagazineHtml — section timestamps', () => {
     expect(html).toContain('href="https://youtu.be/x?v=1&amp;t=0s"');
   });
 
-  it('emits data-start on the section + a dig-deeper control when hasDeepDive', () => {
-    const html = renderMagazineHtml(withTs, model, true);
+  it('emits data-start + a dig-deeper control on every timestamped section', () => {
+    const html = renderMagazineHtml(withTs, model);
     expect(html).toMatch(/<section data-start="135">/);
-    // New markup: data-section (POST-driven) instead of data-type
+    // Markup: data-section (POST-driven) instead of data-type
     expect(html).toContain('class="dig"');
     expect(html).toContain('data-section="135"');
     expect(html).toContain('data-t="135"');
     expect(html).toContain('dig deeper');
     expect(html).toContain('a.dig'); // NAV_SCRIPT present (unique token)
-  });
-  it('emits dig control even when deepDiveMd is absent (deepDiveMd: null, no hasDeepDive)', () => {
-    // NEW BEHAVIOR (D1): control must appear on every timestamped section regardless of hasDeepDive
-    const html = renderMagazineHtml(withTs, model); // hasDeepDive defaults to false
-    expect(html).toContain('class="dig"');
-    expect(html).toContain('data-section="135"');
-    expect(html).toContain('data-t="135"');
-    expect(html).toContain('dig deeper');
   });
   it('omits the dig control when section has no timestamp (startSec null)', () => {
     // Only the Conclusion section (no timeRange) should have no control

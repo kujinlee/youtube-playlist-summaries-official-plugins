@@ -429,7 +429,6 @@ test('F4 (v1 regression): stale summary (magazine-skim v1) → re-render served 
         ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
         overallScore: 3,
         summaryMd: summaryMdRel,
-        deepDiveMd: null,
         summaryHtml: summaryHtmlRel,
         processedAt: '2026-01-01T00:00:00.000Z',
       }],

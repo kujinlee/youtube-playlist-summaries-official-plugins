@@ -7,6 +7,27 @@ import type { PlaylistIndex, Video } from '../types';
 const INDEX_FILE = 'playlist-index.json';
 const VIDEO_ID_RE = /^[A-Za-z0-9_-]{1,20}$/;
 
+// Fields retired by the PDF-generation removal (summaryPdf/deepDivePdf) and the
+// deep-dive removal (deepDiveMd/deepDiveHtml/deepDiveVersion). Index files written
+// before those efforts still carry these keys; strip them on read so the API never
+// re-serves dangling references to deleted files.
+const RETIRED_VIDEO_KEYS = [
+  'summaryPdf',
+  'deepDiveMd',
+  'deepDiveHtml',
+  'deepDivePdf',
+  'deepDiveVersion',
+] as const;
+
+function stripRetiredKeys(index: PlaylistIndex): PlaylistIndex {
+  for (const video of index.videos ?? []) {
+    for (const key of RETIRED_VIDEO_KEYS) {
+      delete (video as Record<string, unknown>)[key];
+    }
+  }
+  return index;
+}
+
 export function assertOutputFolder(outputFolder: string): void {
   const resolved = path.resolve(outputFolder);
   const home = os.homedir();
@@ -45,7 +66,7 @@ export function readIndex(outputFolder: string): PlaylistIndex {
   const filePath = indexPath(outputFolder);
   try {
     const raw = fs.readFileSync(filePath, 'utf-8');
-    return JSON.parse(raw) as PlaylistIndex;
+    return stripRetiredKeys(JSON.parse(raw) as PlaylistIndex);
   } catch (err: unknown) {
     const nodeErr = err as NodeJS.ErrnoException;
     if (nodeErr.code === 'ENOENT') {

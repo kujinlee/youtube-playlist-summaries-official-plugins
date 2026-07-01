@@ -17,7 +17,7 @@ function getFilePairs(outputFolder: string, videoId: string): FilePair[] {
   const base = path.resolve(outputFolder);
   const pairs: FilePair[] = [];
 
-  for (const relPath of [video.summaryMd, video.deepDiveMd]) {
+  for (const relPath of [video.summaryMd]) {
     if (!relPath) continue;
     const root = path.resolve(path.join(base, relPath));
     // Guard: resolved root must stay within outputFolder
@@ -57,7 +57,7 @@ async function moveIfExists(src: string, dest: string): Promise<boolean> {
   }
 }
 
-// Cached HTML files for a video: htmls/<summaryBase>.html and htmls/<deepDiveBase>.html.
+// Cached HTML files for a video: htmls/<summaryBase>.html.
 // Returns only paths safely within outputFolder.
 function getCachedHtmlPaths(outputFolder: string, videoId: string): string[] {
   const index = readIndex(outputFolder);
@@ -65,7 +65,7 @@ function getCachedHtmlPaths(outputFolder: string, videoId: string): string[] {
   if (!video) return [];
   const base = path.resolve(outputFolder);
   const out: string[] = [];
-  for (const md of [video.summaryMd, video.deepDiveMd]) {
+  for (const md of [video.summaryMd]) {
     if (!md) continue;
     const rel = path.join('htmls', `${md.replace(/\.md$/, '')}.html`);
     const abs = path.resolve(base, rel);

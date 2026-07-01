@@ -12,7 +12,6 @@ interface VideoListProps {
   showArchive: boolean;
   minPersonalScore?: number;
   busyVideoId?: string | null;
-  onDeepDive: (videoId: string) => void;
   onArchive: (videoId: string, action: 'archive' | 'unarchive') => void;
   onGenerateHtml: (videoId: string) => void;
   onAnnotationChange?: (videoId: string, patch: Partial<Pick<Video, 'personalScore' | 'personalNote' | 'corrections' | 'tldr' | 'takeaways' | 'summaryHtml'>>) => void;
@@ -51,7 +50,6 @@ export default function VideoList({
   showArchive,
   minPersonalScore = 0,
   busyVideoId = null,
-  onDeepDive,
   onArchive,
   onGenerateHtml,
   onAnnotationChange = noop,
@@ -160,7 +158,6 @@ export default function VideoList({
             selected={selected.has(video.id)}
             selectable={summarySelectable(video)}
             onToggleSelect={onToggleSelect}
-            onDeepDive={onDeepDive}
             onArchive={onArchive}
             onGenerateHtml={onGenerateHtml}
             onAnnotationChange={onAnnotationChange}
