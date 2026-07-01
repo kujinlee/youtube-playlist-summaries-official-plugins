@@ -103,3 +103,59 @@ export async function fetchPlaylistTitle(playlistId: string, apiKey: string): Pr
   const res = await yt.playlists.list({ part: ['snippet'], id: [playlistId] });
   return res.data.items?.[0]?.snippet?.title ?? playlistId;
 }
+
+export class ChannelNotFoundError extends Error {}
+
+export function buildPlaylistUrl(id: string): string {
+  return `https://youtube.com/playlist?list=${id}`;
+}
+
+const HANDLE_RE = /^[A-Za-z0-9._-]{1,30}$/;
+const CHANNEL_ID_RE = /^UC[A-Za-z0-9_-]{20,}$/;
+const YT_HOSTS = new Set(['youtube.com', 'www.youtube.com', 'm.youtube.com']);
+
+// Strict, YouTube-host-only parse (Codex H2). {} for anything invalid → callers map to ChannelNotFound.
+export function parseChannelHandle(input: string): { handle?: string; channelId?: string } {
+  const trimmed = input.trim();
+  if (!trimmed) return {};
+  const looksUrl = /^https?:\/\//i.test(trimmed) || /^(www\.|m\.)?youtube\.com\//i.test(trimmed);
+  if (looksUrl) {
+    let url: URL;
+    try { url = new URL(/^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`); } catch { return {}; }
+    if (!YT_HOSTS.has(url.hostname.toLowerCase())) return {};
+    const at = url.pathname.match(/^\/@([A-Za-z0-9._-]{1,30})$/);
+    if (at) return { handle: at[1] };
+    const chan = url.pathname.match(/^\/channel\/(UC[A-Za-z0-9_-]{20,})$/);
+    if (chan) return { channelId: chan[1] };
+    return {};
+  }
+  if (/[/\s]/.test(trimmed)) return {};       // no path/space in a non-URL form
+  if (CHANNEL_ID_RE.test(trimmed)) return { channelId: trimmed };
+  const bare = trimmed.replace(/^@/, '');
+  if (bare.includes('@')) return {};          // embedded @ (e.g. x@y)
+  if (HANDLE_RE.test(bare)) return { handle: bare };
+  return {};
+}
+
+export async function resolveChannelId(input: string, apiKey: string): Promise<{ channelId: string; channelTitle: string }> {
+  const parsed = parseChannelHandle(input);
+  const yt = google.youtube({ version: 'v3', auth: apiKey });
+  const pick = (item?: { id?: string | null; snippet?: { title?: string | null } | null }) => {
+    if (!item?.id) throw new ChannelNotFoundError(`channel not found: ${input}`);
+    return { channelId: item.id, channelTitle: item.snippet?.title ?? item.id };
+  };
+  if (parsed.channelId) return pick((await yt.channels.list({ part: ['snippet'], id: [parsed.channelId] })).data.items?.[0]);
+  if (parsed.handle) return pick((await yt.channels.list({ part: ['snippet'], forHandle: parsed.handle })).data.items?.[0]);
+  throw new ChannelNotFoundError(`unrecognized channel input: ${input}`);
+}
+
+export async function fetchChannelPlaylists(channelId: string, apiKey: string): Promise<{ id: string; title: string; itemCount?: number; thumbnailUrl?: string }[]> {
+  const yt = google.youtube({ version: 'v3', auth: apiKey });
+  const res = await yt.playlists.list({ part: ['snippet', 'contentDetails'], channelId, maxResults: 50 });
+  return (res.data.items ?? []).filter((i) => i.id).map((i) => ({
+    id: i.id as string,
+    title: i.snippet?.title ?? (i.id as string),
+    itemCount: i.contentDetails?.itemCount ?? undefined,
+    thumbnailUrl: i.snippet?.thumbnails?.medium?.url ?? i.snippet?.thumbnails?.default?.url ?? undefined,
+  }));
+}
