@@ -162,8 +162,14 @@ section[data-dug="true"].show-gist .dug{display:none}
 .dg-expand-all{background:none;border:1px solid var(--rule);border-radius:4px;padding:.2em .6em;cursor:pointer;font-size:.85rem;color:var(--meta)}
 .dg-orphans{margin-top:3em;padding-top:1.5em;border-top:2px dashed var(--rule)}
 .dg-orphan-note{font-size:.82rem;color:var(--meta);font-style:italic}
-#_dg-ea-dlg,#_dg-ea-prog{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;align-items:center;justify-content:center}
-#_dg-ea-dlg[data-open],#_dg-ea-prog[data-open]{display:flex}
+#_dg-ea-dlg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;align-items:center;justify-content:center}
+#_dg-ea-dlg[data-open]{display:flex}
+#_dg-ea-prog{display:none;position:fixed;left:0;right:0;bottom:0;z-index:9000}
+#_dg-ea-prog[data-open]{display:block}
+._dg-bar{display:flex;flex-wrap:wrap;align-items:center;gap:.6em 1em;background:var(--card,#fff);border-top:1px solid var(--rule);padding:.7em 1.2em;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:.9rem;color:var(--ink);box-shadow:0 -2px 12px rgba(0,0,0,.12);max-height:40vh;overflow-y:auto}
+._dg-bar #_dg-ea-prog-msg{flex:1 1 12rem;min-width:0;margin:0}
+._dg-bar #_dg-ea-fail-msg{flex:1 1 100%;min-width:0;margin:0}
+._dg-bar button{flex:0 0 auto;padding:.3em .9em;border-radius:4px;font-size:.85rem;cursor:pointer;border:1px solid var(--rule)}
 ._dg-box{background:var(--card,#fff);border-radius:8px;padding:1.6em 2em;max-width:28rem;width:90%;box-shadow:0 4px 24px rgba(0,0,0,.18);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 ._dg-box p{margin:.4em 0 1.2em;font-size:.95rem;color:var(--ink)}
 ._dg-box button{padding:.3em .9em;border-radius:4px;font-size:.88rem;cursor:pointer;border:1px solid var(--rule)}
@@ -334,10 +340,10 @@ export function renderDigDeeperDoc(args: {
     <button id="_dg-ea-cancel-dlg">Cancel</button>
   </div>
 </div>
-<div id="_dg-ea-prog" role="status">
-  <div class="_dg-box">
-    <p id="_dg-ea-prog-msg">Starting…</p>
-    <p id="_dg-ea-fail-msg" style="color:#c00;display:none"></p>
+<div id="_dg-ea-prog" role="region" aria-label="Expand-all progress">
+  <div class="_dg-bar">
+    <span id="_dg-ea-prog-msg" role="status" aria-live="polite">Starting…</span>
+    <span id="_dg-ea-fail-msg" aria-live="polite" style="color:#c00;display:none"></span>
     <button id="_dg-ea-cancel-prog">Cancel</button>
   </div>
 </div>`;

@@ -217,6 +217,11 @@ export const NAV_SCRIPT = `<script>
     var _dg=document.querySelector('.dg');
     if(_dg){
       function _applyDigErr(el){el.textContent='\\u26a0 retry';el.dataset.state='error';el.removeAttribute('href');}
+      // Non-blocking progress bar means clicks are no longer physically blocked
+      // during an expand-all run (the old full-screen overlay masked them). Guard
+      // against concurrent generation: a second expand-all or a manual single dig
+      // is ignored while a batch is running. Reading aids (toggle) stay allowed.
+      var _eaRunning=false;
       // ── Promise-based dig: single POST→SSE→swap core ─────────────────────
       function _startDocDigAsync(trigger){
         return new Promise(function(resolve,reject){
@@ -264,6 +269,7 @@ export const NAV_SCRIPT = `<script>
         function _eaOpen(el){el.setAttribute('data-open','');}
         function _eaRunBatch(triggers,N){
           _eaOpen(_eaProg);
+          _eaRunning=true;
           var cancelled=false;
           var failures=[];
           var k=0;
@@ -274,6 +280,7 @@ export const NAV_SCRIPT = `<script>
             var remaining=[].slice.call(document.querySelectorAll('.dig-trigger[data-section], .dig-refresh[data-section]'))
               .filter(function(t){return t.dataset.state!=='error'&&t.dataset.state!=='loading';});
             if(cancelled||remaining.length===0){
+              _eaRunning=false;
               if(failures.length>0){
                 // Show failure summary in the progress overlay then auto-close.
                 _eaProgMsg.textContent='Done with '+failures.length+' failure(s).';
@@ -286,7 +293,7 @@ export const NAV_SCRIPT = `<script>
               return;
             }
             k++;
-            _eaProgMsg.textContent='section '+k+' of '+N+'\\u2026';
+            _eaProgMsg.textContent='Expanding \\u2014 section '+k+' of '+N+'\\u2026';
             var trig=remaining[0];
             _startDocDigAsync(trig)
               .then(function(){_next();})
@@ -295,6 +302,7 @@ export const NAV_SCRIPT = `<script>
           _next();
         }
         _eaBtn.addEventListener('click',function(){
+          if(_eaRunning)return;
           var triggers=[].slice.call(document.querySelectorAll('.dig-trigger[data-section], .dig-refresh[data-section]'));
           var N=triggers.length;
           if(N===0)return;
@@ -322,11 +330,12 @@ export const NAV_SCRIPT = `<script>
         if(tog){e.preventDefault();var s=tog.closest('section');if(s){s.classList.toggle('show-gist');tog.textContent=s.classList.contains('show-gist')?'show dig deeper \\u25b6':'show summary \\u2303';}return;}
         // Refresh (stale dug → re-dig in place) — must be before .dig-trigger check
         var refresh=(e.target.closest?e.target.closest('.dig-refresh[data-section]'):null);
-        if(refresh){e.preventDefault();_startDocDig(refresh);return;}
+        if(refresh){e.preventDefault();if(_eaRunning)return;_startDocDig(refresh);return;}
         // Trigger (un-dug → expand in place)
         var trig=(e.target.closest?e.target.closest('.dig-trigger[data-section]'):null);
         if(!trig)return;
         e.preventDefault();
+        if(_eaRunning)return;
         var st=trig.dataset.state;
         if(st==='loading')return;
         _startDocDig(trig);
