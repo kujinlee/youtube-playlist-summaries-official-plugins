@@ -54,11 +54,10 @@ describe('responseSchema (controlled generation) is wired into every JSON call s
 
   it('generateSummary constrains output to the summary object schema', async () => {
     const fixture = {
-      summary: '## 1. X\nbody',
+      // Completeness-clean + a resolvable [[TS:0]] so the quality loop early-returns on attempt 1.
+      summary: '## 1. X\n[[TS:0]]\n\nbody.\n\n## Conclusion\n\nAll done.',
       ratings: { usefulness: 4, depth: 4, originality: 4, recency: 4, completeness: 4 },
     };
-    // Two replies: the guard retries once when no ▶ is resolved (segments present).
-    reply(fixture);
     reply(fixture);
     await generateSummary(segments, 'en', 'vid123');
 

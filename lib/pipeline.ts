@@ -52,7 +52,9 @@ export async function writeSummaryDoc(input: SummaryDocInput): Promise<SummaryDo
     await generateSummary(segments, language, videoId);
   const summary = padDividers(rawSummary);
   // Non-blocking observability: flag a summary that looks truncated (see summary-completeness).
-  // Never blocks the write — Stage 2 adds auto-retry; Stage 1 only makes it visible.
+  // Never blocks the write. Layered on purpose: generateSummary (Stage 2) also warns after its
+  // retry budget is exhausted; this pipeline check is the final gate on the exact text being
+  // persisted (incl. padDividers). Two warnings for one truncation is expected, not a bug.
   const completeness = checkSummaryCompleteness(summary);
   if (!completeness.complete) {
     console.warn(`[summary-suspicious] ${videoId}: ${completeness.reason} (confidence=${completeness.confidence})`);

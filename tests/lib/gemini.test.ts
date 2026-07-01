@@ -7,6 +7,12 @@ const SEGS: TranscriptSegment[] = [
   { text: 'core', offset: 135, duration: 10 },
 ];
 
+// A completeness-clean, timestamp-resolving summary so the quality loop early-returns on attempt 1
+// (SEGS present → [[TS:0]]/[[TS:1]] resolve to ▶). Use this whenever a test's summary content is
+// incidental (it's asserting ratings/tags/videoType/prompt/etc.), so the test exercises the
+// happy path — one call, no soft-retry noise — instead of exhausting the budget.
+const OK = '## 1. A\n[[TS:0]]\n\nbody.\n\n## Conclusion\n[[TS:1]]\n\nAll done.';
+
 jest.mock('@google/generative-ai', () => ({
   ...jest.requireActual('@google/generative-ai'),
   GoogleGenerativeAI: jest.fn(),
@@ -33,7 +39,7 @@ describe('generateSummary', () => {
     mockGenerateContent.mockResolvedValue({
       response: {
         text: () => JSON.stringify({
-          summary: 'A great video about machine learning',
+          summary: OK,
           ratings: { usefulness: 4, depth: 3, originality: 5, recency: 4, completeness: 3 },
         }),
       },
@@ -41,7 +47,8 @@ describe('generateSummary', () => {
 
     const result = await generateSummary(SEGS, 'en', 'vid123');
 
-    expect(result.summary).toBe('A great video about machine learning');
+    expect(mockGenerateContent).toHaveBeenCalledTimes(1); // complete+timestamped → early return
+    expect(result.summary).toContain('All done.');
     for (const value of Object.values(result.ratings)) {
       expect(value).toBeGreaterThanOrEqual(1);
       expect(value).toBeLessThanOrEqual(5);
@@ -53,7 +60,7 @@ describe('generateSummary', () => {
     mockGenerateContent.mockResolvedValue({
       response: {
         text: () => JSON.stringify({
-          summary: 'test',
+          summary: OK,
           ratings: { usefulness: 2, depth: 4, originality: 2, recency: 4, completeness: 3 },
         }),
       },
@@ -86,7 +93,7 @@ describe('generateSummary', () => {
     mockGenerateContent.mockResolvedValue({
       response: {
         text: () => JSON.stringify({
-          summary: '머신러닝에 관한 훌륭한 비디오',
+          summary: OK,
           ratings: { usefulness: 4, depth: 3, originality: 5, recency: 4, completeness: 3 },
         }),
       },
@@ -99,7 +106,9 @@ describe('generateSummary', () => {
   });
 
   it('throws when model returns malformed JSON', async () => {
-    mockGenerateContent.mockResolvedValueOnce({
+    // Persistent (not Once) so every generateJson inner retry sees the same bad payload — tests real
+    // rejection, not a TypeError from an exhausted mock.
+    mockGenerateContent.mockResolvedValue({
       response: { text: () => 'not valid json at all' },
     });
 
@@ -107,10 +116,10 @@ describe('generateSummary', () => {
   });
 
   it('throws when model returns out-of-range rating values', async () => {
-    mockGenerateContent.mockResolvedValueOnce({
+    mockGenerateContent.mockResolvedValue({
       response: {
         text: () => JSON.stringify({
-          summary: 'test',
+          summary: OK,
           ratings: { usefulness: 6, depth: 3, originality: 5, recency: 4, completeness: 3 },
         }),
       },
@@ -123,7 +132,7 @@ describe('generateSummary', () => {
     mockGenerateContent.mockResolvedValue({
       response: {
         text: () => JSON.stringify({
-          summary: 'test',
+          summary: OK,
           ratings: { usefulness: 4, depth: 3, originality: 5, recency: 4, completeness: 3 },
           videoType: 'Tutorial',
           audience: 'Advanced',
@@ -141,7 +150,7 @@ describe('generateSummary', () => {
     mockGenerateContent.mockResolvedValue({
       response: {
         text: () => JSON.stringify({
-          summary: 'test',
+          summary: OK,
           ratings: { usefulness: 4, depth: 3, originality: 5, recency: 4, completeness: 3 },
         }),
       },
@@ -154,10 +163,10 @@ describe('generateSummary', () => {
   });
 
   it('rejects invalid videoType value', async () => {
-    mockGenerateContent.mockResolvedValueOnce({
+    mockGenerateContent.mockResolvedValue({
       response: {
         text: () => JSON.stringify({
-          summary: 'test',
+          summary: OK,
           ratings: { usefulness: 1, depth: 1, originality: 1, recency: 1, completeness: 1 },
           videoType: 'NotAValidType',
         }),
@@ -171,7 +180,7 @@ describe('generateSummary', () => {
     mockGenerateContent.mockResolvedValue({
       response: {
         text: () => JSON.stringify({
-          summary: 'test',
+          summary: OK,
           ratings: { usefulness: 1, depth: 1, originality: 1, recency: 1, completeness: 1 },
         }),
       },
@@ -185,10 +194,10 @@ describe('generateSummary', () => {
   });
 
   it('rejects unexpected top-level fields in model response', async () => {
-    mockGenerateContent.mockResolvedValueOnce({
+    mockGenerateContent.mockResolvedValue({
       response: {
         text: () => JSON.stringify({
-          summary: 'test',
+          summary: OK,
           ratings: { usefulness: 1, depth: 1, originality: 1, recency: 1, completeness: 1 },
           unexpectedField: 'hallucinated data',
         }),
@@ -202,7 +211,7 @@ describe('generateSummary', () => {
     mockGenerateContent.mockResolvedValue({
       response: {
         text: () => JSON.stringify({
-          summary: 'test',
+          summary: OK,
           ratings: { usefulness: 4, depth: 3, originality: 5, recency: 4, completeness: 3 },
           tags: ['machine-learning', 'neural-networks', 'backpropagation'],
         }),
@@ -218,7 +227,7 @@ describe('generateSummary', () => {
     mockGenerateContent.mockResolvedValue({
       response: {
         text: () => JSON.stringify({
-          summary: 'test',
+          summary: OK,
           ratings: { usefulness: 4, depth: 3, originality: 5, recency: 4, completeness: 3 },
         }),
       },
@@ -233,7 +242,7 @@ describe('generateSummary', () => {
     mockGenerateContent.mockResolvedValue({
       response: {
         text: () => JSON.stringify({
-          summary: 'test',
+          summary: OK,
           ratings: { usefulness: 1, depth: 1, originality: 1, recency: 1, completeness: 1 },
         }),
       },
@@ -253,7 +262,7 @@ describe('generateSummary — tldr and takeaways fields', () => {
     mockGenerateContent.mockResolvedValue({
       response: {
         text: () => JSON.stringify({
-          summary: 'body text',
+          summary: OK,
           ratings: { usefulness: 4, depth: 3, originality: 5, recency: 4, completeness: 3 },
           tldr: 'This video teaches AI agents.',
           takeaways: ['Agents use tools', 'Memory matters'],
@@ -269,7 +278,7 @@ describe('generateSummary — tldr and takeaways fields', () => {
     mockGenerateContent.mockResolvedValue({
       response: {
         text: () => JSON.stringify({
-          summary: 'body text',
+          summary: OK,
           ratings: { usefulness: 4, depth: 3, originality: 5, recency: 4, completeness: 3 },
         }),
       },
@@ -283,7 +292,7 @@ describe('generateSummary — tldr and takeaways fields', () => {
 describe('generateSummary — timestamps', () => {
   it('sends an indexed transcript and asks for [[TS:i]] tokens', async () => {
     mockGenerateContent.mockResolvedValue({
-      response: { text: () => JSON.stringify({ summary: '## 1. A\nbody', ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 } }) },
+      response: { text: () => JSON.stringify({ summary: OK, ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 } }) },
     });
 
     await generateSummary(SEGS, 'en', 'vid123');
@@ -297,7 +306,7 @@ describe('generateSummary — timestamps', () => {
   it('resolves [[TS:i]] tokens in the returned summary into ▶ lines', async () => {
     mockGenerateContent.mockResolvedValueOnce({
       response: { text: () => JSON.stringify({
-        summary: '## 1. A\n[[TS:0]]\n\nbody a\n\n## Conclusion\n[[TS:1]]\n\nend',
+        summary: '## 1. A\n[[TS:0]]\n\nbody a\n\n## Conclusion\n[[TS:1]]\n\nend.',
         ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
       }) },
     });
@@ -311,7 +320,8 @@ describe('generateSummary — timestamps', () => {
   it('degrades to no timestamps when Gemini emits an out-of-range index', async () => {
     mockGenerateContent.mockResolvedValue({
       response: { text: () => JSON.stringify({
-        summary: '## 1. A\n[[TS:9]]\n\nbody',
+        // Complete prose but an out-of-range [[TS:9]] (dropped) → no ▶. Complete-but-no-▶ → capped.
+        summary: '## 1. A\n[[TS:9]]\n\nbody.\n\n## Conclusion\n\ndone.',
         ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
       }) },
     });
@@ -325,8 +335,9 @@ describe('generateSummary — timestamps', () => {
 });
 
 describe('generateSummary — timestamp guard', () => {
-  const withTs = '## 1. A\n[[TS:0]]\n\nbody\n\n## Conclusion\n[[TS:1]]\n\nend';
-  const noTs = '## 1. A\n\nbody\n\n## Conclusion\n\nend';
+  // Both are completeness-clean (end on '.') so only the ▶/timestamp behavior is under test.
+  const withTs = '## 1. A\n[[TS:0]]\n\nbody\n\n## Conclusion\n[[TS:1]]\n\nend.';
+  const noTs = '## 1. A\n\nbody\n\n## Conclusion\n\nend.';
   const ratings = { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 };
 
   it('retries once when attempt 1 has no ▶ and attempt 2 does (segments present)', async () => {
@@ -346,7 +357,7 @@ describe('generateSummary — timestamp guard', () => {
 
     const result = await generateSummary(SEGS, 'en', 'vid123');
 
-    expect(mockGenerateContent).toHaveBeenCalledTimes(2);
+    expect(mockGenerateContent).toHaveBeenCalledTimes(2); // complete-but-no-▶ is capped at TIMESTAMP_MISS_CAP
     expect(result.summary).not.toContain('▶');
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('[timestamp-miss] vid123'));
     warn.mockRestore();
@@ -368,7 +379,7 @@ describe('generateSummary — truncation guard (finishReason)', () => {
   // Both carry a resolvable [[TS:0]] so the timestamp re-roll never fires — this isolates the
   // finishReason guard. Only the finishReason differs between the two responses.
   const truncated = '## 1. A\n[[TS:0]]\n\ntruncated body that stops mid-sen';
-  const complete = '## 1. A\n[[TS:0]]\n\nbody\n\n## Conclusion\n[[TS:1]]\n\nend';
+  const complete = '## 1. A\n[[TS:0]]\n\nbody\n\n## Conclusion\n[[TS:1]]\n\nend.';
   const ratings = { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 };
 
   it('rejects a MAX_TOKENS (truncated) response and retries for a clean one', async () => {
@@ -402,6 +413,84 @@ describe('generateSummary — truncation guard (finishReason)', () => {
     expect(mockGenerateContent).toHaveBeenCalledTimes(3); // 1 + 2 retries
 
     warn.mockRestore();
+  });
+});
+
+describe('generateSummary — auto-retry (completeness)', () => {
+  const complete = '## 1. A\n[[TS:0]]\n\nbody\n\n## Conclusion\n[[TS:1]]\n\nAll done.';
+  const truncated = '## 1. A\n[[TS:0]]\n\nbody that is cut off mid';
+  const ratings = { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 };
+  const resp = (summary: string) => ({ response: { candidates: [{ finishReason: 'STOP' }], text: () => JSON.stringify({ summary, ratings }) } });
+
+  it('re-rolls a truncated (STOP) summary and returns the complete one', async () => {
+    mockGenerateContent.mockResolvedValueOnce(resp(truncated)).mockResolvedValueOnce(resp(complete));
+    const r = await generateSummary(SEGS, 'en', 'vid1');
+    expect(r.summary).toContain('All done.');
+    expect(mockGenerateContent).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the best attempt and warns (never throws) when all attempts are truncated', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockGenerateContent.mockResolvedValue(resp(truncated));
+    const r = await generateSummary(SEGS, 'en', 'vid1');
+    expect(r.summary).toContain('cut off mid');
+    expect(mockGenerateContent).toHaveBeenCalledTimes(4); // MAX_SUMMARY_ATTEMPTS
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('[summary-suspicious] vid1'));
+    warn.mockRestore();
+  });
+
+  it('prefers a complete attempt over a longer truncated one', async () => {
+    const longTruncated = '## 1. A\n[[TS:0]]\n\n' + 'x '.repeat(200) + 'still going';
+    const shortComplete = '## 1. A\n[[TS:0]]\n\n## Conclusion\n[[TS:1]]\n\nShort but done.';
+    mockGenerateContent.mockResolvedValueOnce(resp(longTruncated)).mockResolvedValueOnce(resp(shortComplete));
+    const r = await generateSummary(SEGS, 'en', 'vid1');
+    expect(r.summary).toContain('Short but done.');
+  });
+
+  it('on full exhaustion (all incomplete), keeps the highest-scored attempt — more sections wins', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    // All four incomplete (end mid-word) so no early-return; the 2-section one outranks the 1-section
+    // ones on the scoreSummary tuple (sections) even though all share complete=0.
+    const oneSec = '## 1. A\n[[TS:0]]\n\ncut off one';
+    const twoSec = '## 1. A\n[[TS:0]]\n\nbody\n\n## 2. B\n[[TS:1]]\n\ncut off two';
+    mockGenerateContent
+      .mockResolvedValueOnce(resp(oneSec)).mockResolvedValueOnce(resp(twoSec))
+      .mockResolvedValueOnce(resp(oneSec)).mockResolvedValueOnce(resp(oneSec));
+    const r = await generateSummary(SEGS, 'en', 'vid1');
+    expect(mockGenerateContent).toHaveBeenCalledTimes(4);   // incomplete → full budget
+    expect(r.summary).toContain('## 2. B');                 // the 2-section attempt was selected
+    expect(r.summary).toContain('cut off two');
+    warn.mockRestore();
+  });
+
+  it('returns immediately when the first attempt is complete with timestamps', async () => {
+    mockGenerateContent.mockResolvedValue(resp(complete));
+    const r = await generateSummary(SEGS, 'en', 'vid1');
+    expect(mockGenerateContent).toHaveBeenCalledTimes(1);
+    expect(r.summary).toContain('All done.');
+  });
+
+  it('caps re-rolls on a deterministic timestamp-miss (complete, no ▶) at TIMESTAMP_MISS_CAP — warns, no throw', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const noTs = '## 1. A\n\nbody\n\n## Conclusion\n\nAll done.';
+    mockGenerateContent.mockResolvedValue(resp(noTs));
+    const r = await generateSummary(SEGS, 'en', 'vid1');
+    expect(mockGenerateContent).toHaveBeenCalledTimes(2); // capped — not the full 4-attempt budget
+    expect(r.summary).toContain('All done.');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('[timestamp-miss] vid1'));
+    warn.mockRestore();
+  });
+
+  it('persists the FULL response of the selected attempt (ratings/tldr), not just the summary', async () => {
+    const good = { response: { candidates: [{ finishReason: 'STOP' }], text: () => JSON.stringify({
+      summary: complete, ratings: { usefulness: 5, depth: 5, originality: 5, recency: 5, completeness: 5 },
+      tldr: 'This video is complete.', tags: ['x'],
+    }) } };
+    mockGenerateContent.mockResolvedValueOnce(resp(truncated)).mockResolvedValueOnce(good);
+    const r = await generateSummary(SEGS, 'en', 'vid1');
+    expect(r.summary).toContain('All done.');
+    expect(r.ratings.usefulness).toBe(5);
+    expect(r.tldr).toBe('This video is complete.');
   });
 });
 
