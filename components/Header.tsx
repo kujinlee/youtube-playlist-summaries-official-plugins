@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import ChannelPlaylistPanel from './ChannelPlaylistPanel';
+import PlaylistPicker from './PlaylistPicker';
 
 interface HeaderProps {
   /** The data ROOT (baseOutputFolder). Seeds the editable root field. */
@@ -8,6 +10,8 @@ interface HeaderProps {
   /** The currently-viewed playlist folder (write target). Kept for back-compat/seed. */
   defaultOutputFolder: string;
   currentPlaylistUrl?: string;
+  /** Display name of the currently-viewed playlist — shown as a caption near Row 2. */
+  currentPlaylistTitle?: string;
   /** Called with the server-resolved DERIVED TARGET (<root>/<slug>/raw), not the root field. */
   onIngest: (playlistUrl: string, outputFolder: string) => void;
   onSync?: (outputFolder: string, playlistUrl: string) => void;
@@ -25,6 +29,7 @@ export default function Header({
   defaultBaseOutputFolder,
   defaultOutputFolder: _defaultOutputFolder,
   currentPlaylistUrl,
+  currentPlaylistTitle,
   onIngest,
   onSync,
   onFolderChange,
@@ -192,6 +197,13 @@ export default function Header({
     urlEditedByUser.current = true;
   }, []);
 
+  const [channelPanelOpen, setChannelPanelOpen] = useState(false);
+
+  const applyPickedUrl = useCallback((url: string) => {
+    setPlaylistUrl(url);
+    urlEditedByUser.current = true;
+  }, []);
+
   const isFresh =
     trimUrl !== '' && trimRoot !== '' && !resolving && resolvedKey === currentKey && !!target;
   const canAct = isFresh && !disabled;
@@ -247,14 +259,17 @@ export default function Header({
           )}
         </p>
 
+        {currentPlaylistTitle && <p className="text-xs text-zinc-400 pl-1">▶ {currentPlaylistTitle}</p>}
+
         {/* Row 2: Playlist URL + Fetch & Summarize */}
         <div className="flex gap-2 items-center">
-          <input
-            type="text"
-            placeholder="Playlist URL"
+          <PlaylistPicker
+            root={trimRoot}
             value={playlistUrl}
-            onChange={(e) => handleUrlChange(e.target.value)}
-            className="flex-1 rounded bg-zinc-800 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            onChange={handleUrlChange}
+            onPick={applyPickedUrl}
+            onBrowseChannel={() => setChannelPanelOpen(true)}
+            disabled={disabled}
           />
           <button
             type="submit"
@@ -265,6 +280,12 @@ export default function Header({
           </button>
         </div>
       </form>
+      {channelPanelOpen && (
+        <ChannelPlaylistPanel
+          onSelect={(url) => { applyPickedUrl(url); setChannelPanelOpen(false); }}
+          onClose={() => setChannelPanelOpen(false)}
+        />
+      )}
     </header>
   );
 }
