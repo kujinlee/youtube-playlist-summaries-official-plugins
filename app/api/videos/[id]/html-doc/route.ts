@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { NextResponse } from 'next/server';
 import { assertOutputFolder, assertVideoId } from '../../../../../lib/index-store';
 import { ensureHtmlDoc } from '../../../../../lib/html-doc/ensure';
+import { CURRENT_DOC_VERSION } from '../../../../../lib/doc-version';
 import { createJob, deleteJob, emitJobEvent, getActiveJob, releaseJobLock } from '../../../../../lib/job-registry';
 import { logError, errorSummary } from '../../../../../lib/dev-logger';
 import type { ProgressEvent } from '../../../../../types';
@@ -42,10 +43,12 @@ export async function POST(request: Request, { params }: Params) {
     (t as { unref?: () => void }).unref?.();
   };
 
+  // `force: true` (Re-summarize) bypasses the version check in ensureHtmlDoc → always re-summarizes.
+  const force = body?.force === true;
   ensureHtmlDoc(videoId, outputFolder, (event: ProgressEvent) => {
     emitJobEvent(jobId, event);
     if (event.type === 'done' || event.type === 'error') onTerminal();
-  }).catch((err) => {
+  }, CURRENT_DOC_VERSION, force).catch((err) => {
     if (finished) return;
     logError(`html-doc:${videoId}`, err);
     emitJobEvent(jobId, { type: 'error', log: errorSummary(err) });
