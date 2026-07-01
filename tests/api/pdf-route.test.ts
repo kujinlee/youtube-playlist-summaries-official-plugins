@@ -97,6 +97,27 @@ it('dig-deeper done log uses the -dig-deeper.pdf name', async () => {
   expect(done?.log).toBe('275_x-dig-deeper.pdf');
 });
 
+it('two concurrent same-doc POSTs create ONE job (no check-then-create race)', async () => {
+  writeIndex([video()]);
+  mockGen.mockReturnValue(new Promise(() => {})); // never resolves → job stays active
+  const [r1, r2] = await Promise.all([
+    POST(req({ outputFolder: dir, type: 'summary' }), ctx),
+    POST(req({ outputFolder: dir, type: 'summary' }), ctx),
+  ]);
+  const [j1, j2] = [await r1.json(), await r2.json()];
+  expect(j1.jobId).toBe(j2.jobId);        // second joined the first, not a second job
+  expect(mockGen).toHaveBeenCalledTimes(1); // only one chromium render kicked off
+});
+
+it('releases the lock when the build is unavailable (404), leaving no stuck job', async () => {
+  writeIndex([video()]);
+  mockBuild.mockResolvedValueOnce({ ok: false, reason: 'missing-html' });
+  expect((await POST(req({ outputFolder: dir, type: 'summary' }), ctx)).status).toBe(404);
+  // lock freed → a subsequent (now-ok) POST starts a real job
+  const ok = await (await POST(req({ outputFolder: dir, type: 'summary' }), ctx)).json();
+  expect(typeof ok.jobId).toBe('string');
+});
+
 it('on generateDocPdf failure emits error AND releases the lock (next POST gets a new job)', async () => {
   writeIndex([video()]);
   mockGen.mockRejectedValueOnce(new Error('boom'));

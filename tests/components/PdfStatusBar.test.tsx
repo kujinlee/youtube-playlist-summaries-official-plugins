@@ -69,3 +69,18 @@ it('calls onError on an error event', () => {
   act(() => { FakeES.last!.emit({ type: 'error', log: 'boom' }); });
   expect(onError).toHaveBeenCalledTimes(1);
 });
+
+it('shows a pre-set errorMessage (POST failed, no job) and opens NO stream', () => {
+  FakeES.last = null;
+  render(<PdfStatusBar videoId="v" jobId="" title="T" onClose={() => {}} errorMessage="PDF failed — missing-html" />);
+  expect(screen.getByRole('alert')).toHaveTextContent('PDF failed — missing-html');
+  expect(FakeES.last).toBeNull(); // no EventSource opened for an empty jobId
+});
+
+it('auto-dismisses a pre-set error after ~5s', () => {
+  const onClose = jest.fn();
+  render(<PdfStatusBar videoId="v" jobId="" title="T" onClose={onClose} errorMessage="PDF failed — 404" />);
+  expect(onClose).not.toHaveBeenCalled();
+  act(() => { jest.advanceTimersByTime(5000); });
+  expect(onClose).toHaveBeenCalled();
+});

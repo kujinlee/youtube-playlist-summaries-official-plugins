@@ -43,7 +43,7 @@ export default function Page() {
   const [currentPlaylistTitle, setCurrentPlaylistTitle] = useState('');
   const [ingest, setIngest] = useState<IngestState>(IDLE_INGEST);
   const [htmlJob, setHtmlJob] = useState<{ videoId: string; jobId: string; title: string; viewUrl: string; label?: string } | null>(null);
-  const [pdfJob, setPdfJob] = useState<{ videoId: string; jobId: string; title: string } | null>(null);
+  const [pdfJob, setPdfJob] = useState<{ videoId: string; jobId: string; title: string; error?: string } | null>(null);
   // The row whose doc job is actively running, driving its ⏳. Set on job start; cleared on
   // close OR when a status bar reports a terminal error (so a failed job stops showing ⏳ while
   // its error bar stays open). Derived-from-job-existence would leave ⏳ stuck through the error.
@@ -385,7 +385,13 @@ export default function Page() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ outputFolder, type }),
         });
-        if (!res.ok || !mountedRef.current) return;
+        if (!mountedRef.current) return;
+        if (!res.ok) {
+          // Surface the failure instead of silently dropping it — show the bar in error state (no SSE).
+          const msg = await res.json().then((d) => d?.error).catch(() => null);
+          setPdfJob({ videoId, jobId: '', title, error: `PDF failed — ${msg ?? res.status}` });
+          return;
+        }
         const data = await res.json();
         setPdfJob({ videoId, jobId: data.jobId, title });
         setBusyVideoId(videoId);
@@ -647,6 +653,7 @@ export default function Page() {
           videoId={pdfJob.videoId}
           jobId={pdfJob.jobId}
           title={pdfJob.title}
+          errorMessage={pdfJob.error}
           onClose={handlePdfClose}
           onError={() => setBusyVideoId(null)}
         />

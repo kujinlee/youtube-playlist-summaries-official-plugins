@@ -48,22 +48,10 @@ export async function POST(request: Request, { params }: Params) {
   const existing = getActiveJob(key);
   if (existing) return NextResponse.json({ jobId: existing });
 
-  // Build the doc HTML up front so an unavailable doc fails fast with the right HTTP status.
-  const build = await buildDocHtml(video, outputFolder, type);
-  if (!build.ok) {
-    const status = build.reason === 'invalid-path' ? 400 : 404;
-    return NextResponse.json({ error: build.reason }, { status });
-  }
-
-  let rel: string;
-  try {
-    rel = pdfRelPath(video, type);
-    assertIndexRelPathWithin(outputFolder, rel);
-  } catch {
-    return NextResponse.json({ error: 'invalid path' }, { status: 400 });
-  }
-  const absOut = path.resolve(outputFolder, rel);
-
+  // Reserve the job lock SYNCHRONOUSLY, right after the check — before any `await`. The dedup guard
+  // relies on check→create being atomic on Node's single thread (mirrors html-doc/batch routes). An
+  // `await` between them (e.g. buildDocHtml) would let two concurrent same-key POSTs both pass the
+  // check and both create jobs. Release the lock if the pre-render steps below fail.
   const jobId = crypto.randomUUID();
   createJob(jobId, key);
   let finished = false;
@@ -73,6 +61,31 @@ export async function POST(request: Request, { params }: Params) {
     const t = setTimeout(() => deleteJob(jobId), GRACE_MS);  // keep buffer for a late EventSource subscribe
     (t as { unref?: () => void }).unref?.();
   };
+  const abandon = () => { releaseJobLock(jobId); deleteJob(jobId); }; // no job ever started → free immediately
+
+  // Build the doc HTML up front so an unavailable doc fails fast with the right HTTP status.
+  let build;
+  try {
+    build = await buildDocHtml(video, outputFolder, type);
+  } catch (err) {
+    abandon();
+    throw err;
+  }
+  if (!build.ok) {
+    abandon();
+    const status = build.reason === 'invalid-path' ? 400 : 404;
+    return NextResponse.json({ error: build.reason }, { status });
+  }
+
+  let rel: string;
+  try {
+    rel = pdfRelPath(video, type);
+    assertIndexRelPathWithin(outputFolder, rel);
+  } catch {
+    abandon();
+    return NextResponse.json({ error: 'invalid path' }, { status: 400 });
+  }
+  const absOut = path.resolve(outputFolder, rel);
 
   emitJobEvent(jobId, { type: 'start' });
   emitJobEvent(jobId, { type: 'step', step: 'Rendering PDF…', current: 1, total: 1 });

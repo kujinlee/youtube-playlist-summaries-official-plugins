@@ -10,6 +10,8 @@ interface PdfStatusBarProps {
   onClose: () => void;
   // Fired on a terminal error so the page can clear the row's busy state.
   onError?: () => void;
+  // Pre-set error to display when the POST failed before a job started (jobId empty). Skips SSE.
+  errorMessage?: string;
 }
 
 type BarState =
@@ -19,14 +21,22 @@ type BarState =
 
 // Non-blocking bottom bar for the auto-PDF export. Unlike HtmlDocStatusBar it renders NO view link
 // on done — the deliverable is a file saved to the pdfs/ folder, so it reports "Saved pdfs/<file>".
-export default function PdfStatusBar({ videoId, jobId, title, onClose, onError }: PdfStatusBarProps) {
-  const [state, setState] = useState<BarState>({ status: 'running', progress: 0, step: '' });
+export default function PdfStatusBar({ videoId, jobId, title, onClose, onError, errorMessage }: PdfStatusBarProps) {
+  const [state, setState] = useState<BarState>(
+    errorMessage ? { status: 'error', message: errorMessage } : { status: 'running', progress: 0, step: '' },
+  );
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
 
   useEffect(() => {
+    // Pre-set error path: the POST failed before any job started — show it and auto-dismiss, no SSE.
+    if (!jobId) {
+      setState({ status: 'error', message: errorMessage ?? 'PDF failed.' });
+      const t = setTimeout(() => onCloseRef.current(), 5000);
+      return () => clearTimeout(t);
+    }
     setState({ status: 'running', progress: 0, step: '' });
     const url = `/api/videos/${encodeURIComponent(videoId)}/pdf/stream?jobId=${encodeURIComponent(jobId)}`;
     const es = new EventSource(url);
@@ -63,7 +73,7 @@ export default function PdfStatusBar({ videoId, jobId, title, onClose, onError }
     };
 
     return () => { terminal = true; es.close(); if (doneTimer) clearTimeout(doneTimer); };
-  }, [videoId, jobId]);
+  }, [videoId, jobId, errorMessage]);
 
   const progress = state.status === 'running' ? state.progress : state.status === 'done' ? 100 : 0;
   const barColor = state.status === 'error' ? 'bg-red-500' : 'bg-amber-500';
