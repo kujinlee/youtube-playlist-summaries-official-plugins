@@ -20,3 +20,7 @@ it('omits the anchor when no url is given', () => {
   render(<CurrentPlaylist title="건강" />);
   expect(screen.queryByRole('link')).toBeNull();
 });
+it('does not render an anchor for a non-http(s) URL', () => {
+  render(<CurrentPlaylist title="건강" url="javascript:alert(1)" />);
+  expect(screen.queryByRole('link')).toBeNull();
+});
