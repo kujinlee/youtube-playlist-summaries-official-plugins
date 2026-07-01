@@ -10,6 +10,7 @@ import BulkActionBar from '@/components/BulkActionBar';
 import FilterBar from '@/components/FilterBar';
 import Header from '@/components/Header';
 import HtmlDocStatusBar from '@/components/HtmlDocStatusBar';
+import PdfStatusBar from '@/components/PdfStatusBar';
 import VideoList from '@/components/VideoList';
 import { summaryNeedsWork, videoNeedsBatchWork } from '@/lib/html-doc/eligibility';
 
@@ -42,6 +43,7 @@ export default function Page() {
   const [currentPlaylistTitle, setCurrentPlaylistTitle] = useState('');
   const [ingest, setIngest] = useState<IngestState>(IDLE_INGEST);
   const [htmlJob, setHtmlJob] = useState<{ videoId: string; jobId: string; title: string; viewUrl: string; label?: string } | null>(null);
+  const [pdfJob, setPdfJob] = useState<{ videoId: string; jobId: string; title: string } | null>(null);
   // The row whose doc job is actively running, driving its ⏳. Set on job start; cleared on
   // close OR when a status bar reports a terminal error (so a failed job stops showing ⏳ while
   // its error bar stays open). Derived-from-job-existence would leave ⏳ stuck through the error.
@@ -374,6 +376,31 @@ export default function Page() {
     fetchVideos(outputFolder, col, order); // refresh so the menu flips to View/Regenerate
   }, [fetchVideos, outputFolder]);
 
+  const handleSavePdf = useCallback(
+    async (videoId: string, type: 'summary' | 'dig-deeper') => {
+      const title = videos.find((v) => v.id === videoId)?.title ?? '';
+      try {
+        const res = await fetch(`/api/videos/${encodeURIComponent(videoId)}/pdf`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ outputFolder, type }),
+        });
+        if (!res.ok || !mountedRef.current) return;
+        const data = await res.json();
+        setPdfJob({ videoId, jobId: data.jobId, title });
+        setBusyVideoId(videoId);
+      } catch {
+        // ignore — no status bar opened
+      }
+    },
+    [outputFolder, videos],
+  );
+
+  const handlePdfClose = useCallback(() => {
+    setPdfJob(null);
+    setBusyVideoId(null);
+  }, []);
+
   const toggleSelect = useCallback((videoId: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -590,6 +617,7 @@ export default function Page() {
           onArchive={handleArchive}
           onGenerateHtml={handleGenerateHtml}
           onResummarize={handleResummarize}
+          onSavePdf={handleSavePdf}
           sortColumn={sortColumn}
           sortOrder={sortOrder}
           onSort={handleSort}
@@ -611,6 +639,15 @@ export default function Page() {
           viewUrl={htmlJob.viewUrl}
           label={htmlJob.label}
           onClose={handleHtmlClose}
+          onError={() => setBusyVideoId(null)}
+        />
+      )}
+      {pdfJob && (
+        <PdfStatusBar
+          videoId={pdfJob.videoId}
+          jobId={pdfJob.jobId}
+          title={pdfJob.title}
+          onClose={handlePdfClose}
           onError={() => setBusyVideoId(null)}
         />
       )}

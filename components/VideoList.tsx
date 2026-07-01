@@ -15,6 +15,7 @@ interface VideoListProps {
   onArchive: (videoId: string, action: 'archive' | 'unarchive') => void;
   onGenerateHtml: (videoId: string) => void;
   onResummarize?: (videoId: string) => void;
+  onSavePdf?: (videoId: string, type: 'summary' | 'dig-deeper') => void;
   onAnnotationChange?: (videoId: string, patch: Partial<Pick<Video, 'personalScore' | 'personalNote' | 'corrections' | 'tldr' | 'takeaways' | 'summaryHtml'>>) => void;
   sortColumn?: SortColumn | null;
   sortOrder?: SortOrder;
@@ -54,6 +55,7 @@ export default function VideoList({
   onArchive,
   onGenerateHtml,
   onResummarize = () => {},
+  onSavePdf = () => {},
   onAnnotationChange = noop,
   sortColumn,
   sortOrder = 'asc',
@@ -163,6 +165,7 @@ export default function VideoList({
             onArchive={onArchive}
             onGenerateHtml={onGenerateHtml}
                   onResummarize={onResummarize}
+                  onSavePdf={onSavePdf}
             onAnnotationChange={onAnnotationChange}
           />
         ))}
