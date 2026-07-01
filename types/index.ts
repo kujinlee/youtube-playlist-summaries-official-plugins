@@ -105,6 +105,7 @@ export const ProgressEventSchema = z.discriminatedUnion('type', [
     total: z.number().int().nonnegative().optional(),
     succeeded: z.number().int().nonnegative().optional(),
     failed: z.number().int().nonnegative().optional(),
+    log: z.string().optional(), // optional terminal detail, e.g. the saved PDF filename
   }),
   z.object({
     type: z.literal('error'),

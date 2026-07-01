@@ -57,3 +57,36 @@ it('omits Re-summarize when there is no summary', () => {
   render(<VideoMenu {...props} video={{ ...base, summaryMd: null } as any} />);
   expect(screen.queryByText(/Re-summarize/i)).toBeNull();
 });
+
+// ── Save PDF (auto PDF export) ───────────────────────────────────────────────
+
+it('shows "Save summary PDF" only when summaryHtml is present', () => {
+  const { rerender } = render(<VideoMenu {...props} video={base as any} />);
+  expect(screen.queryByText(/Save summary PDF/i)).toBeNull(); // summaryMd only, no summaryHtml
+  rerender(<VideoMenu {...props} video={{ ...base, summaryHtml: 'htmls/base.html' } as any} />);
+  expect(screen.getByRole('button', { name: /Save summary PDF/i })).toBeInTheDocument();
+});
+
+it('shows "Save dig-deeper PDF" only when digDeeperMd is present', () => {
+  const { rerender } = render(<VideoMenu {...props} video={{ ...base, summaryHtml: 'htmls/base.html' } as any} />);
+  expect(screen.queryByText(/Save dig-deeper PDF/i)).toBeNull();
+  rerender(<VideoMenu {...props} video={{ ...base, summaryHtml: 'htmls/base.html', digDeeperMd: 'base-dig-deeper.md' } as any} />);
+  expect(screen.getByRole('button', { name: /Save dig-deeper PDF/i })).toBeInTheDocument();
+});
+
+it('calls onSavePdf(id, type) + onClose on click', () => {
+  const onSavePdf = jest.fn();
+  const onClose = jest.fn();
+  render(<VideoMenu {...props} onSavePdf={onSavePdf} onClose={onClose}
+    video={{ ...base, summaryHtml: 'htmls/base.html', digDeeperMd: 'base-dig-deeper.md' } as any} />);
+  fireEvent.click(screen.getByRole('button', { name: /Save summary PDF/i }));
+  expect(onSavePdf).toHaveBeenCalledWith('vid11111111', 'summary');
+  fireEvent.click(screen.getByRole('button', { name: /Save dig-deeper PDF/i }));
+  expect(onSavePdf).toHaveBeenCalledWith('vid11111111', 'dig-deeper');
+  expect(onClose).toHaveBeenCalledTimes(2);
+});
+
+it('disables Save PDF items while busy', () => {
+  render(<VideoMenu {...props} busy video={{ ...base, summaryHtml: 'htmls/base.html' } as any} />);
+  expect(screen.getByText(/Save summary PDF/i).closest('a,button,span')).toHaveAttribute('aria-disabled', 'true');
+});

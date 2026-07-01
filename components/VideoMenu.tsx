@@ -12,6 +12,7 @@ interface VideoMenuProps {
   onEditCorrections: () => void;
   onGenerateHtml: (videoId: string) => void;
   onResummarize?: (videoId: string) => void;
+  onSavePdf?: (videoId: string, type: 'summary' | 'dig-deeper') => void;
   onClose: () => void;
   busy?: boolean;
 }
@@ -38,7 +39,7 @@ function obsidianHref(baseOutputFolder: string, outputFolder: string, file: stri
 const itemClass = 'block w-full px-4 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-700';
 const disabledClass = 'block w-full px-4 py-2 text-left text-sm text-zinc-500 cursor-not-allowed';
 
-export default function VideoMenu({ video, outputFolder, baseOutputFolder, onArchive, onEditCorrections, onGenerateHtml, onResummarize = () => {}, onClose, busy = false }: VideoMenuProps) {
+export default function VideoMenu({ video, outputFolder, baseOutputFolder, onArchive, onEditCorrections, onGenerateHtml, onResummarize = () => {}, onSavePdf = () => {}, onClose, busy = false }: VideoMenuProps) {
   const summaryFile = video.summaryMd?.replace(/\.md$/, '') ?? video.id;
   const hasSummary = !!video.summaryMd;
   const htmlViewHref = `/api/html/${encodeURIComponent(video.id)}?outputFolder=${encodeURIComponent(outputFolder)}&type=summary`;
@@ -77,6 +78,22 @@ export default function VideoMenu({ video, outputFolder, baseOutputFolder, onArc
           {busy
             ? <span aria-disabled="true" className={disabledClass}>Re-summarize <span aria-hidden="true">⏳</span></span>
             : <button type="button" onClick={() => { onResummarize(video.id); onClose(); }} className={itemClass}>Re-summarize</button>}
+        </li>
+      )}
+      {video.summaryHtml && (
+        <li role="none">
+          {/* Save a self-contained PDF of the summary HTML doc into the pdfs/ folder. Requires the
+              HTML doc to exist (summaryHtml) — same precondition as the "HTML doc" open-link. */}
+          {busy
+            ? <span aria-disabled="true" className={disabledClass}>Save summary PDF <span aria-hidden="true">⏳</span></span>
+            : <button type="button" onClick={() => { onSavePdf(video.id, 'summary'); onClose(); }} className={itemClass}>Save summary PDF</button>}
+        </li>
+      )}
+      {video.digDeeperMd && (
+        <li role="none">
+          {busy
+            ? <span aria-disabled="true" className={disabledClass}>Save dig-deeper PDF <span aria-hidden="true">⏳</span></span>
+            : <button type="button" onClick={() => { onSavePdf(video.id, 'dig-deeper'); onClose(); }} className={itemClass}>Save dig-deeper PDF</button>}
         </li>
       )}
       {video.summaryMd && (

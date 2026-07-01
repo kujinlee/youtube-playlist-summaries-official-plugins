@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { assertOutputFolder, assertVideoId, readIndex } from '../index-store';
+import { assertIndexRelPathWithin } from '../paths/assert-within';
 import { parseSummaryMarkdown } from './parse';
 import { renderMagazineHtml } from './render';
 import { readModelEnvelope } from './model-store';
@@ -39,7 +40,9 @@ export function reRenderSummaryHtml(videoId: string, outputFolder: string): ReRe
 
   let md: string;
   try {
-    md = fs.readFileSync(path.join(outputFolder, video.summaryMd), 'utf-8');
+    // Fail closed on a crafted summaryMd that escapes the output folder.
+    const mdAbs = assertIndexRelPathWithin(outputFolder, video.summaryMd, '.md');
+    md = fs.readFileSync(mdAbs, 'utf-8');
   } catch {
     return { status: 'skipped-no-md' };
   }
