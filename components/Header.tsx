@@ -224,6 +224,7 @@ export default function Header({
   const applyPickedUrl = useCallback((url: string) => {
     setPlaylistUrl(url);
     urlEditedByUser.current = true;
+    setAddByLinkOpen(true); // reveal the picked URL so it stays visible/actionable until the switch resolves
   }, []);
 
   const isFresh =

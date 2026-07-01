@@ -89,3 +89,11 @@ it('picking a recent playlist enables Fetch', async () => {
   fireEvent.click(await screen.findByText('Building with Claude'));
   await waitFor(() => expect(screen.getByRole('button', { name: /Fetch & Summarize/ })).toBeEnabled());
 });
+
+it('reveals the picked URL in the add-by-link field when picking from ▾ Recent', async () => {
+  render(<Header {...common} currentPlaylistTitle="건강" playlistLoaded />); // existing playlist → disclosure starts closed
+  fireEvent.click(screen.getByRole('button', { name: /Recent/ }));
+  fireEvent.click(await screen.findByText('Building with Claude'));
+  // the pick immediately reveals the disclosure with the picked URL (before any debounced resolve completes)
+  expect(screen.getByPlaceholderText(/Paste a playlist URL/)).toHaveValue('https://youtube.com/playlist?list=PLa');
+});
