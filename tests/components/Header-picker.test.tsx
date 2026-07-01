@@ -1,17 +1,99 @@
 /** @jest-environment jsdom */
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import Header from '../../components/Header';
 
-beforeEach(() => { global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({ playlists: [] }) })) as unknown as typeof fetch; });
+function mockFetch() {
+  global.fetch = jest.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes('/api/playlists/recent')) return { ok: true, json: async () => ({ playlists: [
+      { id: 'PLa', title: 'Building with Claude', url: 'https://youtube.com/playlist?list=PLa', source: 'recent', meta: {} },
+    ] }) } as Response;
+    if (url.includes('/api/resolve-folder')) return { ok: true, json: async () => ({ root: '/home/x/data', outputFolder: '/home/x/data/a/raw' }) } as Response;
+    return { ok: true, json: async () => ({}) } as Response;
+  }) as unknown as typeof fetch;
+}
+beforeEach(() => { mockFetch(); });
 
-it('renders the current playlist name caption when provided', () => {
-  render(<Header defaultBaseOutputFolder="/home/x/data" defaultOutputFolder="/home/x/data/a/raw"
-    currentPlaylistTitle="Building with Claude" onIngest={() => {}} />);
-  expect(screen.getByText(/Building with Claude/)).toBeInTheDocument();
+const common = { defaultBaseOutputFolder: '/home/x/data', defaultOutputFolder: '/home/x/data/a/raw', onIngest: () => {} };
+
+it('renders the current playlist title prominently (no ▶ caption)', () => {
+  render(<Header {...common} currentPlaylistTitle="Building with Claude" playlistLoaded />);
+  expect(screen.getByText('Building with Claude')).toBeInTheDocument();
+  expect(screen.queryByText(/▶/)).toBeNull();
 });
-it('opens the channel panel from the picker footer', async () => {
-  render(<Header defaultBaseOutputFolder="/home/x/data" defaultOutputFolder="/home/x/data/a/raw" onIngest={() => {}} />);
-  fireEvent.focus(screen.getByPlaceholderText(/Paste a playlist URL/));
+
+it('renders a clickable muted URL for the current playlist', () => {
+  render(<Header {...common} currentPlaylistTitle="건강" currentPlaylistUrl="https://youtube.com/playlist?list=PL837" playlistLoaded />);
+  const link = screen.getByRole('link', { name: /playlist\?list=PL837/ });
+  expect(link).toHaveAttribute('href', 'https://youtube.com/playlist?list=PL837');
+  expect(link).toHaveAttribute('target', '_blank');
+});
+
+it('shows the folder-slug fallback when the title is missing', () => {
+  render(<Header defaultBaseOutputFolder="/home/x/data" defaultOutputFolder="/home/x/data/건강/raw"
+    currentPlaylistUrl="https://youtube.com/playlist?list=PL837" onIngest={() => {}} playlistLoaded />);
+  expect(screen.getByText('건강')).toBeInTheDocument();
+});
+
+it('empty state (loaded, no playlist) starts with the add-by-link input expanded', () => {
+  render(<Header {...common} playlistLoaded />);
+  expect(screen.getByPlaceholderText(/Paste a playlist URL/)).toBeInTheDocument();
+});
+
+it('does NOT auto-open the disclosure before the playlist has loaded', () => {
+  render(<Header {...common} />); // playlistLoaded defaults false
+  expect(screen.queryByPlaceholderText(/Paste a playlist URL/)).toBeNull();
+});
+
+it('an existing playlist never auto-opens the disclosure', () => {
+  render(<Header {...common} currentPlaylistTitle="건강" playlistLoaded />);
+  expect(screen.queryByPlaceholderText(/Paste a playlist URL/)).toBeNull();
+});
+
+it('the toggle reveals the input in the non-empty state', () => {
+  render(<Header {...common} currentPlaylistTitle="건강" playlistLoaded />);
+  fireEvent.click(screen.getByRole('button', { name: /Add by link/ }));
+  expect(screen.getByPlaceholderText(/Paste a playlist URL/)).toBeInTheDocument();
+});
+
+it('opens the channel panel from the ▾ Recent dropdown', async () => {
+  render(<Header {...common} currentPlaylistTitle="건강" playlistLoaded />);
+  fireEvent.click(screen.getByRole('button', { name: /Recent/ }));
   fireEvent.click(await screen.findByText(/Browse a channel/i));
   expect(await screen.findByText(/Browse channel playlists/i)).toBeInTheDocument();
+});
+
+it('auto-collapses the disclosure after a pasted URL resolves', async () => {
+  render(<Header {...common} playlistLoaded />); // empty → disclosure open
+  const input = screen.getByPlaceholderText(/Paste a playlist URL/);
+  fireEvent.change(input, { target: { value: 'https://youtube.com/playlist?list=PLa' } });
+  await waitFor(() => expect(screen.queryByPlaceholderText(/Paste a playlist URL/)).toBeNull());
+});
+
+it('does NOT collapse the disclosure when currentPlaylistUrl auto-fills (no user edit)', async () => {
+  // Existing playlist → disclosure starts closed; the user opens it manually (no typing).
+  const { rerender } = render(<Header {...common} currentPlaylistTitle="건강" playlistLoaded />);
+  fireEvent.click(screen.getByRole('button', { name: /Add by link/ }));
+  expect(screen.getByPlaceholderText(/Paste a playlist URL/)).toBeInTheDocument();
+  // Parent supplies a playlist URL → auto-fills the field (NOT a user edit) → resolves.
+  rerender(<Header {...common} currentPlaylistTitle="건강" currentPlaylistUrl="https://youtube.com/playlist?list=PLa" playlistLoaded />);
+  // Wait for the debounced resolve to actually complete (derived-target reflects the resolved folder)…
+  await waitFor(() => expect(screen.getByTestId('derived-target')).toHaveTextContent('/home/x/data/a/raw'));
+  // …the guarded collapse must NOT have fired for an auto-fill: the disclosure is still open.
+  expect(screen.getByPlaceholderText(/Paste a playlist URL/)).toBeInTheDocument();
+});
+
+it('picking a recent playlist enables Fetch', async () => {
+  render(<Header {...common} currentPlaylistTitle="건강" playlistLoaded />);
+  fireEvent.click(screen.getByRole('button', { name: /Recent/ }));
+  fireEvent.click(await screen.findByText('Building with Claude'));
+  await waitFor(() => expect(screen.getByRole('button', { name: /Fetch & Summarize/ })).toBeEnabled());
+});
+
+it('reveals the picked URL in the add-by-link field when picking from ▾ Recent', async () => {
+  render(<Header {...common} currentPlaylistTitle="건강" playlistLoaded />); // existing playlist → disclosure starts closed
+  fireEvent.click(screen.getByRole('button', { name: /Recent/ }));
+  fireEvent.click(await screen.findByText('Building with Claude'));
+  // the pick immediately reveals the disclosure with the picked URL (before any debounced resolve completes)
+  expect(screen.getByPlaceholderText(/Paste a playlist URL/)).toHaveValue('https://youtube.com/playlist?list=PLa');
 });

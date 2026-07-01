@@ -41,6 +41,7 @@ export default function Page() {
   const [filters, setFilters] = useState<FilterState>(FILTER_DEFAULTS);
   const [currentPlaylistUrl, setCurrentPlaylistUrl] = useState('');
   const [currentPlaylistTitle, setCurrentPlaylistTitle] = useState('');
+  const [playlistLoaded, setPlaylistLoaded] = useState(false);
   const [ingest, setIngest] = useState<IngestState>(IDLE_INGEST);
   const [htmlJob, setHtmlJob] = useState<{ videoId: string; jobId: string; title: string; viewUrl: string; label?: string } | null>(null);
   const [pdfJob, setPdfJob] = useState<{ videoId: string; jobId: string; title: string; error?: string } | null>(null);
@@ -164,6 +165,7 @@ export default function Page() {
       // Mark the loaded pair so the persist effect doesn't write it straight back.
       lastPersistedRef.current = `${base}\0${folder}`;
       await fetchVideos(folder, null, 'asc');
+      if (mountedRef.current) setPlaylistLoaded(true);
     })();
   }, [fetchVideos]);
 
@@ -514,6 +516,7 @@ export default function Page() {
         defaultOutputFolder={outputFolder}
         currentPlaylistUrl={currentPlaylistUrl}
         currentPlaylistTitle={currentPlaylistTitle}
+        playlistLoaded={playlistLoaded}
         onIngest={handleIngest}
         onSync={handleSync}
         onFolderChange={handleFolderChange}

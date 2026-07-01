@@ -67,9 +67,9 @@ export default function ChannelPlaylistPanel({ onSelect, onClose }: { onSelect: 
               <p className="mb-1 text-xs text-zinc-500">{channelTitle} &middot; {results.length} public playlists{results.length === 50 ? ' (showing first 50)' : ''}</p>
               {results.map((o) => (
                 <button key={o.id} type="button" onClick={() => { onSelect(o.url); onClose(); }}
-                  className="flex w-full items-center justify-between px-2 py-2 text-left text-sm hover:bg-zinc-800">
-                  <span className="truncate">{o.title}</span>
-                  {o.meta?.videoCount != null && <span className="ml-2 shrink-0 text-xs text-zinc-500">{o.meta.videoCount} videos</span>}
+                  className="flex w-full flex-col items-start px-2 py-2 text-left hover:bg-zinc-800">
+                  <span className="w-full truncate text-sm text-zinc-100">{o.title}</span>
+                  {o.url && <span className="w-full truncate text-xs text-zinc-500" title={o.url}>{o.url}</span>}
                 </button>
               ))}
             </>

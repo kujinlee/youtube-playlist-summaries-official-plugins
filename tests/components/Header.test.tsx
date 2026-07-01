@@ -35,6 +35,7 @@ function renderHeader(props: Partial<React.ComponentProps<typeof Header>> = {}) 
       defaultBaseOutputFolder={ROOT}
       defaultOutputFolder={TARGET}
       onIngest={jest.fn()}
+      playlistLoaded
       {...props}
     />,
   );
@@ -47,7 +48,10 @@ const hint = () => screen.getByTestId('derived-target');
 
 beforeEach(() => {
   jest.useFakeTimers();
-  routeFetch({ '/api/resolve-folder': () => ok({ root: ROOT, outputFolder: TARGET }) });
+  routeFetch({
+    '/api/resolve-folder': () => ok({ root: ROOT, outputFolder: TARGET }),
+    '/api/playlists/recent': () => ok({ playlists: [] }),
+  });
 });
 afterEach(() => {
   jest.runOnlyPendingTimers();
@@ -179,6 +183,8 @@ describe('Header — resolve failures and invalidation', () => {
     fireEvent.change(urlField(), { target: { value: URL_VAL } });
     await settle();
     expect(hint()).toHaveTextContent(TARGET);
+    // After resolve the disclosure auto-collapses (H9); re-open it to clear the URL.
+    fireEvent.click(screen.getByRole('button', { name: /Add by link/ }));
     fireEvent.change(urlField(), { target: { value: '' } });
     await settle();
     expect(hint()).not.toHaveTextContent(TARGET);
