@@ -6,7 +6,7 @@
 
 **Architecture:** Extract the serve route's doc-HTML builder into a shared `buildDocHtml` (domain-result union), feed its output to `generateDocPdf` (Playwright `setContent`→`page.pdf`, locked-down context, UUID-temp atomic write). A new POST route runs it as an SSE job; a new `PdfStatusBar` reports progress. Pure export-to-disk — no index fields, no serve route (anti-orphan, per PR #50 history).
 
-**Tech Stack:** Next.js 15 (App Router), TypeScript, `playwright` (runtime dep — chromium), Jest + ts-jest, @testing-library/react, Playwright E2E. Test runner uses SWC (no typecheck) → `npx tsc --noEmit` is the real type gate.
+**Tech Stack:** Next.js 16.2.6 (App Router, Turbopack), TypeScript, `playwright` (runtime dep — chromium), Jest + ts-jest, @testing-library/react, Playwright E2E. Test runner uses SWC (no typecheck) → `npx tsc --noEmit` is the real type gate. `serverExternalPackages` is the correct config key for this Next version.
 
 ## Global Constraints
 
@@ -92,8 +92,9 @@ export function assertIndexRelPathWithin(outputFolder: string, rel: string, allo
 - Test: `tests/lib/pdf/pdf-path.test.ts`
 
 **Interfaces:**
-- Consumes: `assertIndexRelPathWithin` (Task 1); `Video` type from `@/types`.
-- Produces: `pdfRelPath(video: Video, type: 'summary' | 'dig-deeper'): string` → `pdfs/{base}.pdf` or `pdfs/{base}-dig-deeper.pdf`. `base` derived identically to the serve route: summary → `basename(summaryMd)` sans `.md`; dig-deeper → `basename(digDeeperMd)` stripping trailing `-dig-deeper.md` (else sans `.md`). Throws if the required source field is absent.
+- Consumes: `Video` type from `@/types`. (Path containment is NOT done here — it is enforced at the call
+  site in Task 5 via `assertIndexRelPathWithin(outputFolder, rel)`. This helper is a pure string derivation.)
+- Produces: `pdfRelPath(video: Video, type: 'summary' | 'dig-deeper'): string` → `pdfs/{base}.pdf` or `pdfs/{base}-dig-deeper.pdf`. `base` derived identically to the serve route: summary → `basename(summaryMd)` sans `.md`; dig-deeper → `basename(digDeeperMd)` stripping trailing `-dig-deeper.md` then re-appending `-dig-deeper` (else sans `.md`). Throws if the required source field is absent.
 
 - [ ] **Step 1: Write failing tests**
 
@@ -158,7 +159,12 @@ export function pdfRelPath(video: Video, type: 'summary' | 'dig-deeper'): string
 - Produces: `buildDocHtml(videoId: string, outputFolder: string, type: 'summary' | 'dig-deeper'): Promise<BuildResult>` where
   `type BuildResult = { ok: true; html: string } | { ok: false; reason: 'not-found' | 'missing-html' | 'missing-summary' | 'invalid-path' | 'unparseable' }`.
   Logic is the two branches currently inline in `app/api/html/[id]/route.ts:75-197`, verbatim, but returning the union instead of `Response`. The dig-deeper "graceful unavailable" skeleton HTML is returned as `{ ok: true, html }` (it is a valid served page today).
-- Consumes: `assertIndexRelPathWithin` (Task 1) for `summaryMd`, `digDeeperMd`, model, html paths.
+- Consumes: `assertIndexRelPathWithin` (Task 1) for `summaryMd`, `digDeeperMd`, and `models/{base}.json`.
+  **CRITICAL (plan review High 2):** the `summaryHtml` read must PRESERVE the existing stronger guard —
+  `HTML_REL_RE = /^htmls\/[\p{L}\p{N}._-]+\.html$/u` plus `htmlDir` containment (route.ts:16,62-71) — NOT
+  be downgraded to the generic output-folder containment. Move that guard into `buildDocHtml` unchanged.
+  **Preserve ordering:** the companion-path (`digDeeperMd`) containment check fires BEFORE `summaryMdPath`
+  derivation (route.ts:107-119), so it keeps independent 400 coverage.
 
 - [ ] **Step 1: Write failing tests** (build fixtures on disk like existing `render-dig-deeper.test.ts`; assert union shape)
 
@@ -184,7 +190,36 @@ test('crafted digDeeperMd traversal → { ok:false, invalid-path }', async () =>
   const r = await buildDocHtml('vidEvil', dir, 'dig-deeper'); // index digDeeperMd = '../../../etc/x-dig-deeper.md'
   expect(r).toEqual({ ok: false, reason: 'invalid-path' });
 });
+// Parity with existing html-serve cases (plan review Medium 4) — mirror B1–B8 + re-render:
+test('summaryHtml not matching htmls/*.html → invalid/missing (not readable)', async () => {
+  // index summaryHtml = 'secret.html' (inside folder, not under htmls/) → NOT served
+  const r = await buildDocHtml('vidSecret', dir, 'summary');
+  expect(r.ok).toBe(false);
+});
+test('summaryHtml htmls/../secret.html → invalid-path', async () => {
+  const r = await buildDocHtml('vidEscape', dir, 'summary');
+  expect(r).toEqual({ ok: false, reason: 'invalid-path' });
+});
+test('dig-deeper missing summary md → ok skeleton (200-equivalent)', async () => {
+  const r = await buildDocHtml('vidNoMd', dir, 'dig-deeper');
+  expect(r.ok).toBe(true); // "Summary unavailable — regenerate" skeleton
+});
+test('dig-deeper unparseable summary → ok skeleton', async () => {
+  const r = await buildDocHtml('vidBadMd', dir, 'dig-deeper');
+  expect(r.ok).toBe(true);
+});
+test('dig-deeper model missing → ok (envelope null)', async () => {
+  const r = await buildDocHtml('vidNoModel', dir, 'dig-deeper');
+  expect(r.ok).toBe(true);
+});
+test('dig-deeper companion file missing on disk → ok skeleton (dug=[])', async () => {
+  const r = await buildDocHtml('vidNoCompanion', dir, 'dig-deeper');
+  expect(r.ok).toBe(true);
+});
 ```
+
+These cases map 1:1 to `tests/api/html-serve.test.ts` B1–B8 and the summary re-render branches; the goal is
+that every current status/skeleton outcome has an equivalent `BuildResult`.
 
 - [ ] **Step 2: Run to verify fail** — `npx jest build-doc-html` → FAIL.
 
@@ -252,13 +287,22 @@ test('writes a PDF to the target path and creates pdfs/ dir', async () => {
   expect(fs.existsSync(out)).toBe(true);
   expect(fs.readFileSync(out).subarray(0, 5).toString('latin1')).toBe('%PDF-');
 });
-test('emulates print media and disables JS/network hardening', async () => {
+test('emulates print media and closes page+context+browser in finally', async () => {
   const { __mock } = jest.requireMock('playwright');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pdf-'));
   await generateDocPdf('<html></html>', path.join(dir, 'pdfs', 'y.pdf'));
   expect(__mock.page.emulateMedia).toHaveBeenCalledWith({ media: 'print' });
   expect(__mock.pdf).toHaveBeenCalledWith(expect.objectContaining({ printBackground: true }));
-  expect(__mock.browser.close).toHaveBeenCalled(); // closed in finally
+  expect(__mock.page.close).toHaveBeenCalled();
+  expect(__mock.context.close).toHaveBeenCalled();
+  expect(__mock.browser.close).toHaveBeenCalled();
+});
+test('rejects and cleans up when render hangs (overall timeout)', async () => {
+  const { __mock } = jest.requireMock('playwright');
+  __mock.pdf.mockImplementationOnce(() => new Promise(() => {})); // never resolves
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pdf-'));
+  await expect(generateDocPdf('<html></html>', path.join(dir, 'pdfs', 'hang.pdf'), { timeoutMs: 50 }))
+    .rejects.toThrow(/timed out/);
 });
 test('leaves no temp file after success', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pdf-'));
@@ -280,23 +324,37 @@ import path from 'path';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`PDF ${label} timed out after ${ms}ms`)), ms);
+    (t as { unref?: () => void }).unref?.();
+    p.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+  });
+}
+
 export async function generateDocPdf(html: string, absOutPath: string, opts: { timeoutMs?: number } = {}): Promise<void> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  await withTimeout(runGenerate(html, absOutPath, timeoutMs), timeoutMs + 5_000, 'job');
+}
+
+async function runGenerate(html: string, absOutPath: string, timeoutMs: number): Promise<void> {
   const { chromium } = await import('playwright'); // lazy: only load when a PDF is actually requested
   const dir = path.dirname(absOutPath);
   fs.mkdirSync(dir, { recursive: true });
   const tmp = path.join(dir, `.${path.basename(absOutPath, '.pdf')}.${crypto.randomUUID()}.pdf.tmp`);
 
   let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
+  let context: Awaited<ReturnType<NonNullable<typeof browser>['newContext']>> | null = null;
+  let page: Awaited<ReturnType<NonNullable<typeof context>['newPage']>> | null = null;
   try {
     try {
-      browser = await chromium.launch();
+      browser = await chromium.launch({ timeout: timeoutMs });
     } catch (err) {
       throw new Error(`Failed to launch Chromium for PDF export. Run: npx playwright install chromium\n${(err as Error).message}`);
     }
     // Locked-down context: static self-contained doc needs no JS or network.
-    const context = await browser.newContext({ javaScriptEnabled: false });
-    const page = await context.newPage();
+    context = await browser.newContext({ javaScriptEnabled: false });
+    page = await context.newPage();
     page.setDefaultTimeout(timeoutMs);
     await page.route('**/*', (route) => {
       route.request().url().startsWith('data:') ? route.continue() : route.abort();
@@ -308,12 +366,14 @@ export async function generateDocPdf(html: string, absOutPath: string, opts: { t
     fs.renameSync(tmp, absOutPath);
   } finally {
     try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch { /* ignore */ }
+    if (page) { try { await page.close(); } catch { /* ignore */ } }
+    if (context) { try { await context.close(); } catch { /* ignore */ } }
     if (browser) { try { await browser.close(); } catch { /* ignore */ } }
   }
 }
 ```
 
-> `setContent` uses `about:blank` (allowed); all base64 images are `data:` (allowed); everything else is aborted. `waitUntil:'load'` resolves once inline content is parsed.
+> `setContent` uses `about:blank` (allowed); all base64 images are `data:` (allowed); everything else is aborted. `waitUntil:'load'` resolves once inline content is parsed. **Timeout bounding (plan review High 3):** `chromium.launch({ timeout })` bounds launch, `setDefaultTimeout` bounds page ops, and the outer `withTimeout` guarantees the whole job rejects even on an unforeseen hang — so the route's `.catch` always runs and releases the lock. **Cleanup (Medium 5):** page → context → browser all closed in `finally`.
 
 - [ ] **Step 5: Run** — `npx jest generate-doc-pdf` → PASS.
 
@@ -328,28 +388,59 @@ export async function generateDocPdf(html: string, absOutPath: string, opts: { t
 ### Task 5: PDF API routes (POST + SSE stream)
 
 **Files:**
+- Modify: `types/index.ts` (allow `log` on the `done` ProgressEvent variant)
 - Create: `app/api/videos/[id]/pdf/route.ts`, `app/api/videos/[id]/pdf/stream/route.ts`
-- Test: `tests/api/pdf-route.test.ts`
+- Test: `tests/api/pdf-route.test.ts`, `tests/types/progress-event.test.ts`
 
 **Interfaces:**
 - POST `/api/videos/[id]/pdf` body `{ outputFolder, type: 'summary'|'dig-deeper' }` → `{ jobId }` (400 on missing/invalid; 404 when the doc source is unavailable). Runs `buildDocHtml` → `generateDocPdf` into `path.resolve(outputFolder, pdfRelPath(video, type))` (containment via `assertIndexRelPathWithin(outputFolder, rel)`), emitting `start`→`step`→`done`/`error` on the job.
 - GET `/api/videos/[id]/pdf/stream?jobId=` → SSE (identical shape to `html-doc/stream/route.ts`).
 
-- [ ] **Step 1: Write failing tests** (mock `generate-doc-pdf` + `build-doc-html`; use `_resetJobRegistry`)
+- [ ] **Step 1: Add `log` to the `done` ProgressEvent variant** (plan review High 1)
+
+In `types/index.ts`, the `done` object in `ProgressEventSchema` (currently lines ~103-108) gains
+`log: z.string().optional(),`. Add `tests/types/progress-event.test.ts`:
+
+```typescript
+import { ProgressEventSchema } from '@/types';
+test('done event accepts an optional log (saved filename)', () => {
+  expect(ProgressEventSchema.safeParse({ type: 'done', current: 1, total: 1, log: '275_x.pdf' }).success).toBe(true);
+});
+```
+
+- [ ] **Step 2: Write failing route tests** (mock `generate-doc-pdf` + `build-doc-html`; use `_resetJobRegistry`)
 
 ```typescript
 jest.mock('@/lib/pdf/generate-doc-pdf', () => ({ generateDocPdf: jest.fn(async () => {}) }));
 jest.mock('@/lib/html-doc/build-doc-html', () => ({ buildDocHtml: jest.fn(async () => ({ ok: true, html: '<html></html>' })) }));
-// POST returns jobId; missing outputFolder → 400; bad type → 400.
-// done event includes the saved file basename.
+// POST returns jobId; missing outputFolder → 400; bad type → 400; build not-ok → 404 (or 400 invalid-path).
+// done event includes the saved file basename in `log`.
+// HANG: generateDocPdf rejects (or the route's own guard) → an `error` event is emitted AND the job lock
+//   is released (a subsequent POST for the same doc succeeds, not 409).
 ```
 
-- [ ] **Step 2: Run to verify fail** — `npx jest pdf-route` → FAIL.
-
-- [ ] **Step 3: Implement POST** (mirror `html-doc/route.ts`: validate, `getActiveJob` guard keyed `${outputFolder}::${videoId}::${type}`, `createJob`, run async, `emitJobEvent`, `releaseJobLock`+grace-delete on terminal):
+- [ ] **Step 4: Implement POST** (mirror `html-doc/route.ts` exactly, incl. the `GRACE_MS` late-subscriber replay so a fast `done` isn't missed by the client EventSource — plan review confirmed the registry buffers+replays only while the job exists):
 
 ```typescript
-// after validation + readIndex/find video (404 if absent):
+import crypto from 'crypto';
+import path from 'path';
+import { NextResponse } from 'next/server';
+import { assertOutputFolder, assertVideoId, readIndex } from '.../lib/index-store';
+import { buildDocHtml } from '.../lib/html-doc/build-doc-html';
+import { generateDocPdf } from '.../lib/pdf/generate-doc-pdf';
+import { pdfRelPath } from '.../lib/pdf/pdf-path';
+import { assertIndexRelPathWithin } from '.../lib/paths/assert-within';
+import { createJob, deleteJob, emitJobEvent, getActiveJob, releaseJobLock } from '.../lib/job-registry';
+import { logError, errorSummary } from '.../lib/dev-logger';
+
+const GRACE_MS = 15_000;
+
+// ...POST(): validate outputFolder + assertOutputFolder + assertVideoId; read `type` from body,
+// 400 unless 'summary'|'dig-deeper'; readIndex + find video → 404 if absent.
+const key = `${outputFolder}::${videoId}::${type}`;
+const existing = getActiveJob(key);
+if (existing) return NextResponse.json({ jobId: existing });   // join live job
+
 const buildResult = await buildDocHtml(videoId, outputFolder, type);
 if (!buildResult.ok) {
   const status = buildResult.reason === 'invalid-path' ? 400 : 404;
@@ -359,22 +450,29 @@ let rel: string;
 try { rel = pdfRelPath(video, type); assertIndexRelPathWithin(outputFolder, rel); }
 catch { return NextResponse.json({ error: 'invalid path' }, { status: 400 }); }
 const absOut = path.resolve(outputFolder, rel);
+
 const jobId = crypto.randomUUID();
 createJob(jobId, key);
+let finished = false;
+const onTerminal = () => {
+  finished = true;
+  releaseJobLock(jobId);                                   // free lock now → a later re-save is allowed
+  const t = setTimeout(() => deleteJob(jobId), GRACE_MS);  // keep buffer for a late EventSource subscribe
+  (t as { unref?: () => void }).unref?.();
+};
 emitJobEvent(jobId, { type: 'start' });
+emitJobEvent(jobId, { type: 'step', step: 'Rendering PDF…', current: 1, total: 1 });
 generateDocPdf(buildResult.html, absOut)
-  .then(() => { emitJobEvent(jobId, { type: 'done', total: 1, current: 1, log: path.basename(rel) }); onTerminal(); })
-  .catch((err) => { logError(`pdf:${videoId}`, err); emitJobEvent(jobId, { type: 'error', log: errorSummary(err) }); onTerminal(); });
+  .then(() => { if (finished) return; emitJobEvent(jobId, { type: 'done', total: 1, current: 1, log: path.basename(rel) }); onTerminal(); })
+  .catch((err) => { if (finished) return; logError(`pdf:${videoId}`, err); emitJobEvent(jobId, { type: 'error', log: errorSummary(err) }); onTerminal(); });
 return NextResponse.json({ jobId });
 ```
 
-(Emit an intermediate `{ type:'step', step:'Rendering PDF…', current:1, total:1 }` before `generateDocPdf` for the bar.)
+- [ ] **Step 5: Implement stream route** — copy `html-doc/stream/route.ts` verbatim (path depth is the same: `../../../../../../lib/job-registry`).
 
-- [ ] **Step 4: Implement stream route** — copy `html-doc/stream/route.ts` verbatim (path depth is the same: `../../../../../../lib/job-registry`).
-
-- [ ] **Step 5: Run** — `npx jest pdf-route` → PASS.
-- [ ] **Step 6: Type gate** — `npx tsc --noEmit`.
-- [ ] **Step 7: Commit** — `git commit -m "feat: /api/videos/[id]/pdf POST + SSE stream"`
+- [ ] **Step 6: Run** — `npx jest pdf-route progress-event` → PASS.
+- [ ] **Step 7: Type gate** — `npx tsc --noEmit`.
+- [ ] **Step 8: Commit** — `git commit -m "feat: /api/videos/[id]/pdf POST + SSE stream; ProgressEvent done.log"`
 
 ---
 
