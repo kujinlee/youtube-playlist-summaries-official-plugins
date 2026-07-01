@@ -297,7 +297,7 @@ describe('generateSummary — timestamps', () => {
   it('resolves [[TS:i]] tokens in the returned summary into ▶ lines', async () => {
     mockGenerateContent.mockResolvedValueOnce({
       response: { text: () => JSON.stringify({
-        summary: '## 1. A\n[[TS:0]]\n\nbody a\n\n## Conclusion\n[[TS:1]]\n\nend',
+        summary: '## 1. A\n[[TS:0]]\n\nbody a\n\n## Conclusion\n[[TS:1]]\n\nend.',
         ratings: { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 },
       }) },
     });
@@ -325,8 +325,9 @@ describe('generateSummary — timestamps', () => {
 });
 
 describe('generateSummary — timestamp guard', () => {
-  const withTs = '## 1. A\n[[TS:0]]\n\nbody\n\n## Conclusion\n[[TS:1]]\n\nend';
-  const noTs = '## 1. A\n\nbody\n\n## Conclusion\n\nend';
+  // Both are completeness-clean (end on '.') so only the ▶/timestamp behavior is under test.
+  const withTs = '## 1. A\n[[TS:0]]\n\nbody\n\n## Conclusion\n[[TS:1]]\n\nend.';
+  const noTs = '## 1. A\n\nbody\n\n## Conclusion\n\nend.';
   const ratings = { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 };
 
   it('retries once when attempt 1 has no ▶ and attempt 2 does (segments present)', async () => {
@@ -346,7 +347,7 @@ describe('generateSummary — timestamp guard', () => {
 
     const result = await generateSummary(SEGS, 'en', 'vid123');
 
-    expect(mockGenerateContent).toHaveBeenCalledTimes(2);
+    expect(mockGenerateContent).toHaveBeenCalledTimes(4); // timestamp-miss now re-rolls within the shared MAX_SUMMARY_ATTEMPTS budget
     expect(result.summary).not.toContain('▶');
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('[timestamp-miss] vid123'));
     warn.mockRestore();
@@ -368,7 +369,7 @@ describe('generateSummary — truncation guard (finishReason)', () => {
   // Both carry a resolvable [[TS:0]] so the timestamp re-roll never fires — this isolates the
   // finishReason guard. Only the finishReason differs between the two responses.
   const truncated = '## 1. A\n[[TS:0]]\n\ntruncated body that stops mid-sen';
-  const complete = '## 1. A\n[[TS:0]]\n\nbody\n\n## Conclusion\n[[TS:1]]\n\nend';
+  const complete = '## 1. A\n[[TS:0]]\n\nbody\n\n## Conclusion\n[[TS:1]]\n\nend.';
   const ratings = { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 };
 
   it('rejects a MAX_TOKENS (truncated) response and retries for a clean one', async () => {
@@ -402,6 +403,68 @@ describe('generateSummary — truncation guard (finishReason)', () => {
     expect(mockGenerateContent).toHaveBeenCalledTimes(3); // 1 + 2 retries
 
     warn.mockRestore();
+  });
+});
+
+describe('generateSummary — auto-retry (completeness)', () => {
+  const complete = '## 1. A\n[[TS:0]]\n\nbody\n\n## Conclusion\n[[TS:1]]\n\nAll done.';
+  const truncated = '## 1. A\n[[TS:0]]\n\nbody that is cut off mid';
+  const ratings = { usefulness: 3, depth: 3, originality: 3, recency: 3, completeness: 3 };
+  const resp = (summary: string) => ({ response: { candidates: [{ finishReason: 'STOP' }], text: () => JSON.stringify({ summary, ratings }) } });
+
+  it('re-rolls a truncated (STOP) summary and returns the complete one', async () => {
+    mockGenerateContent.mockResolvedValueOnce(resp(truncated)).mockResolvedValueOnce(resp(complete));
+    const r = await generateSummary(SEGS, 'en', 'vid1');
+    expect(r.summary).toContain('All done.');
+    expect(mockGenerateContent).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the best attempt and warns (never throws) when all attempts are truncated', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockGenerateContent.mockResolvedValue(resp(truncated));
+    const r = await generateSummary(SEGS, 'en', 'vid1');
+    expect(r.summary).toContain('cut off mid');
+    expect(mockGenerateContent).toHaveBeenCalledTimes(4); // MAX_SUMMARY_ATTEMPTS
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('[summary-suspicious] vid1'));
+    warn.mockRestore();
+  });
+
+  it('prefers a complete attempt over a longer truncated one', async () => {
+    const longTruncated = '## 1. A\n[[TS:0]]\n\n' + 'x '.repeat(200) + 'still going';
+    const shortComplete = '## 1. A\n[[TS:0]]\n\n## Conclusion\n[[TS:1]]\n\nShort but done.';
+    mockGenerateContent.mockResolvedValueOnce(resp(longTruncated)).mockResolvedValueOnce(resp(shortComplete));
+    const r = await generateSummary(SEGS, 'en', 'vid1');
+    expect(r.summary).toContain('Short but done.');
+  });
+
+  it('returns immediately when the first attempt is complete with timestamps', async () => {
+    mockGenerateContent.mockResolvedValue(resp(complete));
+    const r = await generateSummary(SEGS, 'en', 'vid1');
+    expect(mockGenerateContent).toHaveBeenCalledTimes(1);
+    expect(r.summary).toContain('All done.');
+  });
+
+  it('exhausts the budget on a deterministic timestamp-miss (complete, no ▶) — warns, no throw', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const noTs = '## 1. A\n\nbody\n\n## Conclusion\n\nAll done.';
+    mockGenerateContent.mockResolvedValue(resp(noTs));
+    const r = await generateSummary(SEGS, 'en', 'vid1');
+    expect(mockGenerateContent).toHaveBeenCalledTimes(4);
+    expect(r.summary).toContain('All done.');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('[timestamp-miss] vid1'));
+    warn.mockRestore();
+  });
+
+  it('persists the FULL response of the selected attempt (ratings/tldr), not just the summary', async () => {
+    const good = { response: { candidates: [{ finishReason: 'STOP' }], text: () => JSON.stringify({
+      summary: complete, ratings: { usefulness: 5, depth: 5, originality: 5, recency: 5, completeness: 5 },
+      tldr: 'This video is complete.', tags: ['x'],
+    }) } };
+    mockGenerateContent.mockResolvedValueOnce(resp(truncated)).mockResolvedValueOnce(good);
+    const r = await generateSummary(SEGS, 'en', 'vid1');
+    expect(r.summary).toContain('All done.');
+    expect(r.ratings.usefulness).toBe(5);
+    expect(r.tldr).toBe('This video is complete.');
   });
 });
 

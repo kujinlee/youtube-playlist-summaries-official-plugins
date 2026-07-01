@@ -7,6 +7,7 @@ import { MagazineModelSchema } from './html-doc/types';
 import type { MagazineModel } from './html-doc/types';
 import { buildIndexedTranscript, resolveTranscriptTokens } from './transcript-timestamps';
 import type { TranscriptSegment } from './transcript-timestamps';
+import { checkSummaryCompleteness } from './summary-completeness';
 
 const SUMMARY_MODEL = process.env.GEMINI_SUMMARY_MODEL ?? 'gemini-2.5-flash';
 const TRANSCRIBE_MODEL = process.env.GEMINI_TRANSCRIBE_MODEL ?? 'gemini-2.5-flash';
@@ -169,6 +170,30 @@ function warnTimestampMiss(videoId: string, segmentCount: number, attempts: numb
   console.warn(`[timestamp-miss] ${videoId}: ${segmentCount} segments but 0 timestamps after ${attempts} attempt(s)`);
 }
 
+// Max SUCCESSFUL parsed attempts for the summary quality loop (completeness + timestamp re-rolls
+// share this single budget). Each attempt may still use generateJson's inner retries for hard errors.
+const MAX_SUMMARY_ATTEMPTS = 4;
+
+/**
+ * Rank a candidate summary — higher is better. Compared left→right: complete, #sections,
+ * has-conclusion, has-timestamp, length. (resolveTranscriptTokens strips stray [[TS:i]], so the
+ * spec's "no unresolved token" criterion always holds and is omitted.)
+ */
+function scoreSummary(r: GeminiSummaryResponse, hasSegments: boolean): number[] {
+  const s = r.summary;
+  return [
+    checkSummaryCompleteness(s).complete ? 1 : 0,
+    (s.match(/^## /gm) ?? []).length,
+    /^##\s+(Conclusion|결론)/im.test(s) ? 1 : 0,
+    !hasSegments || hasTimestamp(s) ? 1 : 0,
+    s.length,
+  ];
+}
+function betterScore(a: number[], b: number[]): boolean {
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] > b[i];
+  return false;
+}
+
 export async function generateSummary(
   segments: TranscriptSegment[],
   language: 'en' | 'ko',
@@ -213,14 +238,28 @@ ${indexedTranscript}
     return { summary, ratings, overallScore: computeOverallScore(ratings), videoType, audience, tags, tldr, takeaways };
   };
   try {
-    let result = await attempt();
-    // Guard: segments existed but no ▶ resolved → one re-roll (the miss is often stochastic). A throw
-    // from attempt() propagates (error path unchanged); only the success-but-zero-▶ case retries.
-    if (segments.length > 0 && !hasTimestamp(result.summary)) {
-      result = await attempt();
-      if (!hasTimestamp(result.summary)) warnTimestampMiss(videoId, segments.length, 2);
+    const hasSegments = segments.length > 0;
+    let best: GeminiSummaryResponse | null = null;
+    let bestScore: number[] = [];
+    // Bounded quality loop: re-roll a soft miss (incomplete summary OR no resolved ▶) within one
+    // shared budget. Return as soon as both goals are met; else keep the best-scored attempt.
+    // Hard failures from attempt() (generateJson exhausted) still propagate to the catch below.
+    for (let i = 0; i < MAX_SUMMARY_ATTEMPTS; i++) {
+      const r = await attempt();
+      const score = scoreSummary(r, hasSegments);
+      if (best === null || betterScore(score, bestScore)) { best = r; bestScore = score; }
+      const complete = checkSummaryCompleteness(r.summary).complete;
+      const hasTs = !hasSegments || hasTimestamp(r.summary);
+      if (complete && hasTs) return r;
     }
-    return result;
+    const chosen = best as GeminiSummaryResponse;
+    const c = checkSummaryCompleteness(chosen.summary);
+    if (!c.complete) {
+      const sections = (chosen.summary.match(/^## /gm) ?? []).length;
+      console.warn(`[summary-suspicious] ${videoId} attempts=${MAX_SUMMARY_ATTEMPTS}/${MAX_SUMMARY_ATTEMPTS} reason=${c.reason} confidence=${c.confidence} complete=false len=${chosen.summary.length} sections=${sections}`);
+    }
+    if (hasSegments && !hasTimestamp(chosen.summary)) warnTimestampMiss(videoId, segments.length, MAX_SUMMARY_ATTEMPTS);
+    return chosen;
   } catch (err) {
     const cause = err instanceof Error ? err.message : String(err);
     throw new Error(`Gemini summary failed: ${cause}`, { cause: err });
