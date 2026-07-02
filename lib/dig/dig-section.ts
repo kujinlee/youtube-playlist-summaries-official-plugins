@@ -1,6 +1,6 @@
 import path from 'path';
 import fs from 'node:fs/promises';
-import { readIndex, updateVideoFields } from '@/lib/index-store';
+import { getPrincipal, getMetadataStore } from '@/lib/storage/resolve';
 import { parseSummaryMarkdown } from '@/lib/html-doc/parse';
 import { resolveTranscriptSegments } from '@/lib/transcript-source';
 import { windowForSection } from '@/lib/dig/section-window';
@@ -18,7 +18,9 @@ export async function digSection(
   emit: (event: ProgressEvent) => void,
 ): Promise<void> {
   // Step 1: Read video from index
-  const index = readIndex(outputFolder);
+  const principal = getPrincipal(outputFolder);
+  const store = getMetadataStore();
+  const index = store.readIndex(principal);
   const video = index.videos.find((v) => v.id === videoId);
   if (!video) {
     emit({ type: 'error', log: `Video not found in index: ${videoId}` });
@@ -100,7 +102,7 @@ export async function digSection(
   });
 
   // Step 11: Update index with digDeeperMd (HTML is rendered fresh by GET)
-  updateVideoFields(outputFolder, videoId, {
+  store.updateVideoFields(principal, videoId, {
     digDeeperMd: digDeeperFilename,
   });
 

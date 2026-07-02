@@ -1,6 +1,9 @@
 import fs from 'fs';
 import path from 'path';
-import { assertOutputFolder, assertVideoId, readIndex, updateVideoFields } from './index-store';
+import { assertVideoId } from './index-store';
+import { getPrincipal, getMetadataStore } from '@/lib/storage/resolve';
+import type { MetadataStore } from '@/lib/storage/metadata-store';
+import type { Principal } from '@/lib/storage/principal';
 
 const ARCHIVE_DIR = 'archived';
 
@@ -9,12 +12,12 @@ type FilePair = { root: string; archived: string };
 // Resolve actual on-disk paths from the video's index entry.
 // Files are named with title slugs (not videoId).
 // Returns only paths that are safely within outputFolder (path traversal guard).
-function getFilePairs(outputFolder: string, videoId: string): FilePair[] {
-  const index = readIndex(outputFolder);
+function getFilePairs(principal: Principal, store: MetadataStore, videoId: string): FilePair[] {
+  const index = store.readIndex(principal);
   const video = index.videos.find((v) => v.id === videoId);
   if (!video) return [];
 
-  const base = path.resolve(outputFolder);
+  const base = path.resolve(principal.outputFolder);
   const pairs: FilePair[] = [];
 
   for (const relPath of [video.summaryMd]) {
@@ -59,11 +62,11 @@ async function moveIfExists(src: string, dest: string): Promise<boolean> {
 
 // Cached HTML files for a video: htmls/<summaryBase>.html.
 // Returns only paths safely within outputFolder.
-function getCachedHtmlPaths(outputFolder: string, videoId: string): string[] {
-  const index = readIndex(outputFolder);
+function getCachedHtmlPaths(principal: Principal, store: MetadataStore, videoId: string): string[] {
+  const index = store.readIndex(principal);
   const video = index.videos.find((v) => v.id === videoId);
   if (!video) return [];
-  const base = path.resolve(outputFolder);
+  const base = path.resolve(principal.outputFolder);
   const out: string[] = [];
   for (const md of [video.summaryMd]) {
     if (!md) continue;
@@ -78,9 +81,9 @@ function unlinkIfExists(p: string): void {
   try { fs.unlinkSync(p); } catch { /* not present — fine */ }
 }
 
-function updateIndexIfKnown(outputFolder: string, videoId: string, fields: Partial<{ archived: boolean; summaryHtml: string | null }>): void {
+function updateIndexIfKnown(principal: Principal, store: MetadataStore, videoId: string, fields: Partial<{ archived: boolean; summaryHtml: string | null }>): void {
   try {
-    updateVideoFields(outputFolder, videoId, fields);
+    store.updateVideoFields(principal, videoId, fields);
   } catch (err: unknown) {
     if (err instanceof Error && err.message.startsWith('Video not found in index')) return;
     throw err;
@@ -89,32 +92,34 @@ function updateIndexIfKnown(outputFolder: string, videoId: string, fields: Parti
 
 export async function archiveVideo(outputFolder: string, videoId: string): Promise<void> {
   // Validate before any filesystem operations (P1: validation-before-mutation)
-  assertOutputFolder(outputFolder);
+  const principal = getPrincipal(outputFolder); // replaces assertOutputFolder; guards + preserves raw string
   assertVideoId(videoId);
+  const store = getMetadataStore();
 
   // Delete cached HTML BEFORE moving files — index paths are still root-relative at this point.
-  for (const p of getCachedHtmlPaths(outputFolder, videoId)) unlinkIfExists(p);
+  for (const p of getCachedHtmlPaths(principal, store, videoId)) unlinkIfExists(p);
 
   await ensureArchiveDir(outputFolder);
 
-  for (const { root, archived } of getFilePairs(outputFolder, videoId)) {
+  for (const { root, archived } of getFilePairs(principal, store, videoId)) {
     await moveIfExists(root, archived);
   }
 
-  updateIndexIfKnown(outputFolder, videoId, { archived: true, summaryHtml: null });
+  updateIndexIfKnown(principal, store, videoId, { archived: true, summaryHtml: null });
 }
 
 export async function unarchiveVideo(outputFolder: string, videoId: string): Promise<void> {
   // Validate before any filesystem operations (P1: validation-before-mutation)
-  assertOutputFolder(outputFolder);
+  const principal = getPrincipal(outputFolder); // replaces assertOutputFolder; guards + preserves raw string
   assertVideoId(videoId);
+  const store = getMetadataStore();
 
-  for (const { root, archived } of getFilePairs(outputFolder, videoId)) {
+  for (const { root, archived } of getFilePairs(principal, store, videoId)) {
     await moveIfExists(archived, root);
   }
 
   // Defensively clear any cached HTML — it may reference stale pre-archive paths.
-  for (const p of getCachedHtmlPaths(outputFolder, videoId)) unlinkIfExists(p);
+  for (const p of getCachedHtmlPaths(principal, store, videoId)) unlinkIfExists(p);
 
-  updateIndexIfKnown(outputFolder, videoId, { archived: false, summaryHtml: null });
+  updateIndexIfKnown(principal, store, videoId, { archived: false, summaryHtml: null });
 }
