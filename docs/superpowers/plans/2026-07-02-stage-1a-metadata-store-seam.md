@@ -34,7 +34,9 @@
 - Lib: `lib/pipeline.ts`, `lib/archive.ts`, `lib/dig/dig-section.ts`, `lib/html-doc/generate.ts`, `lib/html-doc/ensure.ts`, `lib/html-doc/batch.ts`, `lib/html-doc/rerender.ts`, `lib/serial-migrate-exec.ts`, `lib/playlists/backfill-titles.ts`, `lib/timestamp-repair.ts`, `lib/timestamp-audit.ts`, `lib/summary-audit.ts`.
 - API routes: `app/api/html/[id]/route.ts`, `app/api/videos/route.ts`, `app/api/videos/[id]/regenerate/route.ts`, `app/api/videos/[id]/pdf/route.ts`, `app/api/videos/[id]/dig-state/route.ts`, `app/api/videos/[id]/review/route.ts`, `app/api/videos/[id]/quick-view/route.ts`, `app/api/quick-view/backfill/route.ts`.
 
-**Do NOT touch** (they import only `assertOutputFolder`/`assertVideoId`, which stay): `app/api/settings/route.ts`, `app/api/ingest/route.ts`, `app/api/playlists/recent/route.ts`, `app/api/videos/batch-docs/route.ts`, `app/api/videos/[id]/archive/route.ts`, `app/api/videos/[id]/html-doc/route.ts`, `app/api/videos/[id]/dig/[sectionId]/route.ts`, `lib/playlists/recent-provider.ts`, `lib/dig/slides.ts`, `scripts/backfill-serial-prefix.ts`.
+**Do NOT touch — import only `assertOutputFolder`/`assertVideoId`, which stay:** `app/api/settings/route.ts`, `app/api/ingest/route.ts`, `app/api/playlists/recent/route.ts`, `app/api/videos/batch-docs/route.ts`, `app/api/videos/[id]/archive/route.ts` (routes to `lib/archive`, rerouted in Task 5), `app/api/videos/[id]/html-doc/route.ts`, `app/api/videos/[id]/dig/[sectionId]/route.ts`, `lib/playlists/recent-provider.ts`, `lib/dig/slides.ts`.
+
+**Out of scope for Part 1 — `scripts/`:** `scripts/backfill-serial-prefix.ts` **does** call `readIndex` directly (Codex correction — it is a data-access consumer, not guard-only). Scripts cannot use the `@/*` alias at runtime (they run via ts-node with relative imports), so rerouting them requires a relative-import strategy for `lib/storage/*`. Defer all of `scripts/` to a dedicated follow-up task; Part 1 covers only `app/` + `lib/` runtime consumers. The Task 8 completeness check whitelists `scripts/` accordingly.
 
 ---
 
@@ -277,11 +279,14 @@ import * as path from 'path';
 import { getPrincipal, getMetadataStore } from '@/lib/storage/resolve';
 import { LocalFsMetadataStore } from '@/lib/storage/local/local-metadata-store';
 
-it('getPrincipal accepts a folder under home and returns a local principal', () => {
+it('getPrincipal accepts a folder under home and preserves the RAW outputFolder string', () => {
   const dir = path.join(os.homedir(), '.test-resolve-ok');
   const p = getPrincipal(dir);
   expect(p.id).toBe('local');
-  expect(p.outputFolder).toBe(path.resolve(dir));
+  // MUST be the raw string, NOT path.resolve(dir): index-store uses the raw
+  // outputFolder for the file path; resolving here would change persisted
+  // values and break mocked-arg assertions. (Codex Blocking)
+  expect(p.outputFolder).toBe(dir);
 });
 
 it('getPrincipal rejects a folder outside home (guard preserved)', () => {
@@ -302,17 +307,21 @@ Expected: FAIL — `Cannot find module '@/lib/storage/resolve'`.
 
 ```typescript
 // lib/storage/resolve.ts
-import * as path from 'path';
 import type { MetadataStore } from '@/lib/storage/metadata-store';
 import { localPrincipal, type Principal } from '@/lib/storage/principal';
 import { localMetadataStore } from '@/lib/storage/local/local-metadata-store';
 import { assertOutputFolder } from '@/lib/index-store';
 
 /** Resolve a request's outputFolder into a Principal, running the local
- *  home-dir containment guard (behavior identical to today's assertOutputFolder). */
+ *  home-dir containment guard (behavior identical to today's assertOutputFolder).
+ *  CRITICAL (Codex Blocking): preserve the RAW outputFolder string — do NOT
+ *  path.resolve it. index-store uses the raw string for the index file path;
+ *  assertOutputFolder resolves only internally for its guard check. Resolving
+ *  here would change the persisted index.outputFolder value and the arguments
+ *  observed by existing mocked-function assertions. */
 export function getPrincipal(outputFolder: string): Principal {
-  assertOutputFolder(outputFolder);
-  return localPrincipal(path.resolve(outputFolder));
+  assertOutputFolder(outputFolder); // guards; resolves internally, returns void
+  return localPrincipal(outputFolder); // raw string preserved
 }
 
 /** The active MetadataStore. Local-only for now; env-selected once the
@@ -369,7 +378,7 @@ store.upsertVideo(principal, video);
 store.writeIndex(principal, index);
 ```
 
-If a function already validated via `assertOutputFolder(outputFolder)` and *also* reads/writes the index, replace that guard call with `const principal = getPrincipal(outputFolder)` and reuse `principal`. If a function only reads/writes (no prior guard call, e.g. an internal helper already handed a validated folder), construct the principal locally with `localPrincipal(outputFolder)` instead of `getPrincipal` to avoid a redundant guard — import `localPrincipal` from `@/lib/storage/principal`.
+**Single rule (Codex): use `getPrincipal(outputFolder)` at the point where a raw `outputFolder` first enters a rerouted function; resolve the principal *once* and pass the `Principal` down to any internal helpers** (do not re-resolve per helper). Rationale: `getPrincipal` preserves the raw string (so persistence + mocked-arg assertions are byte-identical) and applies the home-dir guard. Where the old code already called `assertOutputFolder(outputFolder)`, this replaces that call. Where the old code did *not* guard (a few read-only paths), `getPrincipal` adds an idempotent home-dir guard that never triggers in practice (the app only ever operates on home-scoped folders) and is forward-consistent with the cloud store — do **not** use bare `localPrincipal` in consumers, to avoid the false "no redundant guard" reasoning flagged in review. (`localPrincipal` is used only inside `LocalFsMetadataStore`/tests.)
 
 - [ ] **Step 1: Reroute `lib/pipeline.ts`**
 
@@ -412,9 +421,9 @@ Apply the **canonical transformation from Task 5** to each file's `readIndex`/`w
 
 - [ ] **Step 1: html-doc modules** — `generate.ts` (`readIndex`, `updateVideoFields`), `ensure.ts` (`readIndex`, `updateVideoFields`), `batch.ts` (`readIndex`), `rerender.ts` (`readIndex`). Each already calls `assertOutputFolder`/`assertVideoId`; replace the guard call with `getPrincipal` and thread the principal + store.
 
-- [ ] **Step 2: migration/backfill** — `serial-migrate-exec.ts` (`readIndex`, `writeIndex`, `updateVideoFields`), `backfill-titles.ts` (`readIndex`, `writeIndex`; keeps `assertOutputFolder`). Use `getPrincipal(outputFolder)` at entry.
+- [ ] **Step 2: migration/backfill** — `serial-migrate-exec.ts` (`readIndex`, `writeIndex`, `updateVideoFields`): `getPrincipal(outputFolder)` at entry, thread the principal. **`backfill-titles.ts` is per-child-folder, NOT per-root (Codex High):** it receives `root` and iterates discovered playlist folders, doing `readIndex(folder)`/`writeIndex(folder, …)` per child. Keep the entry guard on `root` if present, but build a **separate principal per discovered `folder`** immediately before each access: `const p = getPrincipal(folder); const idx = store.readIndex(p); …; store.writeIndex(p, idx);` inside the iteration. Do **not** hoist one `root` principal across children.
 
-- [ ] **Step 3: read-only audits** — `timestamp-repair.ts`, `timestamp-audit.ts`, `summary-audit.ts` (each `readIndex` only). These receive an already-in-use folder; use `localPrincipal(outputFolder)` + `getMetadataStore().readIndex(principal)` (no redundant guard).
+- [ ] **Step 3: read-only audits** — `timestamp-repair.ts`, `timestamp-audit.ts`, `summary-audit.ts` (each `readIndex` only). Per the single rule, use `getPrincipal(folder)` + `getMetadataStore().readIndex(principal)` (the added home-dir guard is idempotent and never triggers in practice, and is forward-consistent — see the Single-rule note in Task 5; do **not** use bare `localPrincipal`).
 
 - [ ] **Step 4: Run the affected suites**
 
@@ -443,6 +452,8 @@ git commit -m "refactor(storage): route remaining lib consumers through Metadata
 
 Apply the **canonical transformation** to each route's `readIndex`/`updateVideoFields` calls. Each route currently does `assertOutputFolder(outputFolder)` (+ `assertVideoId(id)`) then `readIndex(outputFolder)`; convert the `assertOutputFolder` call into `const principal = getPrincipal(outputFolder)`, keep `assertVideoId(id)`, and use `getMetadataStore()` for data access.
 
+- [ ] **Step 0: Characterization test on ONE route mock before rerouting all (Codex).** Pick `tests/api/review.test.ts` (asserts `updateVideoFields` call args). Run it *before* touching `review/route.ts` to capture the green baseline: `npx jest tests/api/review.test.ts` → PASS. After rerouting review/route (Step 2), run it again and confirm the **same** assertions pass unchanged — proving the mock still intercepts through the delegating store and the args are byte-identical (they are, because `Principal.outputFolder` is the raw string). If it fails on the mocked-arg assertion, the Blocking fix regressed — stop and re-verify `getPrincipal` does not resolve. Only after this passes, proceed to reroute the remaining routes.
+
 - [ ] **Step 1: Reroute the read-only routes** — `html/[id]`, `videos/route`, `videos/[id]/pdf`, `videos/[id]/dig-state`, `videos/[id]/quick-view` (each `readIndex` only, plus their existing `assertVideoId`).
 
 - [ ] **Step 2: Reroute the read+write routes** — `videos/[id]/regenerate` (`readIndex` + `updateVideoFields`), `videos/[id]/review` (`updateVideoFields`), `quick-view/backfill` (`readIndex` + `updateVideoFields`).
@@ -468,10 +479,12 @@ git commit -m "refactor(storage): route API handlers through MetadataStore"
 
 **Files:** none (verification only).
 
-- [ ] **Step 1: Confirm no remaining direct data-access imports outside the seam**
+- [ ] **Step 1: Confirm no remaining direct data-access calls outside the seam**
 
-Run: `grep -rn "from '@/lib/index-store'" app lib | grep -E "readIndex|writeIndex|upsertVideo|updateVideoFields"`
-Expected: matches **only** in `lib/storage/local/local-metadata-store.ts` (the delegating impl) and any file in the "Do NOT touch" list that legitimately still uses them — cross-check against the plan. `assertOutputFolder`/`assertVideoId` imports elsewhere are expected and fine.
+The old narrow grep (only `from '@/lib/index-store'` lines) missed **relative** imports (`lib/pipeline.ts`, `lib/archive.ts`, …) and the **namespace** import in the delegating impl (Codex High). Search by *symbol usage* across `app lib` (scripts are out of scope for Part 1):
+
+Run: `rg -n "\b(readIndex|writeIndex|upsertVideo|updateVideoFields)\b" app lib`
+Expected: matches **only** in `lib/storage/local/local-metadata-store.ts` (the delegating impl — the sole place calling the raw functions) and `lib/index-store.ts` itself (definitions). **Any** hit in another `app/` or `lib/` file is an un-rerouted consumer — reroute it before proceeding. (`scripts/` is intentionally excluded — deferred; `assertOutputFolder`/`assertVideoId` usages are expected and not matched by this pattern.)
 
 - [ ] **Step 2: Full type gate**
 
@@ -505,4 +518,15 @@ git commit -m "test(storage): verify MetadataStore seam is behavior-preserving (
 
 **Type consistency:** `Principal { id, outputFolder }`, `MetadataStore.readIndex/writeIndex/upsertVideo/updateVideoFields`, `getPrincipal`/`getMetadataStore`, `localPrincipal`, `localMetadataStore` used identically across Tasks 1–7. `PlaylistIndex`/`Video` sourced from `@/types` (verified exported). ✓
 
-**Deferred to sibling Stage 1A plans (not gaps):** BlobStore (MD/slides/html/pdf blobs), ExportTarget (`obsidian://`/zip/FSA), SettingsStore (`settings.json`), TempWorkspace (`.cache`). Each gets its own spec-aligned plan.
+**Deferred to sibling Stage 1A plans (not gaps):** BlobStore (MD/slides/html/pdf blobs), ExportTarget (`obsidian://`/zip/FSA), SettingsStore (`settings.json`), TempWorkspace (`.cache`). Each gets its own spec-aligned plan. `scripts/` reroute is a deferred follow-up task (relative-import strategy needed).
+
+## Codex Plan Review — addressed (v2)
+
+Review: `docs/reviews/stage-1a-metadata-store-seam-plan-codex.md` (1 Blocking, 2 High, 3 Medium, 1 verified-OK).
+- **Blocking** (Principal must preserve raw `outputFolder`, no `path.resolve`) — fixed in Task 1/4 impl + test + `getPrincipal` comment.
+- **High** (`backfill-titles` per-child-folder principal) — fixed in Task 6 Step 2.
+- **High** (completeness grep missed relative/namespace imports) — replaced with `rg` symbol check in Task 8 Step 1.
+- **Medium** (`scripts/backfill-serial-prefix.ts` mis-listed; scripts scoped out) — fixed in file lists + Task 8 whitelist.
+- **Medium** (audit "no redundant guard" reasoning) — single-rule `getPrincipal` everywhere (Task 5 note, Task 6 Step 3).
+- **Medium** (route mocked-arg assertions) — resolved by the Blocking fix; added a pre-reroute characterization test (Task 7 Step 0).
+- **Verified-OK** (namespace-import mock interception) — confirmed; characterization test added as belt-and-suspenders.
