@@ -1,4 +1,5 @@
-import { assertOutputFolder, assertVideoId, readIndex } from '../../../../lib/index-store';
+import { assertVideoId } from '../../../../lib/index-store';
+import { getPrincipal, getMetadataStore } from '../../../../lib/storage/resolve';
 import { buildDocHtml } from '../../../../lib/html-doc/build-doc-html';
 
 type Params = { params: Promise<{ id: string }> };
@@ -11,8 +12,9 @@ export async function GET(request: Request, { params }: Params) {
   if (!outputFolder) {
     return new Response(JSON.stringify({ error: 'outputFolder is required' }), { status: 400 });
   }
+  let principal;
   try {
-    assertOutputFolder(outputFolder);
+    principal = getPrincipal(outputFolder);
     assertVideoId(videoId);
   } catch {
     return new Response(JSON.stringify({ error: 'invalid request' }), { status: 400 });
@@ -25,7 +27,7 @@ export async function GET(request: Request, { params }: Params) {
 
   let video;
   try {
-    const index = readIndex(outputFolder);
+    const index = getMetadataStore().readIndex(principal);
     video = index.videos.find((v) => v.id === videoId);
     if (!video) return new Response(JSON.stringify({ error: 'video not found' }), { status: 404 });
   } catch (err) {

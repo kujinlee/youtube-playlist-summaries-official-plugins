@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { assertOutputFolder, readIndex } from '../../../lib/index-store';
+import { getPrincipal, getMetadataStore } from '../../../lib/storage/resolve';
 import { recoverOrphanedVideos } from '../../../lib/pipeline';
 import type { SortColumn, SortOrder, Video } from '../../../types';
 
@@ -86,8 +86,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'outputFolder is required' }, { status: 400 });
   }
 
+  let principal;
   try {
-    assertOutputFolder(outputFolder);
+    principal = getPrincipal(outputFolder);
   } catch {
     return NextResponse.json({ error: 'invalid outputFolder' }, { status: 400 });
   }
@@ -102,7 +103,7 @@ export async function GET(request: Request) {
 
   let index;
   try {
-    index = readIndex(outputFolder);
+    index = getMetadataStore().readIndex(principal);
   } catch (err) {
     const e = err as { statusCode?: number; message?: string };
     if (e.statusCode === 400) {

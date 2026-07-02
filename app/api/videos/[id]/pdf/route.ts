@@ -1,7 +1,8 @@
 import crypto from 'crypto';
 import path from 'path';
 import { NextResponse } from 'next/server';
-import { assertOutputFolder, assertVideoId, readIndex } from '../../../../../lib/index-store';
+import { assertVideoId } from '../../../../../lib/index-store';
+import { getPrincipal, getMetadataStore } from '../../../../../lib/storage/resolve';
 import { buildDocHtml } from '../../../../../lib/html-doc/build-doc-html';
 import { generateDocPdf } from '../../../../../lib/pdf/generate-doc-pdf';
 import { pdfRelPath } from '../../../../../lib/pdf/pdf-path';
@@ -22,8 +23,9 @@ export async function POST(request: Request, { params }: Params) {
   const type = body?.type;
 
   if (!outputFolder) return NextResponse.json({ error: 'outputFolder is required' }, { status: 400 });
+  let principal;
   try {
-    assertOutputFolder(outputFolder);
+    principal = getPrincipal(outputFolder);
     assertVideoId(videoId);
   } catch {
     return NextResponse.json({ error: 'invalid request' }, { status: 400 });
@@ -34,7 +36,7 @@ export async function POST(request: Request, { params }: Params) {
 
   let video;
   try {
-    const index = readIndex(outputFolder);
+    const index = getMetadataStore().readIndex(principal);
     video = index.videos.find((v) => v.id === videoId);
     if (!video) return NextResponse.json({ error: 'video not found' }, { status: 404 });
   } catch (err) {

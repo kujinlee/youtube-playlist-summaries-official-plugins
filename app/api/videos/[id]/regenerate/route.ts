@@ -1,7 +1,8 @@
 import path from 'path';
 import fs from 'fs';
 import { NextResponse } from 'next/server';
-import { assertOutputFolder, assertVideoId, readIndex, updateVideoFields } from '../../../../../lib/index-store';
+import { assertVideoId } from '../../../../../lib/index-store';
+import { getPrincipal, getMetadataStore } from '../../../../../lib/storage/resolve';
 import { fixSummary, extractQuickView } from '../../../../../lib/gemini';
 import { stripQuickViewCallout, insertQuickViewCallout } from '../../../../../lib/pipeline';
 import { logError, errorSummary } from '../../../../../lib/dev-logger';
@@ -23,14 +24,16 @@ export async function POST(request: Request, { params }: Params) {
     return NextResponse.json({ error: 'corrections must be a string' }, { status: 400 });
   }
 
+  let principal;
   try {
-    assertOutputFolder(outputFolder);
+    principal = getPrincipal(outputFolder);
     assertVideoId(videoId);
   } catch {
     return NextResponse.json({ error: 'invalid request' }, { status: 400 });
   }
 
-  const index = readIndex(outputFolder);
+  const store = getMetadataStore();
+  const index = store.readIndex(principal);
   const video = index.videos.find((v) => v.id === videoId);
 
   if (!video) {
@@ -49,9 +52,9 @@ export async function POST(request: Request, { params }: Params) {
     // page-refresh shows the latest corrections even if Gemini fails.
     const trimmedCorrections = typeof corrections === 'string' ? corrections.trim() : undefined;
     if (trimmedCorrections) {
-      updateVideoFields(outputFolder, videoId, { corrections: trimmedCorrections });
+      store.updateVideoFields(principal, videoId, { corrections: trimmedCorrections });
     } else if (corrections === '') {
-      updateVideoFields(outputFolder, videoId, { corrections: undefined });
+      store.updateVideoFields(principal, videoId, { corrections: undefined });
     }
 
     // Apply text corrections if provided (works on prose only — callout is stripped first)
@@ -65,7 +68,7 @@ export async function POST(request: Request, { params }: Params) {
     await fs.promises.writeFile(mdPath, updatedContent, 'utf-8');
 
     // Update index with refreshed quick-view data; clear stale HTML cache
-    updateVideoFields(outputFolder, videoId, { tldr, takeaways, summaryHtml: null });
+    store.updateVideoFields(principal, videoId, { tldr, takeaways, summaryHtml: null });
 
     return NextResponse.json({
       tldr,

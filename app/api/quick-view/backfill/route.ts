@@ -1,6 +1,6 @@
 import path from 'path';
 import fs from 'fs';
-import { assertOutputFolder, readIndex, updateVideoFields } from '../../../../lib/index-store';
+import { getPrincipal, getMetadataStore } from '../../../../lib/storage/resolve';
 import { extractQuickView } from '../../../../lib/gemini';
 import { insertQuickViewCallout } from '../../../../lib/pipeline';
 import type { ProgressEvent } from '../../../../types';
@@ -17,13 +17,15 @@ export async function GET(request: Request) {
     return new Response(JSON.stringify({ error: 'outputFolder is required' }), { status: 400 });
   }
 
+  let principal;
   try {
-    assertOutputFolder(outputFolder);
+    principal = getPrincipal(outputFolder);
   } catch {
     return new Response(JSON.stringify({ error: 'invalid outputFolder' }), { status: 400 });
   }
 
-  const index = readIndex(outputFolder);
+  const store = getMetadataStore();
+  const index = store.readIndex(principal);
   const eligible = index.videos.filter(
     (v): v is typeof v & { summaryMd: string } => !!v.summaryMd && !v.tldr,
   );
@@ -63,7 +65,7 @@ export async function GET(request: Request) {
           await fs.promises.writeFile(mdPath, updatedContent, 'utf-8');
 
           // Index updated immediately after the .md write.
-          updateVideoFields(outputFolder, video.id, { tldr, takeaways });
+          store.updateVideoFields(principal, video.id, { tldr, takeaways });
 
           succeeded++;
           // Emit step as soon as core work (Gemini + index) is done.
